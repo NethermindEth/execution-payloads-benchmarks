@@ -1,0 +1,17 @@
+[project]
+name = "expb"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Carlos Bermudez Porto", email = "cbermudez.dev@gmail.com" },
+]
+requires-python = ">=3.13"
+dependencies = ["typer>=0.16.0", "web3>=7.12.0"]
+
+[project.scripts]
+expb = "expb:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
