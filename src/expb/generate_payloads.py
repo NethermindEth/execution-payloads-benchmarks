@@ -1,12 +1,12 @@
 import os
 import typer
-import asyncio
 
 from pathlib import Path
 from typing_extensions import Annotated
 
 from expb.payloads import Generator
 from expb.networks import Network
+from expb.logging import setup_logging
 
 app = typer.Typer()
 
@@ -18,6 +18,9 @@ def generate_payloads(
     start_block: Annotated[int, typer.Option(help="Start block")] = 0,
     end_block: Annotated[int | None, typer.Option(help="End block")] = None,
     output_dir: Annotated[Path, typer.Option(help="Output directory")] = "payloads",
+    log_level: Annotated[
+        str, typer.Option(help="Log level (e.g., DEBUG, INFO, WARNING)")
+    ] = "INFO",
     threads: Annotated[
         int, typer.Option(help="Number of threads for parallel processing")
     ] = 10,
@@ -28,6 +31,12 @@ def generate_payloads(
     """
     Generate execution payloads for a given block range.
     """
+    logger = setup_logging(log_level)
+
+    logger.info(
+        "creating output directory",
+        output_dir=output_dir,
+    )
     os.makedirs(output_dir, exist_ok=True)
 
     generator = Generator(
@@ -38,6 +47,14 @@ def generate_payloads(
         output_dir=output_dir,
         threads=threads,
         workers=workers,
+        logger=logger,
     )
 
+    logger.info(
+        "starting payloads generation",
+        network=network.value,
+        rpc_url=rpc_url,
+        start_block=start_block,
+        end_block=end_block,
+    )
     generator.generate_payloads()

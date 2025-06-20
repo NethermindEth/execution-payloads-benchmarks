@@ -3,10 +3,11 @@ import json
 import asyncio
 
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, wait
+from concurrent.futures import ThreadPoolExecutor
 from web3 import Web3
 from web3.types import BlockData, HexBytes, TxData
 
+from expb.logging import Logger
 from expb.networks import Network, Fork
 
 
@@ -20,6 +21,7 @@ class Generator:
         end_block: int | None = None,  # if None, will use the latest block
         threads: int = 10,
         workers: int = 30,
+        logger=Logger(),
     ):
         self.w3 = Web3(Web3.HTTPProvider(rpc_url))
         self.network = network.value
@@ -27,6 +29,7 @@ class Generator:
         self.output_dir = output_dir
         self.threads = threads
         self.workers = workers
+        self.log = logger
         if end_block is None:
             self.end_block = self.w3.eth.get_block("latest")["number"]
         else:
@@ -212,7 +215,7 @@ class Generator:
             "jsonrpc": "2.0",
             "method": f"engine_newPayloadV{version}",
             "params": params,
-        }, version
+        }
 
     async def get_fcu_request(self, block: BlockData) -> dict:
         return {
@@ -232,9 +235,14 @@ class Generator:
         self,
         block_number: int,
     ) -> None:
+        self.log.info("generating payload", block_number=block_number)
         block = self.w3.eth.get_block(block_number)
-        engine_new_payload_request, version = asyncio.run(
-            self.get_new_payload_request(block)
+        self.log.debug(
+            "generating engine_newPayload request", block_number=block_number
+        )
+        engine_new_payload_request = asyncio.run(self.get_new_payload_request(block))
+        self.log.debug(
+            "generating engine_forkChoiceUpdated request", block_number=block_number
         )
         fcu_request = asyncio.run(self.get_fcu_request(block))
         enp_req_file_name = os.path.join(
@@ -243,15 +251,20 @@ class Generator:
         fcu_req_file_name = os.path.join(
             self.output_dir, f"payload_{block_number}_fcu.json"
         )
-
+        self.log.debug("writing engine_newPayload request", block_number=block_number)
         with open(enp_req_file_name, "w") as f:
             json.dump(engine_new_payload_request, f)
+        self.log.debug(
+            "writing engine_forkChoiceUpdated request", block_number=block_number
+        )
         with open(fcu_req_file_name, "w") as f:
             json.dump(fcu_request, f)
+        self.log.info("payload generated", block_number=block_number)
 
     def generate_payloads(self) -> None:
         with ThreadPoolExecutor(max_workers=self.threads) as executor:
-            tasks = executor.map(
-                self.generate_payload, range(self.start_block, self.end_block + 1)
+            list(
+                executor.map(
+                    self.generate_payload, range(self.start_block, self.end_block + 1)
+                )
             )
-        wait(tasks)
