@@ -3,6 +3,7 @@ import json
 import asyncio
 
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, wait
 from web3 import Web3
 from web3.types import BlockData, HexBytes, TxData
 
@@ -17,12 +18,14 @@ class Generator:
         start_block: int,
         output_dir: Path,
         end_block: int | None = None,  # if None, will use the latest block
-        workers: int = 10,
+        threads: int = 10,
+        workers: int = 30,
     ):
         self.w3 = Web3(Web3.HTTPProvider(rpc_url))
         self.network = network.value
         self.start_block = start_block
         self.output_dir = output_dir
+        self.threads = threads
         self.workers = workers
         if end_block is None:
             self.end_block = self.w3.eth.get_block("latest")["number"]
@@ -198,11 +201,11 @@ class Generator:
         else:
             raise ValueError(f"Unknown payload version: {version}")
         params.append(payload)
-        if blobs_versioned_hashes:
+        if blobs_versioned_hashes is not None:
             params.append(blobs_versioned_hashes)
-        if parent_beacon_block_root:
+        if parent_beacon_block_root is not None:
             params.append(parent_beacon_block_root)
-        if execution_requests:
+        if execution_requests is not None:
             params.append(execution_requests)
         return {
             "id": 1,
@@ -225,33 +228,30 @@ class Generator:
             ],
         }
 
-    async def generate_payload(
+    def generate_payload(
         self,
-        blocks_semaphore: asyncio.Semaphore,
         block_number: int,
     ) -> None:
-        async with blocks_semaphore:
-            block = self.w3.eth.get_block(block_number)
-            engine_new_payload_request, version = await self.get_new_payload_request(
-                block
-            )
-            fcu_request = await self.get_fcu_request(block)
-            enp_req_file_name = os.path.join(
-                self.output_dir, f"payload_{block_number}.json"
-            )
-            fcu_req_file_name = os.path.join(
-                self.output_dir, f"payload_{block_number}_fcu.json"
-            )
+        block = self.w3.eth.get_block(block_number)
+        engine_new_payload_request, version = asyncio.run(
+            self.get_new_payload_request(block)
+        )
+        fcu_request = asyncio.run(self.get_fcu_request(block))
+        enp_req_file_name = os.path.join(
+            self.output_dir, f"payload_{block_number}.json"
+        )
+        fcu_req_file_name = os.path.join(
+            self.output_dir, f"payload_{block_number}_fcu.json"
+        )
 
-            with open(enp_req_file_name, "w") as f:
-                json.dump(engine_new_payload_request, f)
-            with open(fcu_req_file_name, "w") as f:
-                json.dump(fcu_request, f)
+        with open(enp_req_file_name, "w") as f:
+            json.dump(engine_new_payload_request, f)
+        with open(fcu_req_file_name, "w") as f:
+            json.dump(fcu_request, f)
 
-    async def generate_payloads(self) -> None:
-        blocks_semaphore = asyncio.Semaphore(self.workers)
-        tasks = []
-        for block in range(self.start_block, self.end_block + 1):
-            task = self.generate_payload(blocks_semaphore, block)
-            tasks.append(task)
-        _ = await asyncio.gather(*tasks)
+    def generate_payloads(self) -> None:
+        with ThreadPoolExecutor(max_workers=self.threads) as executor:
+            tasks = executor.map(
+                self.generate_payload, range(self.start_block, self.end_block + 1)
+            )
+        wait(tasks)

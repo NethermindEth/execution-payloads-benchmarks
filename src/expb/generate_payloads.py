@@ -18,9 +18,12 @@ def generate_payloads(
     start_block: Annotated[int, typer.Option(help="Start block")] = 0,
     end_block: Annotated[int | None, typer.Option(help="End block")] = None,
     output_dir: Annotated[Path, typer.Option(help="Output directory")] = "payloads",
-    workers: Annotated[
-        int, typer.Option(help="Number of workers for parallel processing")
+    threads: Annotated[
+        int, typer.Option(help="Number of threads for parallel processing")
     ] = 10,
+    workers: Annotated[
+        int, typer.Option(help="Number of workers per thread for parallel processing")
+    ] = 30,
 ) -> None:
     """
     Generate execution payloads for a given block range.
@@ -33,7 +36,8 @@ def generate_payloads(
         start_block=start_block,
         end_block=end_block,
         output_dir=output_dir,
+        threads=threads,
         workers=workers,
     )
 
-    asyncio.run(generator.generate_payloads())
+    generator.generate_payloads()
