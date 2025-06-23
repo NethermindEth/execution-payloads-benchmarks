@@ -5,7 +5,7 @@ from pathlib import Path
 from typing_extensions import Annotated
 
 from expb.payloads import Generator
-from expb.networks import Network
+from expb.configs.networks import Network
 from expb.logging import setup_logging
 
 app = typer.Typer()

@@ -8,7 +8,7 @@ from web3 import Web3
 from web3.types import BlockData, HexBytes, TxData
 
 from expb.logging import Logger
-from expb.networks import Network, Fork
+from expb.configs.networks import Network, Fork
 
 
 class Generator:

@@ -1,0 +1,41 @@
+from expb.configs.clients.client_config import (
+    ClientConfig,
+    CLIENTS_DATA_DIR,
+    CLIENTS_JWT_SECRET_FILE,
+    CLIENT_RPC_PORT,
+    CLIENT_ENGINE_PORT,
+    CLIENT_METRICS_PORT,
+    CLIENT_P2P_PORT,
+)
+from expb.configs.networks import Network
+
+
+class RethConfig(ClientConfig):
+    def __init__(self):
+        super().__init__(
+            name="reth",
+            default_image="ethpandaops/reth:performance",
+            default_command=[
+                "node",
+                f"--datadir={CLIENTS_DATA_DIR}",
+                f"--log.file.directory={CLIENTS_DATA_DIR}/logs",
+                f"--port={CLIENT_P2P_PORT}",
+                "--http",
+                "--http.addr=0.0.0.0",
+                f"--http.port={CLIENT_RPC_PORT}",
+                "--authrpc.addr=0.0.0.0",
+                f"--authrpc.port={CLIENT_ENGINE_PORT}",
+                f"--authrpc.jwtsecret={CLIENTS_JWT_SECRET_FILE}",
+                f"--metrics=0.0.0.0:{CLIENT_METRICS_PORT}",
+                "--http.api=trace,rpc,eth,net,debug,web3,admin",
+            ],
+        )
+
+    def get_command(self, network: Network) -> list[str]:
+        if network == Network.MAINNET:
+            return self.default_command + [
+                "--chain=mainnet",
+                "--full",
+            ]
+        else:
+            raise ValueError(f"Network {network} not supported")
