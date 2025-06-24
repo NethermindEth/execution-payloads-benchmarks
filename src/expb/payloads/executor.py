@@ -36,6 +36,7 @@ from expb.configs.defaults import (
 class Executor:
     def __init__(
         self,
+        name: str,
         network: Network,
         execution_client: Client,
         snapshot_dir: Path,
@@ -53,7 +54,7 @@ class Executor:
         logger=Logger(),
     ):
         self.execution_client = execution_client
-        self.executor_name = f"expb-el-{self.execution_client.value.name}"
+        self.executor_name = f"expb-executor-{name}"
         self.network = network
         self.execution_client_image = (
             execution_client_image or self.execution_client.value.default_image
@@ -106,12 +107,12 @@ class Executor:
             "-o",
             ",".join(
                 [
-                    f"lowerdir={self.snapshot_dir}",
-                    f"upperdir={self._overlay_upper_dir}",
-                    f"workdir={self._overlay_work_dir}",
+                    f"lowerdir={self.snapshot_dir.absolute()}",
+                    f"upperdir={self._overlay_upper_dir.absolute()}",
+                    f"workdir={self._overlay_work_dir.absolute()}",
                 ]
             ),
-            self._overlay_merged_dir,
+            self._overlay_merged_dir.absolute(),
         ]
         try:
             subprocess.run(mount_command, check=True, shell=True)
@@ -152,13 +153,13 @@ class Executor:
         container_command = self.execution_client.value.get_command(self.network)
         container = self.docker_client.containers.run(
             image=self.execution_client_image,
-            name=self.executor_name,
+            name=f"{self.executor_name}-{self.execution_client.value.name.lower()}",
             volumes={
-                self._overlay_merged_dir: {
+                self._overlay_merged_dir.absolute(): {
                     "bind": CLIENTS_DATA_DIR,
                     "mode": "rw",
                 },
-                self._jwt_secret_file: {
+                self._jwt_secret_file.absolute(): {
                     "bind": CLIENTS_JWT_SECRET_FILE,
                     "mode": "rw",
                 },
@@ -218,11 +219,11 @@ class Executor:
             image=self.kute_image,
             name=f"{self.executor_name}-kute",
             volumes={
-                self.payloads_dir: {
+                self.payloads_dir.absolute(): {
                     "bind": "/payloads",
                     "mode": "rw",
                 },
-                self._jwt_secret_file: {
+                self._jwt_secret_file.absolute(): {
                     "bind": CLIENTS_JWT_SECRET_FILE,
                     "mode": "rw",
                 },
@@ -240,7 +241,11 @@ class Executor:
         return container
 
     def execute_scenario(self) -> None:
-        self.log.info("preparing scenario", execution_client=self.execution_client)
+        self.log.info(
+            "preparing scenario",
+            scenario=self.executor_name,
+            execution_client=self.execution_client,
+        )
         self.prepare_directories()
         self.prepare_jwt_secret_file()
         if self.pull_images:
@@ -248,7 +253,7 @@ class Executor:
 
         self.log.info("creating docker network")
         containers_network = self.docker_client.networks.create(
-            name=self.executor_name,
+            name=f"{self.executor_name}-network",
             driver="bridge",
         )
 
@@ -297,9 +302,12 @@ class Executor:
         )
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         logs_file = self.logs_dir / f"{self.executor_name}-{timestamp}.log"
-        execution_client_logs = execution_client_container.logs()
-        with open(logs_file, "w") as f:
-            f.write(execution_client_logs)
+        self.log.info("saving execution client logs", logs_file=logs_file)
+        logs_stream = execution_client_container.logs(stream=True, follow=False)
+        with open(logs_file, "wb") as f:
+            for line in logs_stream:
+                f.write(line)
+        logs_stream.close()
 
         self.log.info("cleaning up")
         kute_container.stop()
