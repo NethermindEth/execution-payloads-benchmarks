@@ -15,7 +15,7 @@ directories:
 
 # Resources for the docker container
 resources:
-  cpu: 4.0
+  cpu: 4
   mem: 32g
   download_speed: 50mbit
   upload_speed: 15mbit

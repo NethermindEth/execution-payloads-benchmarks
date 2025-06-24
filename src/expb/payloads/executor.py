@@ -43,7 +43,7 @@ class Executor:
         payloads_dir: Path = PAYLOADS_DEFAULT_DIR,
         work_dir: Path = WORK_DEFAULT_DIR,
         logs_dir: Path = LOGS_DEFAULT_DIR,
-        docker_container_cpus: float = DOCKER_CONTAINER_DEFAULT_CPUS,
+        docker_container_cpus: int = DOCKER_CONTAINER_DEFAULT_CPUS,
         docker_container_mem_limit: str = DOCKER_CONTAINER_DEFAULT_MEM_LIMIT,
         docker_container_download_speed: str = DOCKER_CONTAINER_DEFAULT_DOWNLOAD_SPEED,
         docker_container_upload_speed: str = DOCKER_CONTAINER_DEFAULT_UPLOAD_SPEED,

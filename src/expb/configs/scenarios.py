@@ -62,22 +62,22 @@ class Scenarios:
         logs_dir: str = directories.get("logs", LOGS_DEFAULT_DIR)
         self.logs_dir = Path(logs_dir)
 
-        docker_container_cpus: float = config.get("resources", {}).get(
-            "cpu", DOCKER_CONTAINER_DEFAULT_CPUS
-        )
+        resources: dict[str, str] = config.get("resources", {})
+
+        docker_container_cpus: int = resources.get("cpu", DOCKER_CONTAINER_DEFAULT_CPUS)
         self.docker_container_cpus = docker_container_cpus
 
-        docker_container_mem_limit: str = config.get("resources", {}).get(
+        docker_container_mem_limit: str = resources.get(
             "mem", DOCKER_CONTAINER_DEFAULT_MEM_LIMIT
         )
         self.docker_container_mem_limit = docker_container_mem_limit
 
-        docker_container_download_speed: str = config.get("resources", {}).get(
+        docker_container_download_speed: str = resources.get(
             "download_speed", DOCKER_CONTAINER_DEFAULT_DOWNLOAD_SPEED
         )
         self.docker_container_download_speed = docker_container_download_speed
 
-        docker_container_upload_speed: str = config.get("resources", {}).get(
+        docker_container_upload_speed: str = resources.get(
             "upload_speed", DOCKER_CONTAINER_DEFAULT_UPLOAD_SPEED
         )
         self.docker_container_upload_speed = docker_container_upload_speed
