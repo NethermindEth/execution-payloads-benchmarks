@@ -28,9 +28,10 @@ class Scenario:
         client_name: str = config.get("client")
         self.client: Client = Client[client_name.upper()]
         self.client_image: str | None = config.get("image", None)
-        self.snapshot_dir: str | None = config.get("snapshot_dir", None)
-        if self.snapshot_dir is None:
+        snapshot_dir: str | None = config.get("snapshot_dir", None)
+        if snapshot_dir is None:
             raise ValueError(f"Snapshot directory is required for scenario {name}")
+        self.snapshot_dir = Path(snapshot_dir)
 
 
 class Scenarios:
@@ -50,16 +51,16 @@ class Scenarios:
         kute_image: str = config.get("kute_image", KUTE_DEFAULT_IMAGE)
         self.kute_image = kute_image
 
-        payloads_dir: str = config.get("directories", {}).get(
-            "payloads", PAYLOADS_DEFAULT_DIR
-        )
-        self.payloads_dir = payloads_dir
+        directories: dict[str, str] = config.get("directories", {})
 
-        work_dir: str = config.get("directories", {}).get("work", WORK_DEFAULT_DIR)
-        self.work_dir = work_dir
+        payloads_dir: str = directories.get("payloads", PAYLOADS_DEFAULT_DIR)
+        self.payloads_dir = Path(payloads_dir)
 
-        logs_dir: str = config.get("directories", {}).get("logs", LOGS_DEFAULT_DIR)
-        self.logs_dir = logs_dir
+        work_dir: str = directories.get("work", WORK_DEFAULT_DIR)
+        self.work_dir = Path(work_dir)
+
+        logs_dir: str = directories.get("logs", LOGS_DEFAULT_DIR)
+        self.logs_dir = Path(logs_dir)
 
         docker_container_cpus: float = config.get("resources", {}).get(
             "cpu", DOCKER_CONTAINER_DEFAULT_CPUS
