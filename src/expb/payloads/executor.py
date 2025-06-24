@@ -140,7 +140,7 @@ class Executor:
         )
         self._jwt_secret_file.write_text(secrets.token_urlsafe(32))
 
-    def pull_images(self) -> None:
+    def pull_docker_images(self) -> None:
         self.log.info("updating docker images")
         self.docker_client.images.pull(self.execution_client_image)
         self.docker_client.images.pull(self.kute_image)
@@ -249,7 +249,7 @@ class Executor:
         self.prepare_directories()
         self.prepare_jwt_secret_file()
         if self.pull_images:
-            self.pull_images()
+            self.pull_docker_images()
 
         self.log.info("creating docker network")
         containers_network = self.docker_client.networks.create(
