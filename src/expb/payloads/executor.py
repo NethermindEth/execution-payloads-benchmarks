@@ -99,21 +99,23 @@ class Executor:
         )
         # run mount command
         device_name = self.executor_name
-        mount_command = [
-            "mount",
-            "-t",
-            "overlay",
-            device_name,
-            "-o",
-            ",".join(
-                [
-                    f"lowerdir={self.snapshot_dir.absolute()}",
-                    f"upperdir={self._overlay_upper_dir.absolute()}",
-                    f"workdir={self._overlay_work_dir.absolute()}",
-                ]
-            ),
-            self._overlay_merged_dir.absolute(),
-        ]
+        mount_command: str = " ".join(
+            [
+                "mount",
+                "-t",
+                "overlay",
+                device_name,
+                "-o",
+                ",".join(
+                    [
+                        f"lowerdir={self.snapshot_dir.absolute()}",
+                        f"upperdir={self._overlay_upper_dir.absolute()}",
+                        f"workdir={self._overlay_work_dir.absolute()}",
+                    ]
+                ),
+                self._overlay_merged_dir.absolute(),
+            ]
+        )
         try:
             subprocess.run(mount_command, check=True, shell=True)
         except subprocess.CalledProcessError as e:
