@@ -3,7 +3,7 @@ import typer
 from pathlib import Path
 from typing_extensions import Annotated
 
-from expb.payloads import Executor
+from expb.payloads import Executor, KUTE_DEFAULT_IMAGE
 from expb.configs.networks import Network
 from expb.configs.clients import Client
 from expb.logging import setup_logging
@@ -18,10 +18,12 @@ def execute_payloads(
     network: Annotated[Network, typer.Option(help="Network")] = Network.MAINNET,
     execution_client_image: Annotated[
         str | None,
-        typer.Option(
-            help="Execution client image to use. Leave empty for client default"
-        ),
+        typer.Option(help="Execution client image to use. Empty for client default"),
     ] = None,
+    kute_image: Annotated[
+        str,
+        typer.Option(help="Execution client image to use. Empty for default"),
+    ] = KUTE_DEFAULT_IMAGE,
     payloads_dir: Annotated[Path, typer.Option(help="Payloads directory")] = "payloads",
     work_dir: Annotated[Path, typer.Option(help="Work directory")] = "work",
     logs_dir: Annotated[Path, typer.Option(help="Logs directory")] = "logs",
@@ -62,6 +64,7 @@ def execute_payloads(
         docker_container_mem_limit=docker_container_mem_limit,
         json_rpc_wait_max_retries=json_rpc_wait_max_retries,
         logs_dir=logs_dir,
+        kute_image=kute_image,
         logger=logger,
     )
 
