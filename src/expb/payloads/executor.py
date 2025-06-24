@@ -53,6 +53,7 @@ class Executor:
         kute_image: str = KUTE_DEFAULT_IMAGE,
         json_rpc_wait_max_retries: int = 16,
         pull_images: bool = False,
+        limit_bandwidth: bool = False,
         logger=Logger(),
     ):
         self.execution_client = execution_client
@@ -67,6 +68,7 @@ class Executor:
         self.docker_container_download_speed = docker_container_download_speed
         self.docker_container_upload_speed = docker_container_upload_speed
         self.json_rpc_wait_max_retries = json_rpc_wait_max_retries
+        self.limit_bandwidth = limit_bandwidth
 
         self.docker_client = docker.from_env()
         self.pull_images = pull_images
@@ -315,21 +317,22 @@ class Executor:
                 container_network=containers_network,
             )
 
-            self.log.info(
-                "limiting container bandwidth",
-                execution_client=self.execution_client.value.name.lower(),
-                download_speed=self.docker_container_download_speed,
-                upload_speed=self.docker_container_upload_speed,
-            )
-            try:
-                limit_container_bandwidth(
-                    execution_client_container,
-                    self.docker_container_download_speed,
-                    self.docker_container_upload_speed,
+            if self.limit_bandwidth:
+                self.log.info(
+                    "limiting container bandwidth",
+                    execution_client=self.execution_client.value.name.lower(),
+                    download_speed=self.docker_container_download_speed,
+                    upload_speed=self.docker_container_upload_speed,
                 )
-            except Exception as e:
-                self.log.error("failed to limit container bandwidth", error=e)
-                raise e
+                try:
+                    limit_container_bandwidth(
+                        execution_client_container,
+                        self.docker_container_download_speed,
+                        self.docker_container_upload_speed,
+                    )
+                except Exception as e:
+                    self.log.error("failed to limit container bandwidth", error=e)
+                    raise e
 
             self.log.info("waiting for client json rpc to be available")
             try:

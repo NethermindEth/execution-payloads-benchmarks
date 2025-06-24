@@ -1,7 +1,6 @@
 import subprocess
 
 from docker.models.containers import Container
-from docker.models.networks import Network
 
 
 def get_veth_name(pid: int) -> str:
@@ -19,27 +18,29 @@ def apply_tc_limits(
     download_speed: str,
     upload_speed: str,
 ):
+    # FIXME: current implementation only limits egress speed (uploading)
+    device_name = veth_name.split("@")[0]
     # Remove any existing qdisc
     subprocess.run(
-        f"sudo tc qdisc del dev {veth_name} root || true",
+        f"sudo tc qdisc del dev {device_name} root || true",
         shell=True,
         check=True,
     )
     # Add root qdisc
     subprocess.run(
-        f"sudo tc qdisc add dev {veth_name} root handle 1: htb default 30",
+        f"sudo tc qdisc add dev {device_name} root handle 1: htb default 1",
         shell=True,
         check=True,
     )
     # Add download (ingress) class
     subprocess.run(
-        f"sudo tc class add dev {veth_name} parent 1: classid 1:1 htb rate {download_speed}",
+        f"sudo tc class add dev {device_name} parent 1: classid 1:1 htb rate {download_speed}",
         shell=True,
         check=True,
     )
     # Add upload (egress) class
     subprocess.run(
-        f"sudo tc class add dev {veth_name} parent 1: classid 1:2 htb rate {upload_speed}",
+        f"sudo tc class add dev {device_name} parent 1: classid 1:2 htb rate {upload_speed}",
         shell=True,
         check=True,
     )
