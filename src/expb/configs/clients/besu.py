@@ -14,7 +14,7 @@ class BesuConfig(ClientConfig):
     def __init__(self):
         super().__init__(
             name="besu",
-            default_image="hyperledger/besu:performance",
+            default_image="ethpandaops/besu:performance",
             default_command=[
                 f"--data-path={CLIENTS_DATA_DIR}",
                 "--p2p-host=0.0.0.0",

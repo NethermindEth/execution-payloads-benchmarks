@@ -14,7 +14,7 @@ class NethermindConfig(ClientConfig):
     def __init__(self):
         super().__init__(
             name="nethermind",
-            default_image="nethermindeth/nethermind:performance",
+            default_image="ethpandaops/nethermind:performance",
             default_command=[
                 f"--datadir={CLIENTS_DATA_DIR}",
                 f"--Network.P2PPort={CLIENT_P2P_PORT}",
