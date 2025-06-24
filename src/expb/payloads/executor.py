@@ -49,6 +49,7 @@ class Executor:
         execution_client_image: str | None = None,
         kute_image: str = KUTE_DEFAULT_IMAGE,
         json_rpc_wait_max_retries: int = 16,
+        pull_images: bool = False,
         logger=Logger(),
     ):
         self.execution_client = execution_client
@@ -65,6 +66,7 @@ class Executor:
         self.json_rpc_wait_max_retries = json_rpc_wait_max_retries
 
         self.docker_client = docker.from_env()
+        self.pull_images = pull_images
 
         self.payloads_dir = payloads_dir
         self.work_dir = work_dir
@@ -136,6 +138,12 @@ class Executor:
             exist_ok=True,
         )
         self._jwt_secret_file.write_text(secrets.token_urlsafe(32))
+
+    def pull_images(self) -> None:
+        self.log.info("updating docker images")
+        self.docker_client.images.pull(self.execution_client_image)
+        self.docker_client.images.pull(self.kute_image)
+        self.log.info("docker images updated")
 
     def start_execution_client(
         self,
@@ -235,6 +243,8 @@ class Executor:
         self.log.info("preparing scenario", execution_client=self.execution_client)
         self.prepare_directories()
         self.prepare_jwt_secret_file()
+        if self.pull_images:
+            self.pull_images()
 
         self.log.info("creating docker network")
         containers_network = self.docker_client.networks.create(

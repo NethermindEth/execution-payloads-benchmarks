@@ -1,6 +1,9 @@
 ﻿# Network to use
 network: mainnet
 
+# Pull images before execution
+pull_images: true
+
 # Kute image to use
 kute_image: nethermindeth/kute:latest
 

@@ -44,6 +44,9 @@ class Scenarios:
         config_network: str = config.get("network", Network.MAINNET.name)
         self.network = Network[config_network.upper()]
 
+        pull_images: bool = config.get("pull_images", False)
+        self.pull_images = pull_images
+
         kute_image: str = config.get("kute_image", KUTE_DEFAULT_IMAGE)
         self.kute_image = kute_image
 
@@ -107,6 +110,7 @@ class Scenarios:
             docker_container_upload_speed=self.docker_container_upload_speed,
             docker_container_mem_limit=self.docker_container_mem_limit,
             logs_dir=self.logs_dir,
+            pull_images=self.pull_images,
             kute_image=self.kute_image,
             logger=logger,
         )
