@@ -7,10 +7,10 @@ from docker.models.networks import Network
 def get_veth_name(pid: int) -> str:
     # This command finds the veth interface on the host for the container's eth0
     cmd = f"sudo nsenter -t {pid} -n ip link show eth0 | grep -oP '(?<=eth0@if)\\d+'"
-    veth_index = subprocess.check_output(cmd, shell=True, text=True, check=True).strip()
+    veth_index = subprocess.check_output(cmd, shell=True, text=True).strip()
     # Now find the veth name on the host with that index
     cmd = f"ip link | grep '^{veth_index}:' | awk -F: '{{print $2}}' | tr -d ' '"
-    veth_name = subprocess.check_output(cmd, shell=True, text=True, check=True).strip()
+    veth_name = subprocess.check_output(cmd, shell=True, text=True).strip()
     return veth_name
 
 

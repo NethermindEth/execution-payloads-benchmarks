@@ -5,6 +5,8 @@ import secrets
 import requests
 import subprocess
 
+import docker.errors
+
 from pathlib import Path
 from urllib3.util.retry import Retry
 from docker.models.containers import Container
@@ -123,14 +125,20 @@ class Executor:
             raise e
 
     def remove_directories(self) -> None:
-        umount_command = ["umount", self._overlay_merged_dir]
+        umount_command = " ".join(["umount", str(self._overlay_merged_dir.absolute())])
         try:
             subprocess.run(umount_command, check=True, shell=True)
         except subprocess.CalledProcessError as e:
             self.log.error("failed to umount overlay", error=e)
             raise e
         try:
-            shutil.rmtree(self.work_dir.absolute())
+            paths_to_remove = [
+                self._overlay_upper_dir.absolute(),
+                self._overlay_work_dir.absolute(),
+                self._overlay_merged_dir.absolute(),
+            ]
+            for path in paths_to_remove:
+                shutil.rmtree(path)
         except Exception as e:
             self.log.error("failed to cleanup work directory", error=e)
             raise e
@@ -242,80 +250,115 @@ class Executor:
         )
         return container
 
-    def execute_scenario(self) -> None:
-        self.log.info(
-            "preparing scenario",
-            scenario=self.executor_name,
-            execution_client=self.execution_client,
-        )
-        self.prepare_directories()
-        self.prepare_jwt_secret_file()
-        if self.pull_images:
-            self.pull_docker_images()
-
-        self.log.info("creating docker network")
-        containers_network = self.docker_client.networks.create(
-            name=f"{self.executor_name}-network",
-            driver="bridge",
-        )
-
-        self.log.info(
-            "starting execution client",
-            execution_client=self.execution_client,
-            execution_client_image=self.execution_client_image,
-            docker_container_cpus=self.docker_container_cpus,
-            docker_container_mem_limit=self.docker_container_mem_limit,
-        )
-        execution_client_container = self.start_execution_client(
-            container_network=containers_network,
-        )
-
-        self.log.info(
-            "limiting container bandwidth",
-            execution_client=self.execution_client,
-            download_speed=self.docker_container_download_speed,
-            upload_speed=self.docker_container_upload_speed,
-        )
+    def cleanup_scenario(self) -> None:
+        self.log.info("cleaning up scenario", scenario=self.executor_name)
+        # Clean kute container
         try:
-            limit_container_bandwidth(
-                execution_client_container,
-                self.docker_container_download_speed,
-                self.docker_container_upload_speed,
+            kute_container = self.docker_client.containers.get(
+                f"{self.executor_name}-kute"
             )
-        except Exception as e:
-            self.log.error("failed to limit container bandwidth", error=e)
-            raise e
+            kute_container.stop()
+            kute_container.remove()
+        except docker.errors.NotFound:
+            pass
 
-        self.log.info("waiting for client json rpc to be available")
+        # Clean execution client container
         try:
-            self.wait_for_client_json_rpc()
-        except Exception as e:
-            self.log.error("failed to wait for client json rpc", error=e)
-            raise e
+            execution_client_container = self.docker_client.containers.get(
+                f"{self.executor_name}-{self.execution_client.value.name.lower()}"
+            )
+            execution_client_container.stop()
+            execution_client_container.remove()
+        except docker.errors.NotFound:
+            pass
 
-        self.log.info(
-            "running kute",
-            kute_docker_image=self.kute_image,
-        )
-        kute_container = self.run_kute(container_network=containers_network)
+        # Clean docker network
+        try:
+            containers_network = self.docker_client.networks.get(
+                f"{self.executor_name}-network"
+            )
+            containers_network.remove()
+        except docker.errors.NotFound:
+            pass
 
-        self.log.info(
-            "payloads execution completed", execution_client=self.execution_client
-        )
-        timestamp = time.strftime("%Y%m%d-%H%M%S")
-        logs_file = self.logs_dir / f"{self.executor_name}-{timestamp}.log"
-        self.log.info("saving execution client logs", logs_file=logs_file)
-        logs_stream = execution_client_container.logs(stream=True, follow=False)
-        with open(logs_file, "wb") as f:
-            for line in logs_stream:
-                f.write(line)
-        logs_stream.close()
-
-        self.log.info("cleaning up")
-        kute_container.stop()
-        kute_container.remove()
-        execution_client_container.stop()
-        execution_client_container.remove()
-        containers_network.remove()
+        # Clean overlay directories
         self.remove_directories()
         self.log.info("cleanup completed")
+
+    def execute_scenario(self) -> None:
+        logs_stream = None
+        try:
+            self.log.info(
+                "preparing scenario",
+                scenario=self.executor_name,
+                execution_client=self.execution_client.value.name.lower(),
+            )
+            self.prepare_directories()
+            self.prepare_jwt_secret_file()
+            if self.pull_images:
+                self.pull_docker_images()
+
+            self.log.info("creating docker network")
+            containers_network = self.docker_client.networks.create(
+                name=f"{self.executor_name}-network",
+                driver="bridge",
+            )
+
+            self.log.info(
+                "starting execution client",
+                execution_client=self.execution_client.value.name.lower(),
+                execution_client_image=self.execution_client_image,
+                docker_container_cpus=self.docker_container_cpus,
+                docker_container_mem_limit=self.docker_container_mem_limit,
+            )
+            execution_client_container = self.start_execution_client(
+                container_network=containers_network,
+            )
+
+            self.log.info(
+                "limiting container bandwidth",
+                execution_client=self.execution_client.value.name.lower(),
+                download_speed=self.docker_container_download_speed,
+                upload_speed=self.docker_container_upload_speed,
+            )
+            try:
+                limit_container_bandwidth(
+                    execution_client_container,
+                    self.docker_container_download_speed,
+                    self.docker_container_upload_speed,
+                )
+            except Exception as e:
+                self.log.error("failed to limit container bandwidth", error=e)
+                raise e
+
+            self.log.info("waiting for client json rpc to be available")
+            try:
+                self.wait_for_client_json_rpc()
+            except Exception as e:
+                self.log.error("failed to wait for client json rpc", error=e)
+                raise e
+
+            self.log.info(
+                "running kute",
+                kute_docker_image=self.kute_image,
+            )
+            _ = self.run_kute(container_network=containers_network)
+
+            self.log.info(
+                "payloads execution completed",
+                execution_client=self.execution_client.value.name.lower(),
+            )
+            timestamp = time.strftime("%Y%m%d-%H%M%S")
+            logs_file = self.logs_dir / f"{self.executor_name}-{timestamp}.log"
+            self.log.info("saving execution client logs", logs_file=logs_file)
+            logs_stream = execution_client_container.logs(stream=True, follow=False)
+            with open(logs_file, "wb") as f:
+                for line in logs_stream:
+                    f.write(line)
+        except Exception as e:
+            self.log.error("failed to execute scenario", error=e)
+            raise e
+        finally:
+            if logs_stream is not None:
+                logs_stream.close()
+            self.cleanup_scenario()

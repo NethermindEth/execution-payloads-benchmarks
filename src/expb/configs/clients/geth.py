@@ -43,5 +43,3 @@ class GethConfig(ClientConfig):
                 "--mainnet",
                 "--syncmode=full",
             ]
-        else:
-            raise ValueError(f"Network {network} not supported")

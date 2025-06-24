@@ -41,5 +41,3 @@ class BesuConfig(ClientConfig):
             return self.default_command + [
                 "--network=mainnet",
             ]
-        else:
-            raise ValueError(f"Network {network} not supported")

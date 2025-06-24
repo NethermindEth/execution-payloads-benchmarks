@@ -42,5 +42,3 @@ class ErigonConfig(ClientConfig):
             return self.default_command + [
                 "--chain=mainnet",
             ]
-        else:
-            raise ValueError(f"Network {network} not supported")

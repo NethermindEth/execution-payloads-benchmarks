@@ -39,6 +39,5 @@ class NethermindConfig(ClientConfig):
         if network == Network.MAINNET:
             return self.default_command + [
                 "--config=mainnet",
+                "--Init.BaseDbPath=mainnet",
             ]
-        else:
-            raise ValueError(f"Network {network} not supported")

@@ -37,5 +37,3 @@ class RethConfig(ClientConfig):
                 "--chain=mainnet",
                 "--full",
             ]
-        else:
-            raise ValueError(f"Network {network} not supported")
