@@ -113,7 +113,7 @@ class Executor:
                         f"workdir={self._overlay_work_dir.absolute()}",
                     ]
                 ),
-                self._overlay_merged_dir.absolute(),
+                str(self._overlay_merged_dir.absolute()),
             ]
         )
         try:
