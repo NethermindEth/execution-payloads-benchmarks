@@ -1,0 +1,29 @@
+﻿# Network to use
+network: mainnet
+
+# Kute image to use
+kute_image: nethermindeth/kute:latest
+
+# Directories for the payloads, work, and logs
+directories:
+  payloads: ./payloads
+  work: ./work
+  logs: ./logs
+
+# Resources for the docker container
+resources:
+  cpu: 4.0
+  mem: 32g
+  download_speed: 50mbit
+  upload_speed: 15mbit
+
+# Scenarios to execute
+scenarios:
+  # Scenario name
+  example:
+    # Required client name
+    client: nethermind
+    # Required snapshot directory for the selected client and network
+    snapshot_dir: ./snapthots/nethermind
+    # Optional client image
+    image: nethermindeth/nethermind:latest

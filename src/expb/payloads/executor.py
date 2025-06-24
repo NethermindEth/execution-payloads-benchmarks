@@ -11,16 +11,26 @@ from docker.models.containers import Container
 
 from expb.logging import Logger
 from expb.configs.networks import Network
-from expb.configs.clients import Client, CLIENTS_DATA_DIR, CLIENTS_JWT_SECRET_FILE
 from expb.configs.clients import (
+    Client,
+    CLIENTS_DATA_DIR,
+    CLIENTS_JWT_SECRET_FILE,
     CLIENT_RPC_PORT,
     CLIENT_ENGINE_PORT,
     CLIENT_METRICS_PORT,
     CLIENT_P2P_PORT,
 )
 from expb.payloads.utils.networking import limit_container_bandwidth
-
-KUTE_DEFAULT_IMAGE = "nethermindeth/kute:latest"
+from expb.configs.defaults import (
+    KUTE_DEFAULT_IMAGE,
+    PAYLOADS_DEFAULT_DIR,
+    WORK_DEFAULT_DIR,
+    LOGS_DEFAULT_DIR,
+    DOCKER_CONTAINER_DEFAULT_CPUS,
+    DOCKER_CONTAINER_DEFAULT_MEM_LIMIT,
+    DOCKER_CONTAINER_DEFAULT_DOWNLOAD_SPEED,
+    DOCKER_CONTAINER_DEFAULT_UPLOAD_SPEED,
+)
 
 
 class Executor:
@@ -28,14 +38,14 @@ class Executor:
         self,
         network: Network,
         execution_client: Client,
-        payloads_dir: Path,
-        work_dir: Path,
         snapshot_dir: Path,
-        logs_dir: Path,
-        docker_container_cpus: float = 4.0,
-        docker_container_mem_limit: str = "32g",
-        docker_container_download_speed: str = "50mbit",
-        docker_container_upload_speed: str = "15mbit",
+        payloads_dir: Path = PAYLOADS_DEFAULT_DIR,
+        work_dir: Path = WORK_DEFAULT_DIR,
+        logs_dir: Path = LOGS_DEFAULT_DIR,
+        docker_container_cpus: float = DOCKER_CONTAINER_DEFAULT_CPUS,
+        docker_container_mem_limit: str = DOCKER_CONTAINER_DEFAULT_MEM_LIMIT,
+        docker_container_download_speed: str = DOCKER_CONTAINER_DEFAULT_DOWNLOAD_SPEED,
+        docker_container_upload_speed: str = DOCKER_CONTAINER_DEFAULT_UPLOAD_SPEED,
         execution_client_image: str | None = None,
         kute_image: str = KUTE_DEFAULT_IMAGE,
         json_rpc_wait_max_retries: int = 16,
@@ -221,7 +231,7 @@ class Executor:
         )
         return container
 
-    def execute_scenarios(self) -> None:
+    def execute_scenario(self) -> None:
         self.log.info("preparing scenario", execution_client=self.execution_client)
         self.prepare_directories()
         self.prepare_jwt_secret_file()
