@@ -8,6 +8,7 @@ import subprocess
 import docker.errors
 
 from pathlib import Path
+from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from docker.models.containers import Container
 
@@ -202,15 +203,18 @@ class Executor:
             "params": [],
             "id": 1,
         }
-        response: requests.Response = requests.post(
+        s = requests.Session()
+        retries = Retry(
+            total=self.json_rpc_wait_max_retries,
+            backoff_factor=0.5,
+            status_forcelist=[429, 500, 502, 503, 504],
+        )
+        s.mount("http://", HTTPAdapter(max_retries=retries))
+        s.mount("https://", HTTPAdapter(max_retries=retries))
+        response: requests.Response = s.post(
             json_rpc_url,
             json=payload,
             headers=headers,
-            retries=Retry(
-                total=self.json_rpc_wait_max_retries,
-                backoff_factor=0.5,
-                status_forcelist=[429, 500, 502, 503, 504],
-            ),
         )
         if response.ok:
             self.log.info(
