@@ -151,7 +151,7 @@ class Executor:
             mode=0o666,
             exist_ok=True,
         )
-        self._jwt_secret_file.write_text(secrets.token_urlsafe(32))
+        self._jwt_secret_file.write_text(secrets.token_bytes(32).hex())
 
     def pull_docker_images(self) -> None:
         self.log.info("updating docker images")
@@ -293,6 +293,7 @@ class Executor:
 
     def execute_scenario(self) -> None:
         logs_stream = None
+        execution_client_container = None
         try:
             self.log.info(
                 "preparing scenario",
@@ -355,17 +356,22 @@ class Executor:
                 "payloads execution completed",
                 execution_client=self.execution_client.value.name.lower(),
             )
-            timestamp = time.strftime("%Y%m%d-%H%M%S")
-            logs_file = self.logs_dir / f"{self.executor_name}-{timestamp}.log"
-            self.log.info("saving execution client logs", logs_file=logs_file)
-            logs_stream = execution_client_container.logs(stream=True, follow=False)
-            with open(logs_file, "wb") as f:
-                for line in logs_stream:
-                    f.write(line)
         except Exception as e:
             self.log.error("failed to execute scenario", error=e)
             raise e
         finally:
-            if logs_stream is not None:
+            if execution_client_container is not None:
+                timestamp = time.strftime("%Y%m%d-%H%M%S")
+                logs_file = self.logs_dir / f"{self.executor_name}-{timestamp}.log"
+                self.log.info("saving execution client logs", logs_file=logs_file)
+                logs_stream = execution_client_container.logs(
+                    stream=True,
+                    follow=False,
+                    stdout=True,
+                    stderr=True,
+                )
+                with open(logs_file, "wb") as f:
+                    for line in logs_stream:
+                        f.write(line)
                 logs_stream.close()
             self.cleanup_scenario()
