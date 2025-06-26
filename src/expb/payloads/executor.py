@@ -208,6 +208,7 @@ class Executor:
             total=self.json_rpc_wait_max_retries,
             backoff_factor=0.5,
             status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["POST"],
         )
         s.mount("http://", HTTPAdapter(max_retries=retries))
         s.mount("https://", HTTPAdapter(max_retries=retries))
