@@ -81,7 +81,9 @@ class Executor:
         self._overlay_merged_dir = self.work_dir / "merged"
         self._jwt_secret_file = self.work_dir / "jwtsecret.hex"
         self.snapshot_dir = snapshot_dir
-        self.logs_dir = logs_dir
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        self.logs_dir = logs_dir / f"{self.executor_name}-{timestamp}"
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
 
         self.log = logger
 
@@ -268,14 +270,13 @@ class Executor:
 
     def cleanup_scenario(self) -> None:
         self.log.info("cleaning up scenario", scenario=self.executor_name)
-        timestamp = time.strftime("%Y%m%d-%H%M%S")
         # Clean kute container
         try:
             kute_container = self.docker_client.containers.get(
                 f"{self.executor_name}-kute"
             )
             kute_container.stop()
-            logs_file = self.logs_dir / f"{self.executor_name}-kute-{timestamp}.log"
+            logs_file = self.logs_dir / "kute.log"
             self.log.info("saving kute logs", logs_file=logs_file)
             logs_stream = kute_container.logs(
                 stream=True,
@@ -297,7 +298,9 @@ class Executor:
                 f"{self.executor_name}-{self.execution_client.value.name.lower()}"
             )
             execution_client_container.stop()
-            logs_file = self.logs_dir / f"{self.executor_name}-{timestamp}.log"
+            logs_file = (
+                self.logs_dir / f"{self.execution_client.value.name.lower()}.log"
+            )
             self.log.info("saving execution client logs", logs_file=logs_file)
             logs_stream = execution_client_container.logs(
                 stream=True,
