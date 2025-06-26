@@ -194,7 +194,7 @@ class Executor:
         return container
 
     def wait_for_client_json_rpc(self) -> None:
-        time.sleep(10)
+        time.sleep(60)
         json_rpc_url = f"http://localhost:{CLIENT_RPC_PORT}"
         headers = {"Content-Type": "application/json"}
         payload = {
@@ -230,8 +230,15 @@ class Executor:
 
     def run_kute(
         self,
+        execution_client_container: Container,
         container_network: Network | None = None,
     ) -> Container:
+        execution_client_container.reload()
+        execution_client_ip = execution_client_container.attrs["NetworkSettings"][
+            "Networks"
+        ][container_network.name]["IPAddress"]
+        engine_url = f"http://{execution_client_ip}:{CLIENT_ENGINE_PORT}"
+
         container = self.docker_client.containers.run(
             image=self.kute_image,
             name=f"{self.executor_name}-kute",
@@ -246,6 +253,8 @@ class Executor:
                 },
             },
             command=[
+                "--address",
+                engine_url,
                 "--input",
                 "/payloads",
                 "--secret",
@@ -351,7 +360,10 @@ class Executor:
                 "running kute",
                 kute_docker_image=self.kute_image,
             )
-            _ = self.run_kute(container_network=containers_network)
+            _ = self.run_kute(
+                execution_client_container=execution_client_container,
+                container_network=containers_network,
+            )
 
             self.log.info(
                 "payloads execution completed",
