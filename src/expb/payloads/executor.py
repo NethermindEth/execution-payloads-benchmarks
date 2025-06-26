@@ -219,7 +219,7 @@ class Executor:
         if response.ok:
             self.log.info(
                 "client json rpc is available",
-                latest_block=response.json()["result"],
+                latest_block=int(response.json()["result"], 16),
             )
         else:
             self.log.error(
