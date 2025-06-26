@@ -17,7 +17,8 @@ class GethConfig(ClientConfig):
             default_image="ethpandaops/geth:performance",
             default_command=[
                 f"--datadir={CLIENTS_DATA_DIR}",
-                f"--port={CLIENT_P2P_PORT}--http",
+                f"--port={CLIENT_P2P_PORT}",
+                "--http",
                 "--http.addr=0.0.0.0",
                 f"--http.port={CLIENT_RPC_PORT}",
                 "--http.vhosts=*",
