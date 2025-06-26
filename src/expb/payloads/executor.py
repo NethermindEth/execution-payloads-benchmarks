@@ -194,7 +194,7 @@ class Executor:
         return container
 
     def wait_for_client_json_rpc(self) -> None:
-        time.sleep(60)
+        time.sleep(30)
         json_rpc_url = f"http://localhost:{CLIENT_RPC_PORT}"
         headers = {"Content-Type": "application/json"}
         payload = {
@@ -268,12 +268,25 @@ class Executor:
 
     def cleanup_scenario(self) -> None:
         self.log.info("cleaning up scenario", scenario=self.executor_name)
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
         # Clean kute container
         try:
             kute_container = self.docker_client.containers.get(
                 f"{self.executor_name}-kute"
             )
             kute_container.stop()
+            logs_file = self.logs_dir / f"{self.executor_name}-kute-{timestamp}.log"
+            self.log.info("saving kute logs", logs_file=logs_file)
+            logs_stream = kute_container.logs(
+                stream=True,
+                follow=False,
+                stdout=True,
+                stderr=True,
+            )
+            with open(logs_file, "wb") as f:
+                for line in logs_stream:
+                    f.write(line)
+            logs_stream.close()
             kute_container.remove()
         except docker.errors.NotFound:
             pass
@@ -284,6 +297,18 @@ class Executor:
                 f"{self.executor_name}-{self.execution_client.value.name.lower()}"
             )
             execution_client_container.stop()
+            logs_file = self.logs_dir / f"{self.executor_name}-{timestamp}.log"
+            self.log.info("saving execution client logs", logs_file=logs_file)
+            logs_stream = execution_client_container.logs(
+                stream=True,
+                follow=False,
+                stdout=True,
+                stderr=True,
+            )
+            with open(logs_file, "wb") as f:
+                for line in logs_stream:
+                    f.write(line)
+            logs_stream.close()
             execution_client_container.remove()
         except docker.errors.NotFound:
             pass
@@ -302,8 +327,6 @@ class Executor:
         self.log.info("cleanup completed")
 
     def execute_scenario(self) -> None:
-        logs_stream = None
-        execution_client_container = None
         try:
             self.log.info(
                 "preparing scenario",
@@ -373,18 +396,4 @@ class Executor:
             self.log.error("failed to execute scenario", error=e)
             raise e
         finally:
-            if execution_client_container is not None:
-                timestamp = time.strftime("%Y%m%d-%H%M%S")
-                logs_file = self.logs_dir / f"{self.executor_name}-{timestamp}.log"
-                self.log.info("saving execution client logs", logs_file=logs_file)
-                logs_stream = execution_client_container.logs(
-                    stream=True,
-                    follow=False,
-                    stdout=True,
-                    stderr=True,
-                )
-                with open(logs_file, "wb") as f:
-                    for line in logs_stream:
-                        f.write(line)
-                logs_stream.close()
             self.cleanup_scenario()
