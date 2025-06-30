@@ -48,6 +48,19 @@ class Generator:
         else:
             raise ValueError(f"Unknown fork: {fork}")
 
+    def get_fcu_version(self, block: BlockData) -> int:
+        fork = self.network.get_block_fork(block)
+        if fork == Fork.PARIS:
+            return 1
+        elif fork == Fork.SHANGHAI:
+            return 2
+        elif fork == Fork.CANCUN:
+            return 3
+        elif fork == Fork.PRAGUE:
+            return 3
+        else:
+            raise ValueError(f"Unknown fork: {fork}")
+
     def compose_payload_v1(
         self,
         block: BlockData,
@@ -218,10 +231,11 @@ class Generator:
         }
 
     async def get_fcu_request(self, block: BlockData) -> dict:
+        version = self.get_payload_version(block)
         return {
             "id": 1,
             "jsonrpc": "2.0",
-            "method": "engine_forkChoiceUpdated",
+            "method": f"engine_forkchoiceUpdatedV{version}",
             "params": [
                 {
                     "headBlockHash": block["hash"].to_0x_hex(),
