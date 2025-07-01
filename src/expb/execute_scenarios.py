@@ -27,7 +27,7 @@ def execute_scenarios(
 
     config = Scenarios(config_file)
 
-    while loop:
+    while True:
         for scenario in config.scenarios.values():
             logger.info(
                 "Executing scenario",
@@ -37,3 +37,5 @@ def execute_scenarios(
             )
             executor = config.get_scenario_executor(scenario, logger=logger)
             executor.execute_scenario()
+        if not loop:
+            break
