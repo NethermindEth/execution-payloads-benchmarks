@@ -1,3 +1,4 @@
+import os
 import time
 import shutil
 import docker
@@ -192,6 +193,8 @@ class Executor:
             cpu_count=self.docker_container_cpus,  # Only works for windows
             nano_cpus=self.docker_container_cpus * 10**9,
             mem_limit=self.docker_container_mem_limit,
+            user=os.getuid(),
+            group_add=[os.getgid()],
         )
         return container
 
@@ -265,6 +268,8 @@ class Executor:
             ],
             network=container_network.name if container_network else None,
             detach=False,
+            user=os.getuid(),
+            group_add=[os.getgid()],
         )
         return container
 
