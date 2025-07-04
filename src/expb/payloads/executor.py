@@ -53,6 +53,7 @@ class Executor:
         docker_container_upload_speed: str = DOCKER_CONTAINER_DEFAULT_UPLOAD_SPEED,
         execution_client_image: str | None = None,
         kute_image: str = KUTE_DEFAULT_IMAGE,
+        kute_filter: str | None = None,
         json_rpc_wait_max_retries: int = 16,
         pull_images: bool = False,
         limit_bandwidth: bool = False,
@@ -65,6 +66,7 @@ class Executor:
             execution_client_image or self.execution_client.value.default_image
         )
         self.kute_image = kute_image
+        self.kute_filter = kute_filter
         self.docker_container_cpus = docker_container_cpus
         self.docker_container_mem_limit = docker_container_mem_limit
         self.docker_container_download_speed = docker_container_download_speed
@@ -244,6 +246,22 @@ class Executor:
         ][container_network.name]["IPAddress"]
         engine_url = f"http://{execution_client_ip}:{CLIENT_ENGINE_PORT}"
 
+        kute_filter_command = []
+        if self.kute_filter:
+            kute_filter_command.append("-f")
+            kute_filter_command.append(self.kute_filter)
+
+        kute_command = [
+            "--address",
+            engine_url,
+            "--input",
+            "/payloads",
+            "--secret",
+            CLIENTS_JWT_SECRET_FILE,
+            "--output",
+            "Json",
+        ] + kute_filter_command
+
         container = self.docker_client.containers.run(
             image=self.kute_image,
             name=f"{self.executor_name}-kute",
@@ -257,15 +275,7 @@ class Executor:
                     "mode": "rw",
                 },
             },
-            command=[
-                "--address",
-                engine_url,
-                "--input",
-                "/payloads",
-                "--secret",
-                CLIENTS_JWT_SECRET_FILE,
-                "-p",
-            ],
+            command=kute_command,
             network=container_network.name if container_network else None,
             detach=False,
             user=os.getuid(),

@@ -28,6 +28,7 @@ class Scenario:
         client_name: str = config.get("client")
         self.client: Client = Client[client_name.upper()]
         self.client_image: str | None = config.get("image", None)
+        self.kute_filter: str | None = config.get("kute_filter", None)
         snapshot_dir: str | None = config.get("snapshot_dir", None)
         if snapshot_dir is None:
             raise ValueError(f"Snapshot directory is required for scenario {name}")
@@ -114,6 +115,7 @@ class Scenarios:
             logs_dir=self.logs_dir,
             pull_images=self.pull_images,
             kute_image=self.kute_image,
+            kute_filter=scenario.kute_filter,
             logger=logger,
         )
         return executor

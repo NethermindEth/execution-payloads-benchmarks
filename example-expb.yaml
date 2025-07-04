@@ -30,3 +30,5 @@ scenarios:
     snapshot_dir: ./snapthots/nethermind
     # Optional client image
     image: nethermindeth/nethermind:latest
+    # Optional Kute filter. See https://github.com/NethermindEth/nethermind/tree/master/tools/Nethermind.Tools.Kute
+    filter: .*=100 # first 100 requests
