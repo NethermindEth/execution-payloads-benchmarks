@@ -186,8 +186,9 @@ class Executor:
                 f"{CLIENT_RPC_PORT}/tcp": f"{CLIENT_RPC_PORT}",
                 f"{CLIENT_ENGINE_PORT}/tcp": f"{CLIENT_ENGINE_PORT}",
                 f"{CLIENT_METRICS_PORT}/tcp": f"{CLIENT_METRICS_PORT}",
-                f"{CLIENT_P2P_PORT}/tcp": f"{CLIENT_P2P_PORT}",
-                f"{CLIENT_P2P_PORT}/udp": f"{CLIENT_P2P_PORT}",
+                # Disable p2p
+                # f"{CLIENT_P2P_PORT}/tcp": f"{CLIENT_P2P_PORT}",
+                # f"{CLIENT_P2P_PORT}/udp": f"{CLIENT_P2P_PORT}",
             },
             command=container_command,
             network=container_network.name if container_network else None,
