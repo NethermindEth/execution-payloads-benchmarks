@@ -264,6 +264,7 @@ class Executor:
         kute_export_command = []
         if self.prom_pushgateway_endpoint:
             kute_export_command.append("--prometheus")
+            kute_export_command.append(self.prom_pushgateway_endpoint)
             if self.prom_pushgateway_auth_username:
                 kute_export_command.append("--prometheus-auth-username")
                 kute_export_command.append(self.prom_pushgateway_auth_username)
