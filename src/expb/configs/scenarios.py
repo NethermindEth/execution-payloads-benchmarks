@@ -133,7 +133,7 @@ class Scenarios:
         logger: Logger = Logger(),
     ) -> Executor:
         executor = Executor(
-            name=scenario.name,
+            scenario_name=scenario.name,
             network=self.network,
             execution_client=scenario.client,
             execution_client_image=scenario.client_image,
