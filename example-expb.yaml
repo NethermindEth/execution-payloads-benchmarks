@@ -13,6 +13,20 @@ directories:
   work: ./work
   logs: ./logs
 
+# Optional: Export Kute results metrics
+export:
+  # Prometheus pushgateway
+  prometheus_pushgateway:
+    # Prometheus pushgateway endpoint
+    endpoint: http://localhost:9090
+    # Optional Basic auth for the pushgateway
+    basic_auth:
+      username: expb
+      password: expb
+    # Optional: Tags to add to the metrics
+    tags:
+      - key=value
+
 # Resources for the docker container
 resources:
   cpu: 4

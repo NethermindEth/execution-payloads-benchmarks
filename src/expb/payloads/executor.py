@@ -22,7 +22,6 @@ from expb.configs.clients import (
     CLIENT_RPC_PORT,
     CLIENT_ENGINE_PORT,
     CLIENT_METRICS_PORT,
-    CLIENT_P2P_PORT,
 )
 from expb.payloads.utils.networking import limit_container_bandwidth
 from expb.configs.defaults import (
@@ -40,7 +39,7 @@ from expb.configs.defaults import (
 class Executor:
     def __init__(
         self,
-        name: str,
+        scenario_name: str,
         network: Network,
         execution_client: Client,
         snapshot_dir: Path,
@@ -57,10 +56,15 @@ class Executor:
         json_rpc_wait_max_retries: int = 16,
         pull_images: bool = False,
         limit_bandwidth: bool = False,
+        prom_pushgateway_endpoint: str | None = None,
+        prom_pushgateway_auth_username: str | None = None,
+        prom_pushgateway_auth_password: str | None = None,
+        prom_pushgateway_tags: list[str] = [],
         logger=Logger(),
     ):
         self.execution_client = execution_client
-        self.executor_name = f"expb-executor-{name}"
+        self.scenario_name = scenario_name
+        self.executor_name = f"expb-executor-{scenario_name}"
         self.network = network
         self.execution_client_image = (
             execution_client_image or self.execution_client.value.default_image
@@ -87,6 +91,11 @@ class Executor:
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         self.logs_dir = logs_dir / f"{self.executor_name}-{timestamp}"
         self.logs_dir.mkdir(parents=True, exist_ok=True)
+
+        self.prom_pushgateway_endpoint = prom_pushgateway_endpoint
+        self.prom_pushgateway_auth_username = prom_pushgateway_auth_username
+        self.prom_pushgateway_auth_password = prom_pushgateway_auth_password
+        self.prom_pushgateway_tags = prom_pushgateway_tags
 
         self.log = logger
 
@@ -252,16 +261,44 @@ class Executor:
             kute_filter_command.append("-f")
             kute_filter_command.append(self.kute_filter)
 
-        kute_command = [
-            "--address",
-            engine_url,
-            "--input",
-            "/payloads",
-            "--secret",
-            CLIENTS_JWT_SECRET_FILE,
-            "--output",
-            "Json",
-        ] + kute_filter_command
+        kute_export_command = []
+        if self.prom_pushgateway_endpoint:
+            kute_export_command.append("--prometheus")
+            if self.prom_pushgateway_auth_username:
+                kute_export_command.append("--prometheus-auth-username")
+                kute_export_command.append(self.prom_pushgateway_auth_username)
+            if self.prom_pushgateway_auth_password:
+                kute_export_command.append("--prometheus-auth-password")
+                kute_export_command.append(self.prom_pushgateway_auth_password)
+
+        kute_tags_command = [
+            "--tags",
+            ",".join(
+                [
+                    f"scenario={self.scenario_name}",
+                    f"client={self.execution_client.value.name.lower()}",
+                    f"network={self.network.value.name.lower()}",
+                    f"image={self.execution_client_image}",
+                ]
+                + self.prom_pushgateway_tags
+            ),
+        ]
+
+        kute_command = (
+            [
+                "--address",
+                engine_url,
+                "--input",
+                "/payloads",
+                "--secret",
+                CLIENTS_JWT_SECRET_FILE,
+                "--output",
+                "Json",
+            ]
+            + kute_tags_command
+            + kute_filter_command
+            + kute_export_command
+        )
 
         container = self.docker_client.containers.run(
             image=self.kute_image,

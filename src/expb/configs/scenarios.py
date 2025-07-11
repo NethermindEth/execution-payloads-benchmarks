@@ -63,6 +63,38 @@ class Scenarios:
         logs_dir: str = directories.get("logs", LOGS_DEFAULT_DIR)
         self.logs_dir = Path(logs_dir)
 
+        export: dict[str] = config.get("export", {})
+        if export:
+            prometheus_pushgateway: dict[str] | None = export.get(
+                "prometheus_pushgateway", None
+            )
+            if isinstance(prometheus_pushgateway, dict) and prometheus_pushgateway:
+                self.prom_pushgateway_endpoint = prometheus_pushgateway.get(
+                    "endpoint", None
+                )
+                prom_pushgateway_basic_auth: dict[str, str] | None = (
+                    prometheus_pushgateway.get("basic_auth", None)
+                )
+                if prom_pushgateway_basic_auth:
+                    self.prom_pushgateway_auth_username = (
+                        prom_pushgateway_basic_auth.get("username", None)
+                    )
+                    self.prom_pushgateway_auth_password = (
+                        prom_pushgateway_basic_auth.get("password", None)
+                    )
+                else:
+                    self.prom_pushgateway_auth_username = None
+                    self.prom_pushgateway_auth_password = None
+
+                self.prom_pushgateway_tags: list[str] = prometheus_pushgateway.get(
+                    "tags", []
+                )
+        else:
+            self.prom_pushgateway_endpoint = None
+            self.prom_pushgateway_auth_username = None
+            self.prom_pushgateway_auth_password = None
+            self.prom_pushgateway_tags = []
+
         resources: dict[str, str] = config.get("resources", {})
 
         docker_container_cpus: int = resources.get("cpu", DOCKER_CONTAINER_DEFAULT_CPUS)
@@ -116,6 +148,10 @@ class Scenarios:
             pull_images=self.pull_images,
             kute_image=self.kute_image,
             kute_filter=scenario.kute_filter,
+            prom_pushgateway_endpoint=self.prom_pushgateway_endpoint,
+            prom_pushgateway_auth_username=self.prom_pushgateway_auth_username,
+            prom_pushgateway_auth_password=self.prom_pushgateway_auth_password,
+            prom_pushgateway_tags=self.prom_pushgateway_tags,
             logger=logger,
         )
         return executor
