@@ -187,6 +187,7 @@ class Generator:
         return []
 
     async def get_new_payload_request(self, block: BlockData) -> list:
+        block_number = block["number"]
         txs_task = self.get_block_transactions(block)
         version = self.get_payload_version(block)
         params = []
@@ -224,7 +225,7 @@ class Generator:
         if execution_requests is not None:
             params.append(execution_requests)
         return {
-            "id": 1,
+            "id": block_number,
             "jsonrpc": "2.0",
             "method": f"engine_newPayloadV{version}",
             "params": params,
@@ -232,8 +233,9 @@ class Generator:
 
     async def get_fcu_request(self, block: BlockData) -> dict:
         version = self.get_payload_version(block)
+        block_number = block["number"]
         return {
-            "id": 1,
+            "id": block_number,
             "jsonrpc": "2.0",
             "method": f"engine_forkchoiceUpdatedV{version}",
             "params": [
