@@ -263,20 +263,21 @@ class Executor:
 
         kute_export_command = []
         if self.prom_pushgateway_endpoint:
-            kute_export_command.append("--prometheus")
+            kute_export_command.append("--gateway")
             kute_export_command.append(self.prom_pushgateway_endpoint)
             if self.prom_pushgateway_auth_username:
-                kute_export_command.append("--prometheus-auth-username")
+                kute_export_command.append("--gateway-user")
                 kute_export_command.append(self.prom_pushgateway_auth_username)
             if self.prom_pushgateway_auth_password:
-                kute_export_command.append("--prometheus-auth-password")
+                kute_export_command.append("--gateway-pass")
                 kute_export_command.append(self.prom_pushgateway_auth_password)
 
         kute_tags_command = [
-            "--tags",
+            "--labels",
             ",".join(
                 [
                     f"scenario={self.scenario_name}",
+                    f"instance={self.scenario_name}",
                     f"client={self.execution_client.value.name.lower()}",
                     f"network={self.network.value.name.lower()}",
                     f"image={self.execution_client_image}",
