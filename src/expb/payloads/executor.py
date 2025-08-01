@@ -280,7 +280,6 @@ class Executor:
                     f"instance={self.scenario_name}",
                     f"client={self.execution_client.value.name.lower()}",
                     f"network={self.network.value.name.lower()}",
-                    f"image={self.execution_client_image}",
                 ]
                 + self.prom_pushgateway_tags
             ),
