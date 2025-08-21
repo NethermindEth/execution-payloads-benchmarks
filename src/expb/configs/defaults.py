@@ -1,16 +1,16 @@
 from pathlib import Path
 
 # Images
-## Kute
-KUTE_DEFAULT_IMAGE = "nethermindeth/kute:latest"
+## Grafana K6
+K6_DEFAULT_IMAGE = "grafana/k6:1.1.0"
 
 # Directories
 ## Payloads
-PAYLOADS_DEFAULT_DIR = Path("payloads")
+PAYLOADS_DEFAULT_FILE = Path("payloads.csv")
 ## Work
 WORK_DEFAULT_DIR = Path("work")
 ## Logs
-LOGS_DEFAULT_DIR = Path("logs")
+OUTPUTS_DEFAULT_DIR = Path("outputs")
 
 # Resources
 ## Docker container

@@ -4,28 +4,29 @@ network: mainnet
 # Pull images before execution
 pull_images: true
 
-# Kute image to use
-kute_image: nethermindeth/kute:latest
+# Grafana K6 image to use
+k6_image: grafana/k6:1.1.0
 
 # Directories for the payloads, work, and logs
 directories:
-  payloads: ./payloads
+  payloads: ./payloads.csv
   work: ./work
-  logs: ./logs
+  outputs: ./outputs
 
-# Optional: Export Kute results metrics
+# Optional: Export K6 results metrics
 export:
-  # Prometheus pushgateway
-  prometheus_pushgateway:
-    # Prometheus pushgateway endpoint
-    endpoint: http://localhost:9090
-    # Optional Basic auth for the pushgateway
+  # Prometheus remote write
+  prometheus_remote_write:
+    # Prometheus remote write endpoint
+    endpoint: http://localhost:9090/api/v1/write
+    # Optional: Basic auth for the remote write endpoint
     basic_auth:
       username: expb
       password: expb
     # Optional: Tags to add to the metrics
     tags:
-      - key=value
+      - key1=value1
+      - key2=value2
 
 # Resources for the docker container
 resources:
@@ -38,11 +39,15 @@ resources:
 scenarios:
   # Scenario name
   example:
-    # Required client name
+    # Required: Client name
     client: nethermind
-    # Required snapshot directory for the selected client and network
+    # Required: Snapshot directory for the selected client and network
     snapshot_dir: ./snapthots/nethermind
-    # Optional client image
-    image: nethermindeth/nethermind:latest
-    # Optional Kute filter. See https://github.com/NethermindEth/nethermind/tree/master/tools/Nethermind.Tools.Kute
-    filter: .*=100 # first 100 requests
+    # Required: Delay between payloads in seconds
+    delay: 12.0
+    # Required: Number of payloads to run
+    amount: 100
+    # Optional: Payloads row to start from the payloads file
+    start: 1
+    # Optional: Client image
+    image: ethpandaops/nethermind:performance

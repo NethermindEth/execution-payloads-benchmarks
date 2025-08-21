@@ -1,4 +1,5 @@
 import os
+import json
 import time
 import shutil
 import docker
@@ -24,11 +25,12 @@ from expb.configs.clients import (
     CLIENT_METRICS_PORT,
 )
 from expb.payloads.utils.networking import limit_container_bandwidth
+from expb.payloads.k6_script import get_k6_script_content, build_k6_script_config
 from expb.configs.defaults import (
-    KUTE_DEFAULT_IMAGE,
-    PAYLOADS_DEFAULT_DIR,
+    K6_DEFAULT_IMAGE,
+    PAYLOADS_DEFAULT_FILE,
     WORK_DEFAULT_DIR,
-    LOGS_DEFAULT_DIR,
+    OUTPUTS_DEFAULT_DIR,
     DOCKER_CONTAINER_DEFAULT_CPUS,
     DOCKER_CONTAINER_DEFAULT_MEM_LIMIT,
     DOCKER_CONTAINER_DEFAULT_DOWNLOAD_SPEED,
@@ -43,23 +45,25 @@ class Executor:
         network: Network,
         execution_client: Client,
         snapshot_dir: Path,
-        payloads_dir: Path = PAYLOADS_DEFAULT_DIR,
+        k6_payloads_amount: int,
+        k6_payloads_delay: float,
+        k6_payloads_start: int = 1,
+        k6_image: str = K6_DEFAULT_IMAGE,
+        payloads_file: Path = PAYLOADS_DEFAULT_FILE,
         work_dir: Path = WORK_DEFAULT_DIR,
-        logs_dir: Path = LOGS_DEFAULT_DIR,
+        outputs_dir: Path = OUTPUTS_DEFAULT_DIR,
         docker_container_cpus: int = DOCKER_CONTAINER_DEFAULT_CPUS,
         docker_container_mem_limit: str = DOCKER_CONTAINER_DEFAULT_MEM_LIMIT,
         docker_container_download_speed: str = DOCKER_CONTAINER_DEFAULT_DOWNLOAD_SPEED,
         docker_container_upload_speed: str = DOCKER_CONTAINER_DEFAULT_UPLOAD_SPEED,
         execution_client_image: str | None = None,
-        kute_image: str = KUTE_DEFAULT_IMAGE,
-        kute_filter: str | None = None,
         json_rpc_wait_max_retries: int = 16,
         pull_images: bool = False,
         limit_bandwidth: bool = False,
-        prom_pushgateway_endpoint: str | None = None,
-        prom_pushgateway_auth_username: str | None = None,
-        prom_pushgateway_auth_password: str | None = None,
-        prom_pushgateway_tags: list[str] = [],
+        prom_rw_endpoint: str | None = None,
+        prom_rw_auth_username: str | None = None,
+        prom_rw_auth_password: str | None = None,
+        prom_rw_tags: list[str] = [],
         logger=Logger(),
     ):
         self.execution_client = execution_client
@@ -69,8 +73,10 @@ class Executor:
         self.execution_client_image = (
             execution_client_image or self.execution_client.value.default_image
         )
-        self.kute_image = kute_image
-        self.kute_filter = kute_filter
+        self.k6_image = k6_image
+        self.k6_payloads_amount = k6_payloads_amount
+        self.k6_payloads_delay = k6_payloads_delay
+        self.k6_payloads_start = k6_payloads_start
         self.docker_container_cpus = docker_container_cpus
         self.docker_container_mem_limit = docker_container_mem_limit
         self.docker_container_download_speed = docker_container_download_speed
@@ -81,7 +87,7 @@ class Executor:
         self.docker_client = docker.from_env()
         self.pull_images = pull_images
 
-        self.payloads_dir = payloads_dir
+        self.payloads_file = payloads_file
         self.work_dir = work_dir
         self._overlay_work_dir = self.work_dir / "work"
         self._overlay_upper_dir = self.work_dir / "upper"
@@ -89,13 +95,15 @@ class Executor:
         self._jwt_secret_file = self.work_dir / "jwtsecret.hex"
         self.snapshot_dir = snapshot_dir
         timestamp = time.strftime("%Y%m%d-%H%M%S")
-        self.logs_dir = logs_dir / f"{self.executor_name}-{timestamp}"
-        self.logs_dir.mkdir(parents=True, exist_ok=True)
+        self.outputs_dir = outputs_dir / f"{self.executor_name}-{timestamp}"
+        self.outputs_dir.mkdir(parents=True, exist_ok=True)
+        self._k6_script_file = self.outputs_dir / "k6-script.js"
+        self._k6_config_file = self.outputs_dir / "k6-config.json"
 
-        self.prom_pushgateway_endpoint = prom_pushgateway_endpoint
-        self.prom_pushgateway_auth_username = prom_pushgateway_auth_username
-        self.prom_pushgateway_auth_password = prom_pushgateway_auth_password
-        self.prom_pushgateway_tags = prom_pushgateway_tags
+        self.prom_rw_endpoint = prom_rw_endpoint
+        self.prom_rw_auth_username = prom_rw_auth_username
+        self.prom_rw_auth_password = prom_rw_auth_password
+        self.prom_rw_tags = prom_rw_tags
 
         self.log = logger
 
@@ -170,7 +178,7 @@ class Executor:
     def pull_docker_images(self) -> None:
         self.log.info("updating docker images")
         self.docker_client.images.pull(self.execution_client_image)
-        self.docker_client.images.pull(self.kute_image)
+        self.docker_client.images.pull(self.k6_image)
         self.log.info("docker images updated")
 
     def start_execution_client(
@@ -236,103 +244,133 @@ class Executor:
         )
         if response.ok:
             self.log.info(
-                "client json rpc is available",
+                "Client json rpc is available",
                 latest_block=int(response.json()["result"], 16),
             )
         else:
             self.log.error(
-                "client json rpc is not available", status_code=response.status_code
+                "Client json rpc is not available", status_code=response.status_code
             )
-            raise Exception("client json rpc is not available")
+            raise Exception("Client json rpc is not available")
 
-    def run_kute(
+    def prepare_k6_script(self) -> None:
+        # Create k6 script file
+        self._k6_script_file.touch(mode=0o666, exist_ok=True)
+        # Write k6 script content
+        self._k6_script_file.write_text(get_k6_script_content())
+        # Write k6 script config file
+        k6_config = build_k6_script_config(
+            scenario_name=self.executor_name,
+            client=self.execution_client,
+            iterations=self.k6_payloads_amount,
+        )
+        k6_config_file = self.work_dir / "k6-config.json"
+        k6_config_file.write_text(json.dumps(k6_config))
+        self.log.info(
+            "K6 script prepared",
+            k6_script_file=self._k6_script_file,
+            k6_config_file=k6_config_file,
+        )
+
+    def run_k6(
         self,
         execution_client_container: Container,
         container_network: Network | None = None,
     ) -> Container:
+        # Get execution client ip
         execution_client_container.reload()
         execution_client_ip = execution_client_container.attrs["NetworkSettings"][
             "Networks"
         ][container_network.name]["IPAddress"]
         engine_url = f"http://{execution_client_ip}:{CLIENT_ENGINE_PORT}"
 
-        kute_filter_command = []
-        if self.kute_filter:
-            kute_filter_command.append("-f")
-            kute_filter_command.append(self.kute_filter)
+        # Prepare k6 container volumes
+        k6_container_work_dir = "/expb"
+        k6_container_payloads_file = f"/payloads/{self.payloads_file.name}"
+        k6_container_jwt_secret_file = (
+            f"{k6_container_work_dir}/{self._jwt_secret_file.name}"
+        )
+        k6_container_script_file = (
+            f"{k6_container_work_dir}/{self._k6_script_file.name}"
+        )
+        k6_container_config_file = (
+            f"{k6_container_work_dir}/{self._k6_config_file.name}"
+        )
+        k6_container_volumes = {
+            self.payloads_file.absolute(): {
+                "bind": k6_container_payloads_file,
+                "mode": "rw",
+            },
+            self.outputs_dir.absolute(): {
+                "bind": k6_container_work_dir,
+                "mode": "rw",
+            },
+        }
 
-        kute_export_command = []
-        if self.prom_pushgateway_endpoint:
-            kute_export_command.append("--gateway")
-            kute_export_command.append(self.prom_pushgateway_endpoint)
-            if self.prom_pushgateway_auth_username:
-                kute_export_command.append("--gateway-user")
-                kute_export_command.append(self.prom_pushgateway_auth_username)
-            if self.prom_pushgateway_auth_password:
-                kute_export_command.append("--gateway-pass")
-                kute_export_command.append(self.prom_pushgateway_auth_password)
-
-        kute_tags_command = [
-            "--labels",
-            ",".join(
-                [
-                    f"scenario={self.scenario_name}",
-                    f"instance={self.scenario_name}",
-                    f"client={self.execution_client.value.name.lower()}",
-                    f"network={self.network.value.name.lower()}",
-                ]
-                + self.prom_pushgateway_tags
-            ),
+        # Prepare k6 container command
+        k6_container_command = [
+            "run",
+            k6_container_script_file,
+            "--summary-mode=full",
+            "--summary-export=k6-summary.json",
+            f"--tag=testid={self.scenario_name}",
+            f"--env=EXPB_CONFIG_FILE_PATH={k6_container_config_file}",
+            f"--env=EXPB_PAYLOADS_FILE_PATH={k6_container_payloads_file}",
+            f"--env=EXPB_JWTSECRET_FILE_PATH={k6_container_jwt_secret_file}",
+            f"--env=EXPB_PAYLOADS_DELAY={self.k6_payloads_delay}",
+            f"--env=EXPB_PAYLOADS_START={self.k6_payloads_start}",
+            f"--env=EXPB_ENGINE_ENDPOINT={engine_url}",
         ]
 
-        kute_command = (
-            [
-                "--address",
-                engine_url,
-                "--input",
-                "/payloads",
-                "--secret",
-                CLIENTS_JWT_SECRET_FILE,
-                "--output",
-                "Json",
-            ]
-            + kute_tags_command
-            + kute_filter_command
-            + kute_export_command
-        )
+        # Prepare k6 container environment variables
+        k6_container_environment = {}
 
+        # Prepare k6 outputs
+        if self.prom_rw_endpoint:
+            k6_container_command.append("--out=experimental-prometheus-rw")
+            k6_container_environment["K6_PROMETHEUS_RW_TREND_STATS"] = (
+                "min,max,avg,med,p(90),p(95),p(99)"
+            )
+            k6_container_environment["K6_PROMETHEUS_RW_SERVER_URL"] = (
+                self.prom_rw_endpoint
+            )
+            if self.prom_rw_auth_username:
+                k6_container_environment["K6_PROMETHEUS_RW_SERVER_USERNAME"] = (
+                    self.prom_rw_auth_username
+                )
+            if self.prom_rw_auth_password:
+                k6_container_environment["K6_PROMETHEUS_RW_SERVER_PASSWORD"] = (
+                    self.prom_rw_auth_password
+                )
+            for tag in self.prom_rw_tags:
+                k6_container_command.append(f"--tag={tag}")
+        else:
+            k6_results_jsonl_file = f"{k6_container_work_dir}/k6-results.jsonl"
+            k6_container_command.append(f"--out=jsonl={k6_results_jsonl_file}")
+
+        # Execute k6 container
         container = self.docker_client.containers.run(
-            image=self.kute_image,
-            name=f"{self.executor_name}-kute",
-            volumes={
-                self.payloads_dir.absolute(): {
-                    "bind": "/payloads",
-                    "mode": "rw",
-                },
-                self._jwt_secret_file.absolute(): {
-                    "bind": CLIENTS_JWT_SECRET_FILE,
-                    "mode": "rw",
-                },
-            },
-            command=kute_command,
+            image=self.k6_image,
+            name=f"{self.executor_name}-k6",
+            volumes=k6_container_volumes,
+            command=k6_container_command,
             network=container_network.name if container_network else None,
             detach=False,
             user=os.getuid(),
             group_add=[os.getgid()],
+            environment=k6_container_environment,
         )
         return container
 
     def cleanup_scenario(self) -> None:
-        self.log.info("cleaning up scenario", scenario=self.executor_name)
-        # Clean kute container
+        self.log.info("Cleaning up scenario", scenario=self.executor_name)
+        # Clean k6 container
         try:
-            kute_container = self.docker_client.containers.get(
-                f"{self.executor_name}-kute"
-            )
-            kute_container.stop()
-            logs_file = self.logs_dir / "kute.log"
-            self.log.info("saving kute logs", logs_file=logs_file)
-            logs_stream = kute_container.logs(
+            k6_container = self.docker_client.containers.get(f"{self.executor_name}-k6")
+            k6_container.stop()
+            logs_file = self.outputs_dir / "k6.log"
+            self.log.info("Saving k6 logs", logs_file=logs_file)
+            logs_stream = k6_container.logs(
                 stream=True,
                 follow=False,
                 stdout=True,
@@ -342,7 +380,7 @@ class Executor:
                 for line in logs_stream:
                     f.write(line)
             logs_stream.close()
-            kute_container.remove()
+            k6_container.remove()
         except docker.errors.NotFound:
             pass
 
@@ -353,9 +391,9 @@ class Executor:
             )
             execution_client_container.stop()
             logs_file = (
-                self.logs_dir / f"{self.execution_client.value.name.lower()}.log"
+                self.outputs_dir / f"{self.execution_client.value.name.lower()}.log"
             )
-            self.log.info("saving execution client logs", logs_file=logs_file)
+            self.log.info("Saving execution client logs", logs_file=logs_file)
             logs_stream = execution_client_container.logs(
                 stream=True,
                 follow=False,
@@ -381,12 +419,12 @@ class Executor:
 
         # Clean overlay directories
         self.remove_directories()
-        self.log.info("cleanup completed")
+        self.log.info("Cleanup completed")
 
     def execute_scenario(self) -> None:
         try:
             self.log.info(
-                "preparing scenario",
+                "Preparing scenario",
                 scenario=self.executor_name,
                 execution_client=self.execution_client.value.name.lower(),
             )
@@ -395,14 +433,14 @@ class Executor:
             if self.pull_images:
                 self.pull_docker_images()
 
-            self.log.info("creating docker network")
+            self.log.info("Creating docker network")
             containers_network = self.docker_client.networks.create(
                 name=f"{self.executor_name}-network",
                 driver="bridge",
             )
 
             self.log.info(
-                "starting execution client",
+                "Starting execution client",
                 execution_client=self.execution_client.value.name.lower(),
                 execution_client_image=self.execution_client_image,
                 docker_container_cpus=self.docker_container_cpus,
@@ -414,7 +452,7 @@ class Executor:
 
             if self.limit_bandwidth:
                 self.log.info(
-                    "limiting container bandwidth",
+                    "Limiting container bandwidth",
                     execution_client=self.execution_client.value.name.lower(),
                     download_speed=self.docker_container_download_speed,
                     upload_speed=self.docker_container_upload_speed,
@@ -426,31 +464,34 @@ class Executor:
                         self.docker_container_upload_speed,
                     )
                 except Exception as e:
-                    self.log.error("failed to limit container bandwidth", error=e)
+                    self.log.error("Failed to limit container bandwidth", error=e)
                     raise e
 
-            self.log.info("waiting for client json rpc to be available")
+            self.log.info("Waiting for client json rpc to be available")
             try:
                 self.wait_for_client_json_rpc()
             except Exception as e:
-                self.log.error("failed to wait for client json rpc", error=e)
+                self.log.error("Failed to wait for client json rpc", error=e)
                 raise e
 
+            self.log.info("Preparing K6 script")
+            self.prepare_k6_script()
+
             self.log.info(
-                "running kute",
-                kute_docker_image=self.kute_image,
+                "Running K6",
+                k6_docker_image=self.k6_image,
             )
-            _ = self.run_kute(
+            _ = self.run_k6(
                 execution_client_container=execution_client_container,
                 container_network=containers_network,
             )
 
             self.log.info(
-                "payloads execution completed",
+                "Payloads execution completed",
                 execution_client=self.execution_client.value.name.lower(),
             )
         except Exception as e:
-            self.log.error("failed to execute scenario", error=e)
+            self.log.error("Failed to execute scenario", error=e)
             raise e
         finally:
             self.cleanup_scenario()

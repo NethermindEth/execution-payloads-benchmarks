@@ -1,8 +1,8 @@
 from expb.payloads.generator import Generator
-from expb.payloads.executor import Executor, KUTE_DEFAULT_IMAGE
+from expb.payloads.executor import Executor, K6_DEFAULT_IMAGE
 
 __all__ = [
     "Generator",
     "Executor",
-    "KUTE_DEFAULT_IMAGE",
+    "K6_DEFAULT_IMAGE",
 ]

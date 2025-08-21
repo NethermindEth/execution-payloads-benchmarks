@@ -18,7 +18,7 @@ def execute_scenarios(
     ] = "INFO",
 ) -> None:
     """
-    Execute payloads for multiple execution clients.
+    Execute payloads for multiple execution clients using Grafana K6.
     """
     logger = setup_logging(log_level)
 

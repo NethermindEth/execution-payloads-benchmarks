@@ -3,7 +3,7 @@
 **Usage**:
 
 ```console
-$ expb [OPTIONS] COMMAND [ARGS]...
+expb [OPTIONS] COMMAND [ARGS]...
 ```
 
 **Options**:
@@ -25,7 +25,7 @@ Generate execution payloads for a given block range.
 **Usage**:
 
 ```console
-$ expb generate-payloads [OPTIONS]
+expb generate-payloads [OPTIONS]
 ```
 
 **Options**:
@@ -42,12 +42,12 @@ $ expb generate-payloads [OPTIONS]
 
 ## `expb execute-scenario`
 
-Execute payloads for a given execution client using Kute.
+Execute payloads for a given execution client using Grafana K6.
 
 **Usage**:
 
 ```console
-$ expb execute-scenario [OPTIONS]
+expb execute-scenario [OPTIONS]
 ```
 
 **Options**:
@@ -59,12 +59,12 @@ $ expb execute-scenario [OPTIONS]
 
 ## `expb execute-scenarios`
 
-Execute payloads for multiple execution clients.
+Execute payloads for multiple execution clients using Grafana K6.
 
 **Usage**:
 
 ```console
-$ expb execute-scenarios [OPTIONS]
+expb execute-scenarios [OPTIONS]
 ```
 
 **Options**:

@@ -7,10 +7,10 @@ from expb.configs.clients import Client
 from expb.configs.networks import Network
 from expb.logging import Logger
 from expb.configs.defaults import (
-    KUTE_DEFAULT_IMAGE,
-    PAYLOADS_DEFAULT_DIR,
+    K6_DEFAULT_IMAGE,
+    PAYLOADS_DEFAULT_FILE,
     WORK_DEFAULT_DIR,
-    LOGS_DEFAULT_DIR,
+    OUTPUTS_DEFAULT_DIR,
     DOCKER_CONTAINER_DEFAULT_CPUS,
     DOCKER_CONTAINER_DEFAULT_MEM_LIMIT,
     DOCKER_CONTAINER_DEFAULT_DOWNLOAD_SPEED,
@@ -28,11 +28,17 @@ class Scenario:
         client_name: str = config.get("client")
         self.client: Client = Client[client_name.upper()]
         self.client_image: str | None = config.get("image", None)
-        self.kute_filter: str | None = config.get("kute_filter", None)
+        self.payloads_delay: float | None = config.get("delay", None)
+        if self.payloads_delay is None:
+            raise ValueError(f"Delay between payloads is required for scenario {name}")
+        self.payloads_amount: int | None = config.get("amount", None)
+        if self.payloads_amount is None:
+            raise ValueError(f"Amount of payloads is required for scenario {name}")
         snapshot_dir: str | None = config.get("snapshot_dir", None)
         if snapshot_dir is None:
             raise ValueError(f"Snapshot directory is required for scenario {name}")
         self.snapshot_dir = Path(snapshot_dir)
+        self.payloads_start: int | None = config.get("start", 1)
 
 
 class Scenarios:
@@ -49,51 +55,53 @@ class Scenarios:
         pull_images: bool = config.get("pull_images", False)
         self.pull_images = pull_images
 
-        kute_image: str = config.get("kute_image", KUTE_DEFAULT_IMAGE)
-        self.kute_image = kute_image
+        k6_image: str = config.get("k6_image", K6_DEFAULT_IMAGE)
+        self.k6_image = k6_image
 
         directories: dict[str, str] = config.get("directories", {})
 
-        payloads_dir: str = directories.get("payloads", PAYLOADS_DEFAULT_DIR)
-        self.payloads_dir = Path(payloads_dir)
+        payloads_file: str = directories.get("payloads", PAYLOADS_DEFAULT_FILE)
+        self.payloads_file = Path(payloads_file)
 
         work_dir: str = directories.get("work", WORK_DEFAULT_DIR)
         self.work_dir = Path(work_dir)
 
-        logs_dir: str = directories.get("logs", LOGS_DEFAULT_DIR)
-        self.logs_dir = Path(logs_dir)
+        outputs_dir: str = directories.get("outputs", OUTPUTS_DEFAULT_DIR)
+        self.outputs_dir = Path(outputs_dir)
 
+        # Parse export configurations
+        # TODO: Add support for other exporters
         export: dict[str] = config.get("export", {})
         if export:
-            prometheus_pushgateway: dict[str] | None = export.get(
-                "prometheus_pushgateway", None
+            # Parse prometheus remote write configurations
+            prometheus_remote_write: dict[str] | None = export.get(
+                "prometheus_remote_write", None
             )
-            if isinstance(prometheus_pushgateway, dict) and prometheus_pushgateway:
-                self.prom_pushgateway_endpoint = prometheus_pushgateway.get(
-                    "endpoint", None
+            if isinstance(prometheus_remote_write, dict) and prometheus_remote_write:
+                # Parse prometheus remote write endpoint
+                self.prom_rw_endpoint = prometheus_remote_write.get("endpoint", None)
+                # Parse prometheus remote write basic auth
+                prom_rw_basic_auth: dict[str, str] | None = prometheus_remote_write.get(
+                    "basic_auth", None
                 )
-                prom_pushgateway_basic_auth: dict[str, str] | None = (
-                    prometheus_pushgateway.get("basic_auth", None)
-                )
-                if prom_pushgateway_basic_auth:
-                    self.prom_pushgateway_auth_username = (
-                        prom_pushgateway_basic_auth.get("username", None)
+                # Parse prometheus remote write basic auth
+                if prom_rw_basic_auth:
+                    self.prom_rw_auth_username = prom_rw_basic_auth.get(
+                        "username", None
                     )
-                    self.prom_pushgateway_auth_password = (
-                        prom_pushgateway_basic_auth.get("password", None)
+                    self.prom_rw_auth_password = prom_rw_basic_auth.get(
+                        "password", None
                     )
                 else:
-                    self.prom_pushgateway_auth_username = None
-                    self.prom_pushgateway_auth_password = None
+                    self.prom_rw_auth_username = None
+                    self.prom_rw_auth_password = None
 
-                self.prom_pushgateway_tags: list[str] = prometheus_pushgateway.get(
-                    "tags", []
-                )
+                self.prom_rw_tags: list[str] = prometheus_remote_write.get("tags", [])
         else:
-            self.prom_pushgateway_endpoint = None
-            self.prom_pushgateway_auth_username = None
-            self.prom_pushgateway_auth_password = None
-            self.prom_pushgateway_tags = []
+            self.prom_rw_endpoint = None
+            self.prom_rw_auth_username = None
+            self.prom_rw_auth_password = None
+            self.prom_rw_tags = []
 
         resources: dict[str, str] = config.get("resources", {})
 
@@ -137,21 +145,23 @@ class Scenarios:
             network=self.network,
             execution_client=scenario.client,
             execution_client_image=scenario.client_image,
-            payloads_dir=self.payloads_dir,
+            payloads_file=self.payloads_file,
             work_dir=self.work_dir,
             snapshot_dir=scenario.snapshot_dir,
             docker_container_cpus=self.docker_container_cpus,
             docker_container_download_speed=self.docker_container_download_speed,
             docker_container_upload_speed=self.docker_container_upload_speed,
             docker_container_mem_limit=self.docker_container_mem_limit,
-            logs_dir=self.logs_dir,
+            outputs_dir=self.outputs_dir,
             pull_images=self.pull_images,
-            kute_image=self.kute_image,
-            kute_filter=scenario.kute_filter,
-            prom_pushgateway_endpoint=self.prom_pushgateway_endpoint,
-            prom_pushgateway_auth_username=self.prom_pushgateway_auth_username,
-            prom_pushgateway_auth_password=self.prom_pushgateway_auth_password,
-            prom_pushgateway_tags=self.prom_pushgateway_tags,
+            k6_image=self.k6_image,
+            k6_payloads_amount=scenario.payloads_amount,
+            k6_payloads_delay=scenario.payloads_delay,
+            k6_payloads_start=scenario.payloads_start,
+            prom_rw_endpoint=self.prom_rw_endpoint,
+            prom_rw_auth_username=self.prom_rw_auth_username,
+            prom_rw_auth_password=self.prom_rw_auth_password,
+            prom_rw_tags=self.prom_rw_tags,
             logger=logger,
         )
         return executor

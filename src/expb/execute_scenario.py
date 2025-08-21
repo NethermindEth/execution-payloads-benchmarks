@@ -18,7 +18,7 @@ def execute_scenario(
     ] = "INFO",
 ) -> None:
     """
-    Execute payloads for a given execution client using Kute.
+    Execute payloads for a given execution client using Grafana K6.
     """
     logger = setup_logging(log_level)
 
@@ -36,7 +36,7 @@ def execute_scenario(
     executor = config.get_scenario_executor(scenario, logger=logger)
 
     logger.info(
-        "executing scenario",
+        "Executing scenario",
         client=scenario.client.value.name.lower(),
         image=scenario.client_image,
         snapshot=scenario.snapshot_dir,
