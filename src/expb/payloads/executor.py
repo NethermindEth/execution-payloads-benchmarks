@@ -346,11 +346,11 @@ class Executor:
                 self.prom_rw_endpoint
             )
             if self.prom_rw_auth_username:
-                k6_container_environment["K6_PROMETHEUS_RW_SERVER_USERNAME"] = (
+                k6_container_environment["K6_PROMETHEUS_RW_USERNAME"] = (
                     self.prom_rw_auth_username
                 )
             if self.prom_rw_auth_password:
-                k6_container_environment["K6_PROMETHEUS_RW_SERVER_PASSWORD"] = (
+                k6_container_environment["K6_PROMETHEUS_RW_PASSWORD"] = (
                     self.prom_rw_auth_password
                 )
             for tag in self.prom_rw_tags:
