@@ -264,12 +264,11 @@ class Executor:
             client=self.execution_client,
             iterations=self.k6_payloads_amount,
         )
-        k6_config_file = self.work_dir / "k6-config.json"
-        k6_config_file.write_text(json.dumps(k6_config))
+        self._k6_config_file.write_text(json.dumps(k6_config))
         self.log.info(
             "K6 script prepared",
             k6_script_file=self._k6_script_file,
-            k6_config_file=k6_config_file,
+            k6_config_file=self._k6_config_file,
         )
 
     def run_k6(
@@ -287,9 +286,7 @@ class Executor:
         # Prepare k6 container volumes
         k6_container_work_dir = "/expb"
         k6_container_payloads_file = f"/payloads/{self.payloads_file.name}"
-        k6_container_jwt_secret_file = (
-            f"{k6_container_work_dir}/{self._jwt_secret_file.name}"
-        )
+        k6_container_jwt_secret_file = f"/{self._jwt_secret_file.name}"
         k6_container_script_file = (
             f"{k6_container_work_dir}/{self._k6_script_file.name}"
         )
@@ -299,6 +296,10 @@ class Executor:
         k6_container_volumes = {
             self.payloads_file.absolute(): {
                 "bind": k6_container_payloads_file,
+                "mode": "rw",
+            },
+            self._jwt_secret_file.absolute(): {
+                "bind": k6_container_jwt_secret_file,
                 "mode": "rw",
             },
             self.outputs_dir.absolute(): {
