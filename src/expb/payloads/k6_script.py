@@ -133,7 +133,7 @@ async function getJwtToken() {
 
 export async function setup() {
   // Skip the first payloads and fcus lines
-  for (let i = 0; i < startLine; i++) {
+  for (let i = 1; i < startLine; i++) {
     await readFileLine(payloadsFile);
     await readFileLine(fcusFile);
   }
