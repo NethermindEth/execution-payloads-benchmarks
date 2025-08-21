@@ -9,6 +9,7 @@ from expb.logging import Logger
 from expb.configs.defaults import (
     K6_DEFAULT_IMAGE,
     PAYLOADS_DEFAULT_FILE,
+    FCUS_DEFAULT_FILE,
     WORK_DEFAULT_DIR,
     OUTPUTS_DEFAULT_DIR,
     DOCKER_CONTAINER_DEFAULT_CPUS,
@@ -62,6 +63,9 @@ class Scenarios:
 
         payloads_file: str = paths.get("payloads", PAYLOADS_DEFAULT_FILE)
         self.payloads_file = Path(payloads_file)
+
+        fcus_file: str = paths.get("fcus", FCUS_DEFAULT_FILE)
+        self.fcus_file = Path(fcus_file)
 
         work_dir: str = paths.get("work", WORK_DEFAULT_DIR)
         self.work_dir = Path(work_dir)
@@ -146,6 +150,7 @@ class Scenarios:
             execution_client=scenario.client,
             execution_client_image=scenario.client_image,
             payloads_file=self.payloads_file,
+            fcus_file=self.fcus_file,
             work_dir=self.work_dir,
             snapshot_dir=scenario.snapshot_dir,
             docker_container_cpus=self.docker_container_cpus,

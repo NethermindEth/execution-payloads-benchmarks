@@ -6,7 +6,9 @@ K6_DEFAULT_IMAGE = "grafana/k6:1.1.0"
 
 # Directories
 ## Payloads
-PAYLOADS_DEFAULT_FILE = Path("payloads.csv")
+PAYLOADS_DEFAULT_FILE = Path("payloads.jsonl")
+## Forkchoice Updated
+FCUS_DEFAULT_FILE = Path("fcus.jsonl")
 ## Work
 WORK_DEFAULT_DIR = Path("work")
 ## Logs

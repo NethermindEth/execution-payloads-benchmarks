@@ -9,7 +9,8 @@ k6_image: grafana/k6:1.1.0
 
 # Paths for the payloads csv file, work directory, and outputs directory
 paths:
-  payloads: ./payloads.csv
+  payloads: ./payloads.jsonl # Each line is a payload request body
+  fcus: ./fcus.jsonl # Each line is a forkchoice update request body
   work: ./work
   outputs: ./outputs
 

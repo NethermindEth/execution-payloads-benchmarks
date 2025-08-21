@@ -29,6 +29,7 @@ from expb.payloads.k6_script import get_k6_script_content, build_k6_script_confi
 from expb.configs.defaults import (
     K6_DEFAULT_IMAGE,
     PAYLOADS_DEFAULT_FILE,
+    FCUS_DEFAULT_FILE,
     WORK_DEFAULT_DIR,
     OUTPUTS_DEFAULT_DIR,
     DOCKER_CONTAINER_DEFAULT_CPUS,
@@ -50,6 +51,7 @@ class Executor:
         k6_payloads_start: int = 1,
         k6_image: str = K6_DEFAULT_IMAGE,
         payloads_file: Path = PAYLOADS_DEFAULT_FILE,
+        fcus_file: Path = FCUS_DEFAULT_FILE,
         work_dir: Path = WORK_DEFAULT_DIR,
         outputs_dir: Path = OUTPUTS_DEFAULT_DIR,
         docker_container_cpus: int = DOCKER_CONTAINER_DEFAULT_CPUS,
@@ -88,6 +90,7 @@ class Executor:
         self.pull_images = pull_images
 
         self.payloads_file = payloads_file
+        self.fcus_file = fcus_file
         self.work_dir = work_dir
         self._overlay_work_dir = self.work_dir / "work"
         self._overlay_upper_dir = self.work_dir / "upper"
@@ -286,6 +289,7 @@ class Executor:
         # Prepare k6 container volumes
         k6_container_work_dir = "/expb"
         k6_container_payloads_file = f"/payloads/{self.payloads_file.name}"
+        k6_container_fcus_file = f"/payloads/{self.fcus_file.name}"
         k6_container_jwt_secret_file = f"/{self._jwt_secret_file.name}"
         k6_container_script_file = (
             f"{k6_container_work_dir}/{self._k6_script_file.name}"
@@ -293,9 +297,14 @@ class Executor:
         k6_container_config_file = (
             f"{k6_container_work_dir}/{self._k6_config_file.name}"
         )
+        k6_container_summary_file = f"{k6_container_work_dir}/k6-summary.json"
         k6_container_volumes = {
             self.payloads_file.absolute(): {
                 "bind": k6_container_payloads_file,
+                "mode": "rw",
+            },
+            self.fcus_file.absolute(): {
+                "bind": k6_container_fcus_file,
                 "mode": "rw",
             },
             self._jwt_secret_file.absolute(): {
@@ -313,10 +322,11 @@ class Executor:
             "run",
             k6_container_script_file,
             "--summary-mode=full",
-            "--summary-export=k6-summary.json",
+            f"--summary-export={k6_container_summary_file}",
             f"--tag=testid={self.scenario_name}",
             f"--env=EXPB_CONFIG_FILE_PATH={k6_container_config_file}",
             f"--env=EXPB_PAYLOADS_FILE_PATH={k6_container_payloads_file}",
+            f"--env=EXPB_FCUS_FILE_PATH={k6_container_fcus_file}",
             f"--env=EXPB_JWTSECRET_FILE_PATH={k6_container_jwt_secret_file}",
             f"--env=EXPB_PAYLOADS_DELAY={self.k6_payloads_delay}",
             f"--env=EXPB_PAYLOADS_START={self.k6_payloads_start}",
@@ -347,7 +357,7 @@ class Executor:
                 k6_container_command.append(f"--tag={tag}")
         else:
             k6_results_jsonl_file = f"{k6_container_work_dir}/k6-results.jsonl"
-            k6_container_command.append(f"--out=jsonl={k6_results_jsonl_file}")
+            k6_container_command.append(f"--out=json={k6_results_jsonl_file}")
 
         # Execute k6 container
         container = self.docker_client.containers.run(
