@@ -68,7 +68,7 @@ async function readFileLine(file) {
     }
     for (let i = 0; i < bytesRead; i++) {
       if (buffer[i] === 10) {
-        file.seek( i - bytesRead + 1, SeekMode.Current);
+        file.seek( i - bytesRead + 1, fs.SeekMode.Current);
         done = true;
         break;
       } if (buffer[i] === 13) {
