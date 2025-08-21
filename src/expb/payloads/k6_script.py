@@ -50,16 +50,40 @@ import csv from 'k6/experimental/csv';
 import encoding from 'k6/encoding';
 import crypto from 'k6/crypto';
 
-// Payloads file
+// Payloads and Fcus files
 const payloadsFilePath = __ENV.EXPB_PAYLOADS_FILE_PATH;
+const fcusFilePath = __ENV.EXPB_FCUS_FILE_PATH;
 const payloadsFile = await fs.open(payloadsFilePath);
-const payloadsStart = parseInt(__ENV.EXPB_PAYLOADS_START);
-// Using csv parser which is currently the only K6 module that supports reading a file line by line
-// Review https://grafana.com/docs/k6/latest/javascript-api/k6-experimental/ in the future for other options
-const payloadsParser = new csv.Parser(payloadsFile, {
-  skipFirstLine: false,
-  fromLine: payloadsStart,
-});
+const fcusFile = await fs.open(fcusFilePath);
+const startLine = parseInt(__ENV.EXPB_PAYLOADS_START);
+
+const buffer = new Uint8Array(2 ** 20); // 1MB buffer
+async function readFileLine(file) {
+  let line = "";
+  let done = false;
+  while(true) {
+    let bytesRead = await file.read(buffer);
+    if (bytesRead === 0 || bytesRead === null) {
+      break;
+    }
+    for (let i = 0; i < bytesRead; i++) {
+      if (buffer[i] === 10) {
+        file.seek( i - bytesRead + 1, SeekMode.Current);
+        done = true;
+        break;
+      } if (buffer[i] === 13) {
+        continue;
+      } else {
+        line += String.fromCharCode(buffer[i]);
+      }
+    }
+    if (done) {
+      break;
+    }
+  }
+  return line;
+}
+
 
 // JWT secret file
 function hex2ArrayBuffer(hex) {
@@ -107,64 +131,72 @@ async function getJwtToken() {
   return [jwtHeaderString, jwtPayloadString, signature].join(".");
 }
 
-export default async function () {
-// Get the next payload
-const {done, value} = await payloadsParser.next();
-// If no more payloads, throw an error to finish the test
-if (done) {
-    throw new Error("No more payloads found");
+export async function setup() {
+  // Skip the first payloads and fcus lines
+  for (let i = 0; i < startLine; i++) {
+    await readFileLine(payloadsFile);
+    await readFileLine(fcusFile);
+  }
 }
 
-// Parse payload and fcu requests
-const payload = JSON.parse(value[1]);
-const fcu = JSON.parse(value[2]);
+export default async function () {
+  // Get the next payload
+  const payloadRaw = await readFileLine(payloadsFile);
+  const fcuRaw = await readFileLine(fcusFile);
+  if (payloadRaw === "" || fcuRaw === "") {
+    throw new Error("No more payloads or fcus found");
+  }
+
+  // Parse payload and fcu requests
+  const payload = JSON.parse(payloadRaw);
+  const fcu = JSON.parse(fcuRaw);
   try {
     // Send newPayload request
     const payloadToken = await getJwtToken();
     group("engine_newPayload", function() {
-    const tags = {
-        "jrpc_method": payload["method"],
-    }
-    const headers = {
-        "Authorization": `Bearer ${payloadToken}`,
-        "Content-Type": "application/json",
-    };
-    const response = http.post(engineEndpoint, JSON.stringify(payload), {
-        headers: headers,
-        tags: tags,
-    });
-    // Checks
-    check(response, {
-        'status_200': (r) => r.status === 200,
-        'has_result': (r) => {
-        const data = r.json();
-        return data !== undefined && data.result !== undefined && data.error === undefined;
-        },
-    }, tags);
+      const headers = {
+          "Authorization": `Bearer ${payloadToken}`,
+          "Content-Type": "application/json",
+      };
+      const tags = {
+        "jrpc_method": payload.method,
+      }
+      const response = http.post(engineEndpoint, payloadRaw, {
+          headers: headers,
+          tags: tags,
+      });
+      // Checks
+      check(response, {
+          'status_200': (r) => r.status === 200,
+          'has_result': (r) => {
+          const data = r.json();
+          return data !== undefined && data.result !== undefined && data.error === undefined;
+          },
+      }, tags);
     });
 
     // Send forkchoiceUpdated request
     const fcuToken = await getJwtToken();
     group("engine_forkchoiceUpdated", function() {
-    const tags = {
-        "jrpc_method": fcu["method"],
-    }
-    const headers = {
+      const headers = {
         "Authorization": `Bearer ${fcuToken}`,
         "Content-Type": "application/json",
-    };
-    const response = http.post(engineEndpoint, JSON.stringify(fcu), {
+      };
+      const tags = {
+        "jrpc_method": fcu.method,
+      }
+      const response = http.post(engineEndpoint, fcuRaw, {
         headers: headers,
         tags: tags,
-    });
-    // Checks
-    check(response, {
+      });
+      // Checks
+      check(response, {
         'status_200': (r) => r.status === 200,
         'has_result': (r) => {
         const data = r.json();
         return data !== undefined && data.result !== undefined && data.error === undefined;
         },
-    }, tags);
+      }, tags);
     });
   } catch (e) {
     console.error(e);
