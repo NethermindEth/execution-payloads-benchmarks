@@ -58,15 +58,15 @@ class Scenarios:
         k6_image: str = config.get("k6_image", K6_DEFAULT_IMAGE)
         self.k6_image = k6_image
 
-        directories: dict[str, str] = config.get("directories", {})
+        paths: dict[str, str] = config.get("paths", {})
 
-        payloads_file: str = directories.get("payloads", PAYLOADS_DEFAULT_FILE)
+        payloads_file: str = paths.get("payloads", PAYLOADS_DEFAULT_FILE)
         self.payloads_file = Path(payloads_file)
 
-        work_dir: str = directories.get("work", WORK_DEFAULT_DIR)
+        work_dir: str = paths.get("work", WORK_DEFAULT_DIR)
         self.work_dir = Path(work_dir)
 
-        outputs_dir: str = directories.get("outputs", OUTPUTS_DEFAULT_DIR)
+        outputs_dir: str = paths.get("outputs", OUTPUTS_DEFAULT_DIR)
         self.outputs_dir = Path(outputs_dir)
 
         # Parse export configurations

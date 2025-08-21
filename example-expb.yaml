@@ -7,8 +7,8 @@ pull_images: true
 # Grafana K6 image to use
 k6_image: grafana/k6:1.1.0
 
-# Directories for the payloads, work, and logs
-directories:
+# Paths for the payloads csv file, work directory, and outputs directory
+paths:
   payloads: ./payloads.csv
   work: ./work
   outputs: ./outputs
