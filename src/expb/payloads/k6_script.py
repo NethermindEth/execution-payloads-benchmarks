@@ -46,7 +46,6 @@ def get_k6_script_content() -> str:
 import http from 'k6/http';
 import { group, check, sleep } from 'k6';
 import fs from 'k6/experimental/fs';
-import csv from 'k6/experimental/csv';
 import encoding from 'k6/encoding';
 import crypto from 'k6/crypto';
 
