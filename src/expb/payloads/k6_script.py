@@ -98,9 +98,6 @@ const jwtsecretFilePath = __ENV.EXPB_JWTSECRET_FILE_PATH;
 const jwtsecret = open(jwtsecretFilePath).trim();
 const jwtsecretBytes = hex2ArrayBuffer(jwtsecret);
 
-// Delay between payloads
-const payloadsDelay = parseFloat(__ENV.EXPB_PAYLOADS_DELAY);
-
 // Engine endpoint
 const engineEndpoint = __ENV.EXPB_ENGINE_ENDPOINT;
 
@@ -200,6 +197,5 @@ export default async function () {
   } catch (e) {
     console.error(e);
   }
-  sleep(payloadsDelay); // Wait for the next payload
 }
 """
