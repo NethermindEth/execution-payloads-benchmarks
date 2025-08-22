@@ -66,8 +66,9 @@ const payloadsFilePath = __ENV.EXPB_PAYLOADS_FILE_PATH;
 const fcusFilePath     = __ENV.EXPB_FCUS_FILE_PATH;
 const startLine        = parseInt(__ENV.EXPB_PAYLOADS_START || '1', 10);
 const payloadsDelay    = parseFloat(__ENV.EXPB_PAYLOADS_DELAY || '0');
-const RATE_MODE        = __ENV.EXPB_RATE_MODE === '1';              // set in your scenario for arrival-rate
+const RATE_MODE        = __ENV.EXPB_RATE_MODE === '1';             // set when using arrival-rate
 const ABORT_ON_EOF     = (__ENV.EXPB_ABORT_ON_EOF || '1') === '1';
+const ABORT_ON_PARSE   = (__ENV.EXPB_ABORT_ON_PARSE_FAIL || '1') === '1';
 const engineEndpoint   = __ENV.EXPB_ENGINE_ENDPOINT;
 
 // Load k6 options JSON
@@ -86,7 +87,7 @@ const fcuLines = new SharedArray('expb_fcu_lines', () =>
 const startIdx0  = Math.max(0, startLine - 1);
 const totalPairs = Math.max(0, Math.min(payloadLines.length, fcuLines.length) - startIdx0);
 
-// --- JWT helpers ---
+// --- Helpers ---
 function hex2ArrayBuffer(hex) {
   const buf = new ArrayBuffer(hex.length / 2);
   const view = new Uint8Array(buf);
@@ -104,28 +105,54 @@ async function getJwtToken() {
   return header + '.' + payload + '.' + h.digest('base64rawurl');
 }
 
+function safeGetLine(arr, idx) {
+  const v = (idx >= 0 && idx < arr.length) ? arr[idx] : undefined;
+  if (typeof v !== 'string') return '';
+  // Trim BOM and whitespace
+  return v.replace(/^\\uFEFF/, '').trim();
+}
+
+function parseJsonStrict(raw, label, idx) {
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    console.error(`JSON parse failed for ${label} at idx=${idx}`, { snippet: String(raw).slice(0, 160) });
+    if (ABORT_ON_PARSE) {
+      exec.test.abort(`Parse error in ${label} at idx=${idx}`);
+    }
+    return null;
+  }
+}
+
 export async function setup() {
   // nothing; data preloaded
 }
 
 export default async function () {
-  // Unique global index across all VUs/iterations
-  const idx = startIdx0 + exec.instance.iterationInTest;
+  // Global iteration index across all VUs/scenario runs
+  const idx = startIdx0 + exec.scenario.iterationInTest;
 
-  // Out of data? Abort (non-zero exit) or no-op, depending on env.
+  // Out of data? abort or noop
   if (idx >= startIdx0 + totalPairs) {
     if (ABORT_ON_EOF) exec.test.abort('No more payloads or fcus found');
     return;
   }
 
-  const payloadRaw = payloadLines[idx];
-  const fcuRaw     = fcuLines[idx];
+  const payloadRaw = safeGetLine(payloadLines, idx);
+  const fcuRaw     = safeGetLine(fcuLines, idx);
 
-  const payload = JSON.parse(payloadRaw);
-  const fcu     = JSON.parse(fcuRaw);
+  if (!payloadRaw || !fcuRaw) {
+    console.error('Empty/undefined line encountered', { idx, payloadOk: !!payloadRaw, fcuOk: !!fcuRaw });
+    if (ABORT_ON_EOF) exec.test.abort('Dataset contains empty lines or ended prematurely');
+    return;
+  }
+
+  const payload = parseJsonStrict(payloadRaw, 'payload', idx);
+  const fcu     = parseJsonStrict(fcuRaw, 'fcu', idx);
+  if (!payload || !fcu) return; // already logged/aborted
 
   try {
-    // --- newPayload ---
+    // --- engine_newPayload ---
     const tok1 = await getJwtToken();
     group('engine_newPayload', function () {
       const tags = { jrpc_method: payload.method, kind: 'newPayload' };
@@ -152,7 +179,7 @@ export default async function () {
       }, tags);
     });
 
-    // --- forkchoiceUpdated ---
+    // --- engine_forkchoiceUpdated ---
     const tok2 = await getJwtToken();
     group('engine_forkchoiceUpdated', function () {
       const tags = { jrpc_method: fcu.method, kind: 'forkchoiceUpdated' };
@@ -184,3 +211,4 @@ export default async function () {
   }
 }
 """
+
