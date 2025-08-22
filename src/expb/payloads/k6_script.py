@@ -56,167 +56,131 @@ def get_k6_script_content() -> str:
     return """
 import http from 'k6/http';
 import { group, check, sleep } from 'k6';
-import fs from 'k6/experimental/fs';
+import { SharedArray } from 'k6/data';
+import exec from 'k6/execution';
 import encoding from 'k6/encoding';
 import crypto from 'k6/crypto';
 
-// Payloads and Fcus files
+// --- Env / config ---
 const payloadsFilePath = __ENV.EXPB_PAYLOADS_FILE_PATH;
-const fcusFilePath = __ENV.EXPB_FCUS_FILE_PATH;
-const payloadsFile = await fs.open(payloadsFilePath);
-const fcusFile = await fs.open(fcusFilePath);
-const startLine = parseInt(__ENV.EXPB_PAYLOADS_START);
+const fcusFilePath     = __ENV.EXPB_FCUS_FILE_PATH;
+const startLine        = parseInt(__ENV.EXPB_PAYLOADS_START || '1', 10);
+const payloadsDelay    = parseFloat(__ENV.EXPB_PAYLOADS_DELAY || '0');
+const RATE_MODE        = __ENV.EXPB_RATE_MODE === '1';              // set in your scenario for arrival-rate
+const ABORT_ON_EOF     = (__ENV.EXPB_ABORT_ON_EOF || '1') === '1';
+const engineEndpoint   = __ENV.EXPB_ENGINE_ENDPOINT;
 
-const buffer = new Uint8Array(2 ** 20); // 1MB buffer
-async function readFileLine(file) {
-  let line = "";
-  let done = false;
-  while(true) {
-    let bytesRead = await file.read(buffer);
-    if (bytesRead === 0 || bytesRead === null) {
-      break;
-    }
-    for (let i = 0; i < bytesRead; i++) {
-      if (buffer[i] === 10) {
-        file.seek( i - bytesRead + 1, fs.SeekMode.Current);
-        done = true;
-        break;
-      } if (buffer[i] === 13) {
-        continue;
-      } else {
-        line += String.fromCharCode(buffer[i]);
-      }
-    }
-    if (done) {
-      break;
-    }
-  }
-  return line;
-}
-
-
-// JWT secret file
-function hex2ArrayBuffer(hex) {
-  const buf = new ArrayBuffer(hex.length / 2);
-  const bufView = new Uint8Array(buf);
-  for (let i = 0; i < hex.length; i += 2) {
-      bufView[i / 2] = parseInt(hex.slice(i, i + 2), 16);
-  }
-  return buf;
-}
-
-const jwtsecretFilePath = __ENV.EXPB_JWTSECRET_FILE_PATH;
-const jwtsecret = open(jwtsecretFilePath).trim();
-const jwtsecretBytes = hex2ArrayBuffer(jwtsecret);
-
-// Delay between payloads (used only when not in rate mode)
-const payloadsDelay = parseFloat(__ENV.EXPB_PAYLOADS_DELAY);
-const RATE_MODE = __ENV.EXPB_RATE_MODE === '1'; // set by config when using constant-arrival-rate
-
-// Engine endpoint
-const engineEndpoint = __ENV.EXPB_ENGINE_ENDPOINT;
-
-// Test config file
+// Load k6 options JSON
 const configFilePath = __ENV.EXPB_CONFIG_FILE_PATH;
-const configFile = open(configFilePath);
-const config = JSON.parse(configFile);
-
+const config = JSON.parse(open(configFilePath));
 export const options = config["options"];
 
-// Get JWT token
-async function getJwtToken() {
-  const jwtHeaderString = encoding.b64encode(JSON.stringify({
-    "typ": "JWT",
-    "alg": "HS256",
-  }), "rawurl");
-  const iat = Math.floor(Date.now() / 1000);
-  const exp = iat + 60;
-  const jwtPayloadString = encoding.b64encode(JSON.stringify({
-    "iat": iat,
-    "exp": exp,
-  }), "rawurl");
+// --- Multi-VU safe data: shared, preloaded lines ---
+const payloadLines = new SharedArray('expb_payload_lines', () =>
+  open(payloadsFilePath).trim().split(/\\r?\\n/)
+);
+const fcuLines = new SharedArray('expb_fcu_lines', () =>
+  open(fcusFilePath).trim().split(/\\r?\\n/)
+);
 
-  const jwtHasher = crypto.createHMAC("sha256", jwtsecretBytes);
-  jwtHasher.update([jwtHeaderString, jwtPayloadString].join("."));
-  const signature = jwtHasher.digest("base64rawurl");
-  return [jwtHeaderString, jwtPayloadString, signature].join(".");
+const startIdx0  = Math.max(0, startLine - 1);
+const totalPairs = Math.max(0, Math.min(payloadLines.length, fcuLines.length) - startIdx0);
+
+// --- JWT helpers ---
+function hex2ArrayBuffer(hex) {
+  const buf = new ArrayBuffer(hex.length / 2);
+  const view = new Uint8Array(buf);
+  for (let i = 0; i < hex.length; i += 2) view[i / 2] = parseInt(hex.slice(i, i + 2), 16);
+  return buf;
+}
+const jwtsecretBytes = hex2ArrayBuffer(open(__ENV.EXPB_JWTSECRET_FILE_PATH).trim());
+
+async function getJwtToken() {
+  const header = encoding.b64encode(JSON.stringify({ typ: 'JWT', alg: 'HS256' }), 'rawurl');
+  const iat = Math.floor(Date.now() / 1000), exp = iat + 60;
+  const payload = encoding.b64encode(JSON.stringify({ iat, exp }), 'rawurl');
+  const h = crypto.createHMAC('sha256', jwtsecretBytes);
+  h.update(header + '.' + payload);
+  return header + '.' + payload + '.' + h.digest('base64rawurl');
 }
 
 export async function setup() {
-  // Skip the first payloads and fcus lines
-  for (let i = 1; i < startLine; i++) {
-    await readFileLine(payloadsFile);
-    await readFileLine(fcusFile);
-  }
+  // nothing; data preloaded
 }
 
 export default async function () {
-  // Get the next payload
-  const payloadRaw = await readFileLine(payloadsFile);
-  const fcuRaw = await readFileLine(fcusFile);
-  if (payloadRaw === "" || fcuRaw === "") {
-    throw new Error("No more payloads or fcus found");
+  // Unique global index across all VUs/iterations
+  const idx = startIdx0 + exec.instance.iterationInTest;
+
+  // Out of data? Abort (non-zero exit) or no-op, depending on env.
+  if (idx >= startIdx0 + totalPairs) {
+    if (ABORT_ON_EOF) exec.test.abort('No more payloads or fcus found');
+    return;
   }
 
-  // Parse payload and fcu requests
+  const payloadRaw = payloadLines[idx];
+  const fcuRaw     = fcuLines[idx];
+
   const payload = JSON.parse(payloadRaw);
-  const fcu = JSON.parse(fcuRaw);
+  const fcu     = JSON.parse(fcuRaw);
+
   try {
-    // Send newPayload request
-    const payloadToken = await getJwtToken();
-    group("engine_newPayload", function() {
-      const headers = {
-          "Authorization": `Bearer ${payloadToken}`,
-          "Content-Type": "application/json",
-      };
-      const tags = {
-        "jrpc_method": payload.method,
-      }
-      const response = http.post(engineEndpoint, payloadRaw, {
-          headers: headers,
-          tags: tags,
+    // --- newPayload ---
+    const tok1 = await getJwtToken();
+    group('engine_newPayload', function () {
+      const tags = { jrpc_method: payload.method, kind: 'newPayload' };
+      const r = http.post(engineEndpoint, payloadRaw, {
+        headers: { Authorization: 'Bearer ' + tok1, 'Content-Type': 'application/json' },
+        tags,
       });
-      // Checks
-      check(response, {
-          'status_200': (r) => r.status === 200,
-          'has_result': (r) => {
-          const data = r.json();
-          return data !== undefined && data.result !== undefined && data.error === undefined;
-          },
+      const data = r.json();
+      check(r, {
+        'status_200': (x) => x.status === 200,
+        'has_result': () => data && data.result !== undefined && data.error === undefined,
+        'result_status_VALID': () => {
+          const st = data?.result?.status;
+          const ok = st === 'VALID';
+          if (!ok) {
+            console.error('newPayload not VALID:', {
+              status: st,
+              latestValidHash: data?.result?.latestValidHash,
+              validationError: data?.result?.validationError,
+            });
+          }
+          return ok;
+        },
       }, tags);
     });
 
-    // Send forkchoiceUpdated request
-    const fcuToken = await getJwtToken();
-    group("engine_forkchoiceUpdated", function() {
-      const headers = {
-        "Authorization": `Bearer ${fcuToken}`,
-        "Content-Type": "application/json",
-      };
-      const tags = {
-        "jrpc_method": fcu.method,
-      }
-      const response = http.post(engineEndpoint, fcuRaw, {
-        headers: headers,
-        tags: tags,
+    // --- forkchoiceUpdated ---
+    const tok2 = await getJwtToken();
+    group('engine_forkchoiceUpdated', function () {
+      const tags = { jrpc_method: fcu.method, kind: 'forkchoiceUpdated' };
+      const r = http.post(engineEndpoint, fcuRaw, {
+        headers: { Authorization: 'Bearer ' + tok2, 'Content-Type': 'application/json' },
+        tags,
       });
-      // Checks
-      check(response, {
-        'status_200': (r) => r.status === 200,
-        'has_result': (r) => {
-        const data = r.json();
-        return data !== undefined && data.result !== undefined && data.error === undefined;
+      const data = r.json();
+      check(r, {
+        'status_200': (x) => x.status === 200,
+        'has_result': () => data && data.result !== undefined && data.error === undefined,
+        'payloadStatus_VALID': () => {
+          const st = data?.result?.payloadStatus?.status;
+          const ok = st === 'VALID';
+          if (!ok) {
+            console.error('forkchoiceUpdated not VALID:', {
+              status: st,
+              latestValidHash: data?.result?.payloadStatus?.latestValidHash,
+              validationError: data?.result?.payloadStatus?.validationError,
+              payloadId: data?.result?.payloadId,
+            });
+          }
+          return ok;
         },
       }, tags);
     });
   } catch (e) {
     console.error(e);
-  }
-
-  // With arrival-rate executors, pacing is handled by k6.
-  // Keep the legacy delay only when NOT in rate mode.
-  if (!RATE_MODE && payloadsDelay > 0) {
-    sleep(payloadsDelay); // Wait for the next payload
   }
 }
 """
