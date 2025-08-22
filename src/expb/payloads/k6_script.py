@@ -42,7 +42,11 @@ def build_k6_script_config(
     return {
         "options": {
             "scenarios": {scenario_name: scenario},
-            "thresholds": {"http_req_failed": ["rate < 0.01"]},
+            "thresholds": {
+                "http_req_failed": ["rate < 0.01"],
+                'checks{check:"result_status_VALID"}': ["rate==1.0"],
+                'checks{check:"payloadStatus_VALID"}': ["rate==1.0"],
+            },
             "systemTags": [
                 "scenario", "status", "url", "group", "check",
                 "error", "error_code",
@@ -154,6 +158,7 @@ export default async function () {
   try {
     // --- engine_newPayload ---
     const tok1 = await getJwtToken();
+    let npValid = false;
     group('engine_newPayload', function () {
       const tags = { jrpc_method: payload.method, kind: 'newPayload' };
       const r = http.post(engineEndpoint, payloadRaw, {
@@ -161,24 +166,28 @@ export default async function () {
         tags,
       });
       const data = r.json();
+      const st = data?.result?.status;
+      npValid = (st === 'VALID');
+    
+      // checks (no aborts)
       check(r, {
         'status_200': (x) => x.status === 200,
         'has_result': () => data && data.result !== undefined && data.error === undefined,
-        'result_status_VALID': () => {
-          const st = data?.result?.status;
-          const ok = st === 'VALID';
-          if (!ok) {
-            console.error('newPayload not VALID:', {
-              status: st,
-              latestValidHash: data?.result?.latestValidHash,
-              validationError: data?.result?.validationError,
-            });
-          }
-          return ok;
-        },
+        'result_status_VALID': () => npValid,
       }, tags);
+    
+      if (!npValid && LOG_NON_VALID) {
+        console.error('newPayload not VALID:', {
+          status: st,
+          latestValidHash: data?.result?.latestValidHash,
+          validationError: data?.result?.validationError,
+        });
+      }
     });
-
+    
+    // If newPayload wasn’t VALID, optionally skip FCU to be nice to the engine
+    if (!npValid && SKIP_FCU_ON_NON_VALID) return;
+    
     // --- engine_forkchoiceUpdated ---
     const tok2 = await getJwtToken();
     group('engine_forkchoiceUpdated', function () {
@@ -188,27 +197,26 @@ export default async function () {
         tags,
       });
       const data = r.json();
+      const st = data?.result?.payloadStatus?.status;
+      const fcuValid = (st === 'VALID');
+    
       check(r, {
         'status_200': (x) => x.status === 200,
         'has_result': () => data && data.result !== undefined && data.error === undefined,
-        'payloadStatus_VALID': () => {
-          const st = data?.result?.payloadStatus?.status;
-          const ok = st === 'VALID';
-          if (!ok) {
-            console.error('forkchoiceUpdated not VALID:', {
-              status: st,
-              latestValidHash: data?.result?.payloadStatus?.latestValidHash,
-              validationError: data?.result?.payloadStatus?.validationError,
-              payloadId: data?.result?.payloadId,
-            });
-          }
-          return ok;
-        },
+        'payloadStatus_VALID': () => fcuValid,
       }, tags);
+    
+      if (!fcuValid && LOG_NON_VALID) {
+        console.error('forkchoiceUpdated not VALID:', {
+          status: st,
+          latestValidHash: data?.result?.payloadStatus?.latestValidHash,
+          validationError: data?.result?.payloadStatus?.validationError,
+          payloadId: data?.result?.payloadId,
+        });
+      }
     });
   } catch (e) {
     console.error(e);
   }
 }
 """
-
