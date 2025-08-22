@@ -1,45 +1,56 @@
+import math
+from typing import Optional
 from expb.configs.clients import Client
-
 
 def build_k6_script_config(
     scenario_name: str,
     client: Client,
     iterations: int,
+    rate: Optional[int] = 2,           # iterations per second (IPS)
+    duration: Optional[str] = "60m",       # e.g. "20m", "600s"; if None we'll compute
+    pre_allocated_vus: int = 1,           # >1 enables overlap
+    max_vus: int = 1,
+    time_unit: str = "1s",
 ):
+    if rate and rate > 0:
+        # If duration not provided, compute from iterations/rate
+        if not duration:
+            duration_seconds = max(1, math.ceil(iterations / rate))
+            duration = f"{duration_seconds}s"
+
+        scenario = {
+            "executor": "constant-arrival-rate",
+            "rate": rate,                       # iterations per timeUnit
+            "timeUnit": time_unit,
+            "duration": duration,
+            "preAllocatedVUs": pre_allocated_vus,
+            "maxVUs": max_vus,
+            # tells the JS to skip sleep(); k6 controls pacing now
+            "env": {"EXPB_RATE_MODE": "1"},
+            "tags": {"client_type": f"{client.value.name}"},
+        }
+    else:
+        # legacy single-stream behavior
+        scenario = {
+            "executor": "shared-iterations",
+            "vus": 1,
+            "iterations": iterations,
+            "env": {},
+            "tags": {"client_type": f"{client.value.name}"},
+        }
+
     return {
         "options": {
-            "scenarios": {
-                scenario_name: {
-                    "executor": "shared-iterations",
-                    "vus": 1,
-                    "iterations": iterations,
-                    "env": {},
-                    "tags": {"client_type": f"{client.value.name}"},
-                }
-            },
+            "scenarios": {scenario_name: scenario},
             "thresholds": {"http_req_failed": ["rate < 0.01"]},
             "systemTags": [
-                "scenario",
-                "status",
-                "url",
-                "group",
-                "check",
-                "error",
-                "error_code",
+                "scenario", "status", "url", "group", "check",
+                "error", "error_code",
             ],
-            "summaryTrendStats": [
-                "avg",
-                "min",
-                "med",
-                "max",
-                "p(90)",
-                "p(95)",
-                "p(99)",
-            ],
+            "summaryTrendStats": ["avg", "min", "med", "max", "p(90)", "p(95)", "p(99)"],
             "tags": {"testid": f"{scenario_name}"},
         }
     }
-
 
 def get_k6_script_content() -> str:
     return """
@@ -98,8 +109,9 @@ const jwtsecretFilePath = __ENV.EXPB_JWTSECRET_FILE_PATH;
 const jwtsecret = open(jwtsecretFilePath).trim();
 const jwtsecretBytes = hex2ArrayBuffer(jwtsecret);
 
-// Delay between payloads
+// Delay between payloads (used only when not in rate mode)
 const payloadsDelay = parseFloat(__ENV.EXPB_PAYLOADS_DELAY);
+const RATE_MODE = __ENV.EXPB_RATE_MODE === '1'; // set by config when using constant-arrival-rate
 
 // Engine endpoint
 const engineEndpoint = __ENV.EXPB_ENGINE_ENDPOINT;
@@ -109,7 +121,7 @@ const configFilePath = __ENV.EXPB_CONFIG_FILE_PATH;
 const configFile = open(configFilePath);
 const config = JSON.parse(configFile);
 
-export const options = config["options"]
+export const options = config["options"];
 
 // Get JWT token
 async function getJwtToken() {
@@ -200,6 +212,11 @@ export default async function () {
   } catch (e) {
     console.error(e);
   }
-  sleep(payloadsDelay); // Wait for the next payload
+
+  // With arrival-rate executors, pacing is handled by k6.
+  // Keep the legacy delay only when NOT in rate mode.
+  if (!RATE_MODE && payloadsDelay > 0) {
+    sleep(payloadsDelay); // Wait for the next payload
+  }
 }
 """
