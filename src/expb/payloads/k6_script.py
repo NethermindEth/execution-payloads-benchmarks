@@ -11,6 +11,7 @@ def build_k6_script_config(
             "scenarios": {
                 scenario_name: {
                     "executor": "shared-iterations",
+                    "rate": 2,
                     "vus": 1,
                     "iterations": iterations,
                     "env": {},
