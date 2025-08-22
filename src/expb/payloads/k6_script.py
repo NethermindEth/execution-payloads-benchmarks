@@ -6,10 +6,10 @@ def build_k6_script_config(
     scenario_name: str,
     client: Client,
     iterations: int,
-    rate: Optional[int] = 10,           # iterations per second (IPS)
-    duration: Optional[str] = None,       # e.g. "20m", "600s"; if None we'll compute
-    pre_allocated_vus: int = 20,           # >1 enables overlap
-    max_vus: int = 20,
+    rate: Optional[int] = 4,           # iterations per second (IPS)
+    duration: Optional[str] = None, 
+    pre_allocated_vus: int = 8,  
+    max_vus: int = 8,
     time_unit: str = "1s",
 ):
     if rate and rate > 0:
@@ -59,26 +59,35 @@ def build_k6_script_config(
 def get_k6_script_content() -> str:
     return """
 import http from 'k6/http';
-import { group, check, sleep } from 'k6';
+import { group, check } from 'k6';
 import { SharedArray } from 'k6/data';
 import exec from 'k6/execution';
 import encoding from 'k6/encoding';
 import crypto from 'k6/crypto';
+import { Counter } from 'k6/metrics';
 
 // --- Env / config ---
 const payloadsFilePath = __ENV.EXPB_PAYLOADS_FILE_PATH;
 const fcusFilePath     = __ENV.EXPB_FCUS_FILE_PATH;
 const startLine        = parseInt(__ENV.EXPB_PAYLOADS_START || '1', 10);
-const payloadsDelay    = parseFloat(__ENV.EXPB_PAYLOADS_DELAY || '0');
-const RATE_MODE        = __ENV.EXPB_RATE_MODE === '1';             // set when using arrival-rate
-const ABORT_ON_EOF     = (__ENV.EXPB_ABORT_ON_EOF || '1') === '1';
+const RATE_MODE        = __ENV.EXPB_RATE_MODE === '1';                  // when using arrival-rate
+const ABORT_ON_EOF     = (__ENV.EXPB_ABORT_ON_EOF || '0') === '1';      // default off for graceful exit
 const ABORT_ON_PARSE   = (__ENV.EXPB_ABORT_ON_PARSE_FAIL || '1') === '1';
+const LOG_NON_VALID    = (__ENV.EXPB_LOG_NON_VALID || '1') === '1';
+const SKIP_FCU_ON_NON_VALID = (__ENV.EXPB_SKIP_FCU_ON_NON_VALID || '0') === '1'; // default 0 so FCU always sent
+const ADD_CORRELATION_HEADER = (__ENV.EXPB_ADD_CID || '1') === '1';
+
 const engineEndpoint   = __ENV.EXPB_ENGINE_ENDPOINT;
 
 // Load k6 options JSON
 const configFilePath = __ENV.EXPB_CONFIG_FILE_PATH;
 const config = JSON.parse(open(configFilePath));
 export const options = config["options"];
+
+// --- Metrics to diagnose "lost" requests ---
+const skipped_fcu = new Counter('expb_skipped_fcu');               // when FCU is skipped due to non-VALID newPayload
+const nonvalid_newpayload = new Counter('expb_nonvalid_newpayload');
+const nonvalid_fcu       = new Counter('expb_nonvalid_fcu');
 
 // --- Multi-VU safe data: shared, preloaded lines ---
 const payloadLines = new SharedArray('expb_payload_lines', () =>
@@ -112,20 +121,21 @@ async function getJwtToken() {
 function safeGetLine(arr, idx) {
   const v = (idx >= 0 && idx < arr.length) ? arr[idx] : undefined;
   if (typeof v !== 'string') return '';
-  // Trim BOM and whitespace
-  return v.replace(/^\\uFEFF/, '').trim();
+  return v.replace(/^\\uFEFF/, '').trim(); // Trim BOM and whitespace
 }
 
 function parseJsonStrict(raw, label, idx) {
   try {
     return JSON.parse(raw);
   } catch (e) {
-    console.error(`JSON parse failed for ${label} at idx=${idx}`, { snippet: String(raw).slice(0, 160) });
-    if (ABORT_ON_PARSE) {
-      exec.test.abort(`Parse error in ${label} at idx=${idx}`);
-    }
+    console.error(`JSON parse failed for ${label} at idx=${idx}: ` + JSON.stringify({ snippet: String(raw).slice(0, 200) }));
+    if (ABORT_ON_PARSE) exec.test.abort(`Parse error in ${label} at idx=${idx}`);
     return null;
   }
+}
+
+function cid() {
+  return `${__ENV.testid || 'expb'}-vu${exec.vu.idInTest}-it${exec.scenario.iterationInTest}`;
 }
 
 export async function setup() {
@@ -136,7 +146,7 @@ export default async function () {
   // Global iteration index across all VUs/scenario runs
   const idx = startIdx0 + exec.scenario.iterationInTest;
 
-  // Out of data? abort or noop
+  // Out of data? graceful (default) or abort if explicitly requested
   if (idx >= startIdx0 + totalPairs) {
     if (ABORT_ON_EOF) exec.test.abort('No more payloads or fcus found');
     return;
@@ -146,7 +156,9 @@ export default async function () {
   const fcuRaw     = safeGetLine(fcuLines, idx);
 
   if (!payloadRaw || !fcuRaw) {
-    console.error('Empty/undefined line encountered', { idx, payloadOk: !!payloadRaw, fcuOk: !!fcuRaw });
+    console.error('Empty/undefined line encountered: ' + JSON.stringify({
+      idx, payloadOk: !!payloadRaw, fcuOk: !!fcuRaw
+    }));
     if (ABORT_ON_EOF) exec.test.abort('Dataset contains empty lines or ended prematurely');
     return;
   }
@@ -159,64 +171,75 @@ export default async function () {
     // --- engine_newPayload ---
     const tok1 = await getJwtToken();
     let npValid = false;
+
     group('engine_newPayload', function () {
       const tags = { jrpc_method: payload.method, kind: 'newPayload' };
-      const r = http.post(engineEndpoint, payloadRaw, {
-        headers: { Authorization: 'Bearer ' + tok1, 'Content-Type': 'application/json' },
-        tags,
-      });
+      const headers = { Authorization: 'Bearer ' + tok1, 'Content-Type': 'application/json' };
+      if (ADD_CORRELATION_HEADER) headers['X-Expb-Cid'] = cid();
+
+      const r = http.post(engineEndpoint, payloadRaw, { headers, tags });
       const data = r.json();
       const st = data?.result?.status;
       npValid = (st === 'VALID');
-    
-      // checks (no aborts)
+
       check(r, {
         'status_200': (x) => x.status === 200,
         'has_result': () => data && data.result !== undefined && data.error === undefined,
         'result_status_VALID': () => npValid,
       }, tags);
-    
-      if (!npValid && LOG_NON_VALID) {
-        console.error('newPayload not VALID:', {
-          status: st,
-          latestValidHash: data?.result?.latestValidHash,
-          validationError: data?.result?.validationError,
-        });
+
+      if (!npValid) {
+        nonvalid_newpayload.add(1, tags);
+        if (LOG_NON_VALID) {
+          console.error('newPayload not VALID: ' + JSON.stringify({
+            idx,
+            status: st,
+            latestValidHash: data?.result?.latestValidHash,
+            validationError: data?.result?.validationError,
+          }));
+        }
       }
     });
-    
-    // If newPayload wasn’t VALID, optionally skip FCU to be nice to the engine
-    if (!npValid && SKIP_FCU_ON_NON_VALID) return;
-    
+
+    // Optionally skip FCU if newPayload failed (default OFF here)
+    if (!npValid && SKIP_FCU_ON_NON_VALID) {
+      skipped_fcu.add(1);
+      return;
+    }
+
     // --- engine_forkchoiceUpdated ---
     const tok2 = await getJwtToken();
     group('engine_forkchoiceUpdated', function () {
       const tags = { jrpc_method: fcu.method, kind: 'forkchoiceUpdated' };
-      const r = http.post(engineEndpoint, fcuRaw, {
-        headers: { Authorization: 'Bearer ' + tok2, 'Content-Type': 'application/json' },
-        tags,
-      });
+      const headers = { Authorization: 'Bearer ' + tok2, 'Content-Type': 'application/json' };
+      if (ADD_CORRELATION_HEADER) headers['X-Expb-Cid'] = cid();
+
+      const r = http.post(engineEndpoint, fcuRaw, { headers, tags });
       const data = r.json();
       const st = data?.result?.payloadStatus?.status;
       const fcuValid = (st === 'VALID');
-    
+
       check(r, {
         'status_200': (x) => x.status === 200,
         'has_result': () => data && data.result !== undefined && data.error === undefined,
         'payloadStatus_VALID': () => fcuValid,
       }, tags);
-    
-      if (!fcuValid && LOG_NON_VALID) {
-        console.error('forkchoiceUpdated not VALID:', {
-          status: st,
-          latestValidHash: data?.result?.payloadStatus?.latestValidHash,
-          validationError: data?.result?.payloadStatus?.validationError,
-          payloadId: data?.result?.payloadId,
-        });
+
+      if (!fcuValid) {
+        nonvalid_fcu.add(1, tags);
+        if (LOG_NON_VALID) {
+          console.error('forkchoiceUpdated not VALID: ' + JSON.stringify({
+            idx,
+            status: st,
+            latestValidHash: data?.result?.payloadStatus?.latestValidHash,
+            validationError: data?.result?.payloadStatus?.validationError,
+            payloadId: data?.result?.payloadId,
+          }));
+        }
       }
     });
   } catch (e) {
-    console.error(e);
+    console.error('Iteration error at idx=' + idx + ': ' + String(e));
   }
 }
 """
