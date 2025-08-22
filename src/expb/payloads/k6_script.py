@@ -8,8 +8,8 @@ def build_k6_script_config(
     iterations: int,
     rate: Optional[int] = 4,           # iterations per second (IPS)
     duration: Optional[str] = None, 
-    pre_allocated_vus: int = 4,  
-    max_vus: int = 4,
+    pre_allocated_vus: int = 2,  
+    max_vus: int = 2,
     time_unit: str = "1s",
 ):
     if rate and rate > 0:
