@@ -1,23 +1,43 @@
 from expb.configs.clients import Client
 
 
+import math
+from expb.configs.clients import Client
+
+
 def build_k6_script_config(
     scenario_name: str,
     client: Client,
     iterations: int,
 ):
+    # You already added "rate": 2. Use that here:
+    rate = 2  # change this value wherever you currently set your rate
+
+    if rate and rate > 0:
+        duration_seconds = max(1, math.ceil(iterations / rate))
+        scenario = {
+            "executor": "constant-arrival-rate",
+            "rate": rate,                  # iterations per timeUnit
+            "timeUnit": "1s",
+            "duration": f"{duration_seconds}s",
+            # keep single VU by default; raise these later if you want overlap:
+            "preAllocatedVUs": 1,
+            "maxVUs": 1,
+            "env": {"EXPB_RATE_MODE": "1"},  # tells the script to skip sleep()
+            "tags": {"client_type": f"{client.value.name}"},
+        }
+    else:
+        scenario = {
+            "executor": "shared-iterations",
+            "vus": 1,
+            "iterations": iterations,
+            "env": {},
+            "tags": {"client_type": f"{client.value.name}"},
+        }
+
     return {
         "options": {
-            "scenarios": {
-                scenario_name: {
-                    "executor": "shared-iterations",
-                    "rate": 2,
-                    "vus": 1,
-                    "iterations": iterations,
-                    "env": {},
-                    "tags": {"client_type": f"{client.value.name}"},
-                }
-            },
+            "scenarios": {scenario_name: scenario},
             "thresholds": {"http_req_failed": ["rate < 0.01"]},
             "systemTags": [
                 "scenario",
@@ -40,7 +60,6 @@ def build_k6_script_config(
             "tags": {"testid": f"{scenario_name}"},
         }
     }
-
 
 def get_k6_script_content() -> str:
     return """
@@ -99,8 +118,9 @@ const jwtsecretFilePath = __ENV.EXPB_JWTSECRET_FILE_PATH;
 const jwtsecret = open(jwtsecretFilePath).trim();
 const jwtsecretBytes = hex2ArrayBuffer(jwtsecret);
 
-// Delay between payloads
+// Delay between payloads (used only when not in rate mode)
 const payloadsDelay = parseFloat(__ENV.EXPB_PAYLOADS_DELAY);
+const RATE_MODE = __ENV.EXPB_RATE_MODE === '1'; // set by config when using constant-arrival-rate
 
 // Engine endpoint
 const engineEndpoint = __ENV.EXPB_ENGINE_ENDPOINT;
@@ -110,7 +130,7 @@ const configFilePath = __ENV.EXPB_CONFIG_FILE_PATH;
 const configFile = open(configFilePath);
 const config = JSON.parse(configFile);
 
-export const options = config["options"]
+export const options = config["options"];
 
 // Get JWT token
 async function getJwtToken() {
@@ -201,6 +221,11 @@ export default async function () {
   } catch (e) {
     console.error(e);
   }
-  sleep(payloadsDelay); // Wait for the next payload
+
+  // With arrival-rate executors, pacing is handled by k6.
+  // Keep the legacy delay only when NOT in rate mode.
+  if (!RATE_MODE && payloadsDelay > 0) {
+    sleep(payloadsDelay); // Wait for the next payload
+  }
 }
 """
