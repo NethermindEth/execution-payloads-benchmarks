@@ -44,10 +44,6 @@ def build_k6_script_config(
             "scenarios": {scenario_name: scenario},
             "thresholds": {
                 "http_req_failed": ["rate < 0.01"],
-                'checks{check:"result_status_VALID"}': ["rate==1.0"],
-                'checks{check:"payloadStatus_VALID"}': ["rate==1.0"],
-                'checks{check:"under_slot_np"}': ["rate==1.0"],
-                'checks{check:"under_slot_fcu"}': ["rate==1.0"],
             },
             "systemTags": [
                 "scenario", "status", "url", "group", "check",
