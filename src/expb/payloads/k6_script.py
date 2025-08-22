@@ -46,6 +46,8 @@ def build_k6_script_config(
                 "http_req_failed": ["rate < 0.01"],
                 'checks{check:"result_status_VALID"}': ["rate==1.0"],
                 'checks{check:"payloadStatus_VALID"}': ["rate==1.0"],
+                'checks{check:"under_slot_np"}': ["rate==1.0"],
+                'checks{check:"under_slot_fcu"}': ["rate==1.0"],
             },
             "systemTags": [
                 "scenario", "status", "url", "group", "check",
@@ -83,6 +85,11 @@ const engineEndpoint   = __ENV.EXPB_ENGINE_ENDPOINT;
 const configFilePath = __ENV.EXPB_CONFIG_FILE_PATH;
 const config = JSON.parse(open(configFilePath));
 export const options = config["options"];
+
+// --- simple slot budget: 1s / rate ---
+const _scn = Object.values(options.scenarios || {})[0] || {};
+const _rate = Number(_scn.rate || __ENV.EXPB_RATE || 0);
+const SLOT_MS = Number(__ENV.EXPB_SLOT_MS || (_rate > 0 ? Math.ceil(1000 / _rate) : 0));
 
 // --- Metrics to diagnose "lost" requests ---
 const skipped_fcu = new Counter('expb_skipped_fcu');               // when FCU is skipped due to non-VALID newPayload
@@ -186,6 +193,7 @@ export default async function () {
         'status_200': (x) => x.status === 200,
         'has_result': () => data && data.result !== undefined && data.error === undefined,
         'result_status_VALID': () => npValid,
+        'under_slot_np': () => SLOT_MS ? r.timings.duration <= SLOT_MS : true,
       }, tags);
 
       if (!npValid) {
@@ -223,6 +231,7 @@ export default async function () {
         'status_200': (x) => x.status === 200,
         'has_result': () => data && data.result !== undefined && data.error === undefined,
         'payloadStatus_VALID': () => fcuValid,
+        'under_slot_fcu': () => SLOT_MS ? r.timings.duration <= SLOT_MS : true,
       }, tags);
 
       if (!fcuValid) {
