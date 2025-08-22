@@ -7,8 +7,8 @@ def build_k6_script_config(
     client: Client,
     iterations: int,
     rate: Optional[int] = 2,           # iterations per second (IPS)
-    duration: Optional[str] = "60m",       # e.g. "20m", "600s"; if None we'll compute
-    pre_allocated_vus: int = 1,           # >1 enables overlap
+    duration: Optional[str] = None,       # e.g. "20m", "600s"; if None we'll compute
+    pre_allocated_vus: int = 8,           # >1 enables overlap
     max_vus: int = 1,
     time_unit: str = "1s",
 ):
