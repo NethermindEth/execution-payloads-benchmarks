@@ -6,10 +6,10 @@ def build_k6_script_config(
     scenario_name: str,
     client: Client,
     iterations: int,
-    rate: Optional[int] = 2,           # iterations per second (IPS)
+    rate: Optional[int] = 10,           # iterations per second (IPS)
     duration: Optional[str] = None,       # e.g. "20m", "600s"; if None we'll compute
-    pre_allocated_vus: int = 8,           # >1 enables overlap
-    max_vus: int = 8,
+    pre_allocated_vus: int = 20,           # >1 enables overlap
+    max_vus: int = 20,
     time_unit: str = "1s",
 ):
     if rate and rate > 0:
@@ -26,7 +26,7 @@ def build_k6_script_config(
             "preAllocatedVUs": pre_allocated_vus,
             "maxVUs": max_vus,
             # tells the JS to skip sleep(); k6 controls pacing now
-            "env": {"EXPB_RATE_MODE": "1"},
+            "env": {"EXPB_RATE_MODE": "1", "EXPB_ABORT_ON_EOF": "0"},
             "tags": {"client_type": f"{client.value.name}"},
         }
     else:
