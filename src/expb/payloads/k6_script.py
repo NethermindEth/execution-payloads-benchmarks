@@ -1,32 +1,36 @@
-from expb.configs.clients import Client
-
-
 import math
+from typing import Optional
 from expb.configs.clients import Client
-
 
 def build_k6_script_config(
     scenario_name: str,
     client: Client,
     iterations: int,
+    rate: Optional[int] = None,           # iterations per second (IPS)
+    duration: Optional[str] = None,       # e.g. "20m", "600s"; if None we'll compute
+    pre_allocated_vus: int = 1,           # >1 enables overlap
+    max_vus: int = 1,
+    time_unit: str = "1s",
 ):
-    # You already added "rate": 2. Use that here:
-    rate = 2  # change this value wherever you currently set your rate
-
     if rate and rate > 0:
-        duration_seconds = max(1, math.ceil(iterations / rate))
+        # If duration not provided, compute from iterations/rate
+        if not duration:
+            duration_seconds = max(1, math.ceil(iterations / rate))
+            duration = f"{duration_seconds}s"
+
         scenario = {
             "executor": "constant-arrival-rate",
-            "rate": rate,                  # iterations per timeUnit
-            "timeUnit": "1s",
-            "duration": f"{duration_seconds}s",
-            # keep single VU by default; raise these later if you want overlap:
-            "preAllocatedVUs": 1,
-            "maxVUs": 1,
-            "env": {"EXPB_RATE_MODE": "1"},  # tells the script to skip sleep()
+            "rate": rate,                       # iterations per timeUnit
+            "timeUnit": time_unit,
+            "duration": duration,
+            "preAllocatedVUs": pre_allocated_vus,
+            "maxVUs": max_vus,
+            # tells the JS to skip sleep(); k6 controls pacing now
+            "env": {"EXPB_RATE_MODE": "1"},
             "tags": {"client_type": f"{client.value.name}"},
         }
     else:
+        # legacy single-stream behavior
         scenario = {
             "executor": "shared-iterations",
             "vus": 1,
@@ -40,23 +44,10 @@ def build_k6_script_config(
             "scenarios": {scenario_name: scenario},
             "thresholds": {"http_req_failed": ["rate < 0.01"]},
             "systemTags": [
-                "scenario",
-                "status",
-                "url",
-                "group",
-                "check",
-                "error",
-                "error_code",
+                "scenario", "status", "url", "group", "check",
+                "error", "error_code",
             ],
-            "summaryTrendStats": [
-                "avg",
-                "min",
-                "med",
-                "max",
-                "p(90)",
-                "p(95)",
-                "p(99)",
-            ],
+            "summaryTrendStats": ["avg", "min", "med", "max", "p(90)", "p(95)", "p(99)"],
             "tags": {"testid": f"{scenario_name}"},
         }
     }
