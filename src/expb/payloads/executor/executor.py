@@ -191,7 +191,8 @@ class Executor:
         if self.exports is not None and self.exports.pyroscope is not None:
             add_pyroscope_config(
                 client=self.execution_client,
-                app_name=self.executor_name,
+                executor_name=self.executor_name,
+                scenario_name=self.scenario_name,
                 pyroscope=self.exports.pyroscope,
                 command=execution_container_command,
                 environment=execution_container_environment,
