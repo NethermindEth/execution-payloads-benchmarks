@@ -6,6 +6,7 @@ from expb.payloads import Executor
 from expb.configs.clients import Client
 from expb.configs.networks import Network
 from expb.logging import Logger
+from expb.configs.exports import Exports
 from expb.configs.defaults import (
     K6_DEFAULT_IMAGE,
     PAYLOADS_DEFAULT_FILE,
@@ -74,38 +75,9 @@ class Scenarios:
         self.outputs_dir = Path(outputs_dir)
 
         # Parse export configurations
-        # TODO: Add support for other exporters
-        export: dict[str] = config.get("export", {})
-        if export:
-            # Parse prometheus remote write configurations
-            prometheus_remote_write: dict[str] | None = export.get(
-                "prometheus_remote_write", None
-            )
-            if isinstance(prometheus_remote_write, dict) and prometheus_remote_write:
-                # Parse prometheus remote write endpoint
-                self.prom_rw_endpoint = prometheus_remote_write.get("endpoint", None)
-                # Parse prometheus remote write basic auth
-                prom_rw_basic_auth: dict[str, str] | None = prometheus_remote_write.get(
-                    "basic_auth", None
-                )
-                # Parse prometheus remote write basic auth
-                if prom_rw_basic_auth:
-                    self.prom_rw_auth_username = prom_rw_basic_auth.get(
-                        "username", None
-                    )
-                    self.prom_rw_auth_password = prom_rw_basic_auth.get(
-                        "password", None
-                    )
-                else:
-                    self.prom_rw_auth_username = None
-                    self.prom_rw_auth_password = None
-
-                self.prom_rw_tags: list[str] = prometheus_remote_write.get("tags", [])
-        else:
-            self.prom_rw_endpoint = None
-            self.prom_rw_auth_username = None
-            self.prom_rw_auth_password = None
-            self.prom_rw_tags = []
+        exports: dict[str] = config.get("export", {})
+        if exports and isinstance(exports, dict):
+            self.exports = Exports(exports)
 
         resources: dict[str, str] = config.get("resources", {})
 
@@ -163,10 +135,7 @@ class Scenarios:
             k6_payloads_amount=scenario.payloads_amount,
             k6_payloads_delay=scenario.payloads_delay,
             k6_payloads_start=scenario.payloads_start,
-            prom_rw_endpoint=self.prom_rw_endpoint,
-            prom_rw_auth_username=self.prom_rw_auth_username,
-            prom_rw_auth_password=self.prom_rw_auth_password,
-            prom_rw_tags=self.prom_rw_tags,
+            exports=self.exports,
             logger=logger,
         )
         return executor

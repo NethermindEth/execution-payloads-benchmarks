@@ -15,6 +15,7 @@ from urllib3.util.retry import Retry
 from docker.models.containers import Container
 
 from expb.logging import Logger
+from expb.configs.exports import Exports
 from expb.configs.networks import Network
 from expb.configs.clients import (
     Client,
@@ -26,6 +27,7 @@ from expb.configs.clients import (
 )
 from expb.payloads.utils.networking import limit_container_bandwidth
 from expb.payloads.k6_script import get_k6_script_content, build_k6_script_config
+from expb.payloads.executor.exports_utils import add_pyroscope_config
 from expb.configs.defaults import (
     K6_DEFAULT_IMAGE,
     PAYLOADS_DEFAULT_FILE,
@@ -62,10 +64,7 @@ class Executor:
         json_rpc_wait_max_retries: int = 16,
         pull_images: bool = False,
         limit_bandwidth: bool = False,
-        prom_rw_endpoint: str | None = None,
-        prom_rw_auth_username: str | None = None,
-        prom_rw_auth_password: str | None = None,
-        prom_rw_tags: list[str] = [],
+        exports: Exports | None = None,
         logger=Logger(),
     ):
         self.execution_client = execution_client
@@ -103,10 +102,7 @@ class Executor:
         self._k6_script_file = self.outputs_dir / "k6-script.js"
         self._k6_config_file = self.outputs_dir / "k6-config.json"
 
-        self.prom_rw_endpoint = prom_rw_endpoint
-        self.prom_rw_auth_username = prom_rw_auth_username
-        self.prom_rw_auth_password = prom_rw_auth_password
-        self.prom_rw_tags = prom_rw_tags
+        self.exports = exports
 
         self.log = logger
 
@@ -188,7 +184,19 @@ class Executor:
         self,
         container_network: Network | None = None,
     ) -> Container:
-        container_command = self.execution_client.value.get_command(self.network)
+        execution_container_command = self.execution_client.value.get_command(
+            self.network
+        )
+        execution_container_environment = {}
+        if self.exports is not None and self.exports.pyroscope is not None:
+            add_pyroscope_config(
+                client=self.execution_client,
+                app_name=self.executor_name,
+                pyroscope=self.exports.pyroscope,
+                command=execution_container_command,
+                environment=execution_container_environment,
+            )
+
         container = self.docker_client.containers.run(
             image=self.execution_client_image,
             name=f"{self.executor_name}-{self.execution_client.value.name.lower()}",
@@ -210,7 +218,8 @@ class Executor:
                 # f"{CLIENT_P2P_PORT}/tcp": f"{CLIENT_P2P_PORT}",
                 # f"{CLIENT_P2P_PORT}/udp": f"{CLIENT_P2P_PORT}",
             },
-            command=container_command,
+            command=execution_container_command,
+            environment=execution_container_environment,
             network=container_network.name if container_network else None,
             detach=True,
             cpu_count=self.docker_container_cpus,  # Only works for windows
@@ -339,23 +348,25 @@ class Executor:
         k6_container_environment = {}
 
         # Prepare k6 outputs
-        if self.prom_rw_endpoint:
+        if (
+            self.exports is not None
+            and self.exports.prometheus_remote_write is not None
+        ):
             k6_container_command.append("--out=experimental-prometheus-rw")
             k6_container_environment["K6_PROMETHEUS_RW_TREND_STATS"] = (
                 "min,max,avg,med,p(90),p(95),p(99)"
             )
             k6_container_environment["K6_PROMETHEUS_RW_SERVER_URL"] = (
-                self.prom_rw_endpoint
+                self.exports.prometheus_remote_write.endpoint
             )
-            if self.prom_rw_auth_username:
+            if self.exports.prometheus_remote_write.basic_auth is not None:
                 k6_container_environment["K6_PROMETHEUS_RW_USERNAME"] = (
-                    self.prom_rw_auth_username
+                    self.exports.prometheus_remote_write.basic_auth.username
                 )
-            if self.prom_rw_auth_password:
                 k6_container_environment["K6_PROMETHEUS_RW_PASSWORD"] = (
-                    self.prom_rw_auth_password
+                    self.exports.prometheus_remote_write.basic_auth.password
                 )
-            for tag in self.prom_rw_tags:
+            for tag in self.exports.prometheus_remote_write.tags:
                 k6_container_command.append(f"--tag={tag}")
         else:
             k6_results_jsonl_file = f"{k6_container_work_dir}/k6-results.jsonl"

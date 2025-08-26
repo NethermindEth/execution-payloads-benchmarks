@@ -28,6 +28,18 @@ export:
     tags:
       - key1=value1
       - key2=value2
+  # Grafana Pyroscope
+  pyroscope:
+    # Pyroscope endpoint
+    endpoint: http://localhost:4040
+    # Optional: Basic auth for the remote write endpoint
+    basic_auth:
+      username: expb
+      password: expb
+    # Optional: Tags to add to the metrics
+    tags:
+      - key1=value1
+      - key2=value2
 
 # Resources for the docker container
 resources:
