@@ -2,13 +2,14 @@ import math
 from typing import Optional
 from expb.configs.clients import Client
 
+
 def build_k6_script_config(
     scenario_name: str,
     client: Client,
     iterations: int,
-    rate: Optional[int] = 4,           # iterations per second (IPS)
-    duration: Optional[str] = None, 
-    pre_allocated_vus: int = 2,  
+    rate: Optional[int] = 4,  # iterations per second (IPS)
+    duration: Optional[str] = None,
+    pre_allocated_vus: int = 2,
     max_vus: int = 2,
     time_unit: str = "1s",
 ):
@@ -20,7 +21,7 @@ def build_k6_script_config(
 
         scenario = {
             "executor": "constant-arrival-rate",
-            "rate": rate,                       # iterations per timeUnit
+            "rate": rate,  # iterations per timeUnit
             "timeUnit": time_unit,
             "duration": duration,
             "preAllocatedVUs": pre_allocated_vus,
@@ -46,13 +47,27 @@ def build_k6_script_config(
                 "http_req_failed": ["rate < 0.01"],
             },
             "systemTags": [
-                "scenario", "status", "url", "group", "check",
-                "error", "error_code",
+                "scenario",
+                "status",
+                "url",
+                "group",
+                "check",
+                "error",
+                "error_code",
             ],
-            "summaryTrendStats": ["avg", "min", "med", "max", "p(90)", "p(95)", "p(99)"],
+            "summaryTrendStats": [
+                "avg",
+                "min",
+                "med",
+                "max",
+                "p(90)",
+                "p(95)",
+                "p(99)",
+            ],
             "tags": {"testid": f"{scenario_name}"},
         }
     }
+
 
 def get_k6_script_content() -> str:
     return """
@@ -62,7 +77,7 @@ import { SharedArray } from 'k6/data';
 import exec from 'k6/execution';
 import encoding from 'k6/encoding';
 import crypto from 'k6/crypto';
-import { Counter } from 'k6/metrics';
+import { Counter, Gauge } from 'k6/metrics';
 
 // --- Env / config ---
 const payloadsFilePath = __ENV.EXPB_PAYLOADS_FILE_PATH;
@@ -74,6 +89,7 @@ const ABORT_ON_PARSE   = (__ENV.EXPB_ABORT_ON_PARSE_FAIL || '1') === '1';
 const LOG_NON_VALID    = (__ENV.EXPB_LOG_NON_VALID || '1') === '1';
 const SKIP_FCU_ON_NON_VALID = (__ENV.EXPB_SKIP_FCU_ON_NON_VALID || '0') === '1'; // default 0 so FCU always sent
 const ADD_CORRELATION_HEADER = (__ENV.EXPB_ADD_CID || '1') === '1';
+const USE_PERPAYLOAD_METRIC = (__ENV.EXPB_USE_PERPAYLOAD_METRIC || 'false') === 'true'; // default false to avoid calculating per-payload metrics
 
 const engineEndpoint   = __ENV.EXPB_ENGINE_ENDPOINT;
 
@@ -91,6 +107,7 @@ const SLOT_MS = Number(__ENV.EXPB_SLOT_MS || (_rate > 0 ? Math.ceil(1000 / _rate
 const skipped_fcu = new Counter('expb_skipped_fcu');               // when FCU is skipped due to non-VALID newPayload
 const nonvalid_newpayload = new Counter('expb_nonvalid_newpayload');
 const nonvalid_fcu       = new Counter('expb_nonvalid_fcu');
+const slowest_newpayloads = new Gauge('expb_slowest_newpayloads', true);
 
 // --- Multi-VU safe data: shared, preloaded lines ---
 const payloadLines = new SharedArray('expb_payload_lines', () =>
@@ -202,6 +219,11 @@ export default async function () {
             validationError: data?.result?.validationError,
           }));
         }
+      } else if (USE_PERPAYLOAD_METRIC) {
+        slowest_newpayloads.add(r.timings.duration, {
+          jrpc_id: payload.id,
+          ...tags,
+        });
       }
     });
 

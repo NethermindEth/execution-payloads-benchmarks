@@ -16,6 +16,12 @@ def execute_scenarios(
     log_level: Annotated[
         str, typer.Option(help="Log level (e.g., DEBUG, INFO, WARNING)")
     ] = "INFO",
+    per_payload_metric: Annotated[
+        bool,
+        typer.Option(
+            help="Collect per-payload metric. This generates a metric for each payload, which can overload the configured outputs.",
+        ),
+    ] = False,
 ) -> None:
     """
     Execute payloads for multiple execution clients using Grafana K6.
@@ -36,6 +42,8 @@ def execute_scenarios(
                 snapshot=scenario.snapshot_dir,
             )
             executor = config.get_scenario_executor(scenario, logger=logger)
-            executor.execute_scenario()
+            executor.execute_scenario(
+                collect_per_payload_metrics=per_payload_metric,
+            )
         if not loop:
             break

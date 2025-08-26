@@ -278,6 +278,7 @@ class Executor:
         self,
         execution_client_container: Container,
         container_network: Network | None = None,
+        collect_per_payload_metrics: bool = False,
     ) -> Container:
         # Get execution client ip
         execution_client_container.reload()
@@ -331,6 +332,7 @@ class Executor:
             f"--env=EXPB_PAYLOADS_DELAY={self.k6_payloads_delay}",
             f"--env=EXPB_PAYLOADS_START={self.k6_payloads_start}",
             f"--env=EXPB_ENGINE_ENDPOINT={engine_url}",
+            f"--env=EXPB_USE_PERPAYLOAD_METRIC={str(collect_per_payload_metrics).lower()}",
         ]
 
         # Prepare k6 container environment variables
@@ -432,7 +434,10 @@ class Executor:
         self.remove_directories()
         self.log.info("Cleanup completed")
 
-    def execute_scenario(self) -> None:
+    def execute_scenario(
+        self,
+        collect_per_payload_metrics: bool = False,
+    ) -> None:
         try:
             self.log.info(
                 "Preparing scenario",
@@ -495,6 +500,7 @@ class Executor:
             _ = self.run_k6(
                 execution_client_container=execution_client_container,
                 container_network=containers_network,
+                collect_per_payload_metrics=collect_per_payload_metrics,
             )
 
             self.log.info(

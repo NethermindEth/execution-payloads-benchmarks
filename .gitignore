@@ -198,3 +198,6 @@ cython_debug/
 
 # DS_Store
 .DS_Store
+
+# Default Outputs folder
+/outputs/
