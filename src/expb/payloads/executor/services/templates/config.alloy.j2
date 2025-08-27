@@ -10,6 +10,7 @@
     - address: Execution client prometheus metrics address
     - metrics_path: Execution client prometheus metrics path
     - scrape_interval: Execution client prometheus metrics scrape interval
+    - scrape_timeout: Execution client prometheus metrics scrape timeout
     - labels: Execution client prometheus metrics labels dictionary
   - prometheus_rw: Prometheus remote write object
     - endpoint: Prometheus remote write endpoint
@@ -55,15 +56,16 @@ prometheus.remote_write "prometheus_backend" {
 
 prometheus.scrape "execution" {
   targets = [{
-    "__address__" = "{{ execution_metrics.address }}"
+    "__address__" = "{{ execution_metrics.address }}",
     {% for key, value in execution_metrics.labels.items() %}
-    "{{ key }}" = "{{ value }}"
+    "{{ key }}" = "{{ value }}",
     {% endfor %}
   }]
 
   forward_to = [prometheus.remote_write.prometheus_backend.receiver]
 
   scrape_interval = "{{ execution_metrics.scrape_interval }}"
+  scrape_timeout = "{{ execution_metrics.scrape_timeout }}"
   metrics_path = "{{ execution_metrics.metrics_path }}"
 }
 {% endif %}

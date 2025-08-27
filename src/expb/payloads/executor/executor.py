@@ -279,7 +279,9 @@ class Executor:
                 scenario_name=self.scenario_name,
                 execution_client=self.execution_client,
                 execution_client_address=f"{execution_client_container_name}:{CLIENT_METRICS_PORT}",
-                execution_client_scrape_interval="4s",  # TODO: Make it configurable
+                # TODO: Make scrape parameters configurable
+                execution_client_scrape_interval="4s",
+                execution_client_scrape_timeout="3s",  # Has to be lower than the scrape interval
                 prometheus_rw=self.exports.prometheus_remote_write,
                 pyroscope=self.exports.pyroscope,
             )

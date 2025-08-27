@@ -12,6 +12,7 @@ def get_alloy_config(
     execution_client: Client,
     execution_client_address: str,
     execution_client_scrape_interval: str,
+    execution_client_scrape_timeout: str,
     prometheus_rw: PrometheusRW | None = None,
     pyroscope: Pyroscope | None = None,
 ) -> str:
@@ -42,6 +43,7 @@ def get_alloy_config(
             "address": execution_client_address,
             "metrics_path": execution_client.value.prometheus_metrics_path,
             "scrape_interval": execution_client_scrape_interval,
+            "scrape_timeout": execution_client_scrape_timeout,
             "labels": {
                 "testid": scenario_name,
                 "client_type": execution_client.value.name,
