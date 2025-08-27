@@ -5,7 +5,9 @@ network: mainnet
 pull_images: true
 
 # Grafana K6 image to use
-k6_image: grafana/k6:1.1.0
+images:
+  k6: grafana/k6:latest
+  alloy: grafana/alloy:latest
 
 # Paths for the payloads csv file, work directory, and outputs directory
 paths:
@@ -14,7 +16,7 @@ paths:
   work: ./work
   outputs: ./outputs
 
-# Optional: Export K6 results metrics
+# Optional: Export options for scenarios metrics
 export:
   # Prometheus remote write
   prometheus_remote_write:
@@ -64,3 +66,6 @@ scenarios:
     start: 1
     # Optional: Client image
     image: ethpandaops/nethermind:performance
+    # Optional: Client extra flags
+    extra_flags:
+      - --flag1=value1

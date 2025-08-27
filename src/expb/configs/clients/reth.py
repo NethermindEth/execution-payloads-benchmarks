@@ -29,11 +29,21 @@ class RethConfig(ClientConfig):
                 f"--metrics=0.0.0.0:{CLIENT_METRICS_PORT}",
                 "--http.api=trace,rpc,eth,net,debug,web3,admin",
             ],
+            prometheus_metrics_path="/debug/metrics/prometheus",
         )
 
-    def get_command(self, network: Network) -> list[str]:
+    def get_command(
+        self,
+        instance: str,
+        network: Network,
+        extra_flags: list[str] = [],
+    ) -> list[str]:
+        command = []
         if network == Network.MAINNET:
-            return self.default_command + [
-                "--chain=mainnet",
-                "--full",
-            ]
+            command.extend(
+                [
+                    "--chain=mainnet",
+                    "--full",
+                ]
+            )
+        return self.default_command + command + extra_flags

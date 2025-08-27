@@ -16,13 +16,20 @@ class ClientConfig:
         default_image: str,
         default_command: list[str] = [],
         default_env: dict[str, str] = {},
+        prometheus_metrics_path: str = "/metrics",
     ):
         self.name = name
         self.default_image = default_image
         self.default_command = default_command
         self.default_env = default_env
+        self.prometheus_metrics_path = prometheus_metrics_path
 
-    def get_command(self, network: Network) -> list[str]:
+    def get_command(
+        self,
+        instance: str,
+        network: Network,
+        extra_flags: list[str] = [],
+    ) -> list[str]:
         raise NotImplementedError("get_network_command is not implemented")
 
     def __str__(self) -> str:

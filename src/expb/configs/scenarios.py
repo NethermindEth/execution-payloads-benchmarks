@@ -8,7 +8,6 @@ from expb.configs.networks import Network
 from expb.logging import Logger
 from expb.configs.exports import Exports
 from expb.configs.defaults import (
-    K6_DEFAULT_IMAGE,
     PAYLOADS_DEFAULT_FILE,
     FCUS_DEFAULT_FILE,
     WORK_DEFAULT_DIR,
@@ -41,6 +40,7 @@ class Scenario:
             raise ValueError(f"Snapshot directory is required for scenario {name}")
         self.snapshot_dir = Path(snapshot_dir)
         self.payloads_start: int | None = config.get("start", 1)
+        self.extra_flags: list[str] = config.get("extra_flags", [])
 
 
 class Scenarios:
@@ -57,8 +57,8 @@ class Scenarios:
         pull_images: bool = config.get("pull_images", False)
         self.pull_images = pull_images
 
-        k6_image: str = config.get("k6_image", K6_DEFAULT_IMAGE)
-        self.k6_image = k6_image
+        images: dict[str, str] = config.get("images", {})
+        self.docker_images = images
 
         paths: dict[str, str] = config.get("paths", {})
 
@@ -121,6 +121,7 @@ class Scenarios:
             network=self.network,
             execution_client=scenario.client,
             execution_client_image=scenario.client_image,
+            execution_client_extra_flags=scenario.extra_flags,
             payloads_file=self.payloads_file,
             fcus_file=self.fcus_file,
             work_dir=self.work_dir,
@@ -131,7 +132,7 @@ class Scenarios:
             docker_container_mem_limit=self.docker_container_mem_limit,
             outputs_dir=self.outputs_dir,
             pull_images=self.pull_images,
-            k6_image=self.k6_image,
+            docker_images=self.docker_images,
             k6_payloads_amount=scenario.payloads_amount,
             k6_payloads_delay=scenario.payloads_delay,
             k6_payloads_start=scenario.payloads_start,

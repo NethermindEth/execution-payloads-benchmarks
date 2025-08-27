@@ -34,10 +34,20 @@ class BesuConfig(ClientConfig):
                 "--sync-mode=FULL",
                 "--version-compatibility-protection=false",
             ],
+            prometheus_metrics_path="/metrics",
         )
 
-    def get_command(self, network: Network) -> list[str]:
+    def get_command(
+        self,
+        instance: str,
+        network: Network,
+        extra_flags: list[str] = [],
+    ) -> list[str]:
+        command = []
         if network == Network.MAINNET:
-            return self.default_command + [
-                "--network=mainnet",
-            ]
+            command.extend(
+                [
+                    "--network=mainnet",
+                ]
+            )
+        return self.default_command + command + extra_flags

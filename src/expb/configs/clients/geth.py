@@ -36,11 +36,21 @@ class GethConfig(ClientConfig):
                 f"--ws.port={CLIENT_RPC_PORT}",
                 "--ws.api=eth,web3,net,debug,admin",
             ],
+            prometheus_metrics_path="/debug/metrics/prometheus",
         )
 
-    def get_command(self, network: Network) -> list[str]:
+    def get_command(
+        self,
+        instance: str,
+        network: Network,
+        extra_flags: list[str] = [],
+    ) -> list[str]:
+        command = []
         if network == Network.MAINNET:
-            return self.default_command + [
-                "--mainnet",
-                "--syncmode=full",
-            ]
+            command.extend(
+                [
+                    "--mainnet",
+                    "--syncmode=full",
+                ]
+            )
+        return self.default_command + command + extra_flags

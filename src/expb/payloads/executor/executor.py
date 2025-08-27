@@ -15,7 +15,7 @@ from urllib3.util.retry import Retry
 from docker.models.containers import Container
 
 from expb.logging import Logger
-from expb.configs.exports import Exports
+from expb.configs.exports import Exports, Pyroscope
 from expb.configs.networks import Network
 from expb.configs.clients import (
     Client,
@@ -30,9 +30,14 @@ from expb.payloads.executor.services.k6 import (
     get_k6_script_content,
     build_k6_script_config,
 )
+from expb.payloads.executor.services.alloy import (
+    get_alloy_config,
+    ALLOY_PYROSCOPE_PORT,
+)
 from expb.payloads.executor.exports_utils import add_pyroscope_config
 from expb.configs.defaults import (
     K6_DEFAULT_IMAGE,
+    ALLOY_DEFAULT_IMAGE,
     PAYLOADS_DEFAULT_FILE,
     FCUS_DEFAULT_FILE,
     WORK_DEFAULT_DIR,
@@ -54,7 +59,7 @@ class Executor:
         k6_payloads_amount: int,
         k6_payloads_delay: float,
         k6_payloads_start: int = 1,
-        k6_image: str = K6_DEFAULT_IMAGE,
+        docker_images: dict[str, str] = {},
         payloads_file: Path = PAYLOADS_DEFAULT_FILE,
         fcus_file: Path = FCUS_DEFAULT_FILE,
         work_dir: Path = WORK_DEFAULT_DIR,
@@ -64,20 +69,23 @@ class Executor:
         docker_container_download_speed: str = DOCKER_CONTAINER_DEFAULT_DOWNLOAD_SPEED,
         docker_container_upload_speed: str = DOCKER_CONTAINER_DEFAULT_UPLOAD_SPEED,
         execution_client_image: str | None = None,
+        execution_client_extra_flags: list[str] = [],
         json_rpc_wait_max_retries: int = 16,
         pull_images: bool = False,
         limit_bandwidth: bool = False,
         exports: Exports | None = None,
         logger=Logger(),
     ):
-        self.execution_client = execution_client
         self.scenario_name = scenario_name
         self.executor_name = f"expb-executor-{scenario_name}"
         self.network = network
+        self.execution_client = execution_client
         self.execution_client_image = (
             execution_client_image or self.execution_client.value.default_image
         )
-        self.k6_image = k6_image
+        self.execution_client_extra_flags = execution_client_extra_flags
+
+        self.docker_images = docker_images
         self.k6_payloads_amount = k6_payloads_amount
         self.k6_payloads_delay = k6_payloads_delay
         self.k6_payloads_start = k6_payloads_start
@@ -104,11 +112,12 @@ class Executor:
         self.outputs_dir.mkdir(parents=True, exist_ok=True)
         self._k6_script_file = self.outputs_dir / "k6-script.js"
         self._k6_config_file = self.outputs_dir / "k6-config.json"
-
+        self._alloy_config_file = self.outputs_dir / "config.alloy"
         self.exports = exports
 
         self.log = logger
 
+    # Scenario Setup
     def prepare_directories(self) -> None:
         # Create overlay required directories
         self._overlay_work_dir.mkdir(
@@ -151,25 +160,16 @@ class Executor:
             self.log.error("failed to mount overlay", error=e)
             raise e
 
-    def remove_directories(self) -> None:
-        umount_command = " ".join(["umount", str(self._overlay_merged_dir.absolute())])
-        try:
-            subprocess.run(umount_command, check=True, shell=True)
-        except subprocess.CalledProcessError as e:
-            self.log.error("failed to umount overlay", error=e)
-            raise e
-        try:
-            paths_to_remove = [
-                self._overlay_upper_dir.absolute(),
-                self._overlay_work_dir.absolute(),
-                self._overlay_merged_dir.absolute(),
-            ]
-            for path in paths_to_remove:
-                shutil.rmtree(path)
-        except Exception as e:
-            self.log.error("failed to cleanup work directory", error=e)
-            raise e
+    def pull_docker_images(self) -> None:
+        self.log.info("updating docker images")
+        self.docker_client.images.pull(self.execution_client_image)
+        self.docker_client.images.pull(self.docker_images.get("k6", K6_DEFAULT_IMAGE))
+        self.docker_client.images.pull(
+            self.docker_images.get("alloy", ALLOY_DEFAULT_IMAGE)
+        )
+        self.log.info("docker images updated")
 
+    # Execution Client Setup
     def prepare_jwt_secret_file(self) -> None:
         self._jwt_secret_file.touch(
             mode=0o666,
@@ -177,26 +177,23 @@ class Executor:
         )
         self._jwt_secret_file.write_text(secrets.token_bytes(32).hex())
 
-    def pull_docker_images(self) -> None:
-        self.log.info("updating docker images")
-        self.docker_client.images.pull(self.execution_client_image)
-        self.docker_client.images.pull(self.k6_image)
-        self.log.info("docker images updated")
-
     def start_execution_client(
         self,
         container_network: Network | None = None,
+        pyroscope: Pyroscope | None = None,
     ) -> Container:
         execution_container_command = self.execution_client.value.get_command(
-            self.network
+            instance=self.scenario_name,
+            network=self.network,
+            extra_flags=self.execution_client_extra_flags,
         )
         execution_container_environment = {}
-        if self.exports is not None and self.exports.pyroscope is not None:
+        if pyroscope:
             add_pyroscope_config(
                 client=self.execution_client,
                 executor_name=self.executor_name,
                 scenario_name=self.scenario_name,
-                pyroscope=self.exports.pyroscope,
+                pyroscope=pyroscope,
                 command=execution_container_command,
                 environment=execution_container_environment,
             )
@@ -269,6 +266,51 @@ class Executor:
             )
             raise Exception("Client json rpc is not available")
 
+    # Grafana Alloy Setup
+    def prepare_alloy_config(self) -> None:
+        # Create alloy config file
+        self._alloy_config_file.touch(mode=0o666, exist_ok=True)
+        # Write alloy config content
+        execution_client_container_name = (
+            f"{self.executor_name}-{self.execution_client.value.name.lower()}"
+        )
+        self._alloy_config_file.write_text(
+            get_alloy_config(
+                scenario_name=self.scenario_name,
+                execution_client=self.execution_client,
+                execution_client_address=f"{execution_client_container_name}:{CLIENT_METRICS_PORT}",
+                execution_client_scrape_interval="4s",  # TODO: Make it configurable
+                prometheus_rw=self.exports.prometheus_remote_write,
+                pyroscope=self.exports.pyroscope,
+            )
+        )
+        self.log.info(
+            "Alloy config prepared", alloy_config_file=self._alloy_config_file
+        )
+
+    def start_alloy(
+        self,
+        container_network: Network | None = None,
+    ) -> Container:
+        alloy_container = self.docker_client.containers.run(
+            image=self.docker_images.get("alloy", ALLOY_DEFAULT_IMAGE),
+            name=f"{self.executor_name}-alloy",
+            volumes={
+                self._alloy_config_file.absolute(): {
+                    "bind": "/etc/alloy/config.alloy",
+                    "mode": "rw",
+                },
+            },
+            ports={
+                # f"{ALLOY_PYROSCOPE_PORT}/tcp": f"{ALLOY_PYROSCOPE_PORT}",
+            },
+            command=["alloy", "run", "/etc/alloy/config.alloy"],
+            detach=True,
+            network=container_network.name if container_network else None,
+        )
+        return alloy_container
+
+    # Grafana K6 Setup
     def prepare_k6_script(self) -> None:
         # Create k6 script file
         self._k6_script_file.touch(mode=0o666, exist_ok=True)
@@ -378,7 +420,7 @@ class Executor:
 
         # Execute k6 container
         container = self.docker_client.containers.run(
-            image=self.k6_image,
+            image=self.docker_images.get("k6", K6_DEFAULT_IMAGE),
             name=f"{self.executor_name}-k6",
             volumes=k6_container_volumes,
             command=k6_container_command,
@@ -389,6 +431,26 @@ class Executor:
             environment=k6_container_environment,
         )
         return container
+
+    # Scenario Cleanup
+    def remove_directories(self) -> None:
+        umount_command = " ".join(["umount", str(self._overlay_merged_dir.absolute())])
+        try:
+            subprocess.run(umount_command, check=True, shell=True)
+        except subprocess.CalledProcessError as e:
+            self.log.error("failed to umount overlay", error=e)
+            raise e
+        try:
+            paths_to_remove = [
+                self._overlay_upper_dir.absolute(),
+                self._overlay_work_dir.absolute(),
+                self._overlay_merged_dir.absolute(),
+            ]
+            for path in paths_to_remove:
+                shutil.rmtree(path)
+        except Exception as e:
+            self.log.error("failed to cleanup work directory", error=e)
+            raise e
 
     def cleanup_scenario(self) -> None:
         self.log.info("Cleaning up scenario", scenario=self.executor_name)
@@ -449,6 +511,7 @@ class Executor:
         self.remove_directories()
         self.log.info("Cleanup completed")
 
+    # Scenario Execution
     def execute_scenario(
         self,
         collect_per_payload_metrics: bool = False,
@@ -471,6 +534,27 @@ class Executor:
             )
 
             self.log.info(
+                "Starting Grafana Alloy",
+                image=self.docker_images.get("alloy", ALLOY_DEFAULT_IMAGE),
+            )
+            alloy_container = self.start_alloy(
+                container_network=containers_network,
+            )
+            alloy_container.reload()
+            alloy_container_ip = alloy_container.attrs["NetworkSettings"]["Networks"][
+                containers_network.name
+            ]["IPAddress"]
+            alloy_pyroscope: Pyroscope | None = (
+                Pyroscope(
+                    {
+                        "endpoint": f"http://{alloy_container_ip}:{ALLOY_PYROSCOPE_PORT}",
+                    }
+                )
+                if self.exports is not None and self.exports.pyroscope is not None
+                else None
+            )
+
+            self.log.info(
                 "Starting execution client",
                 execution_client=self.execution_client.value.name.lower(),
                 execution_client_image=self.execution_client_image,
@@ -479,6 +563,7 @@ class Executor:
             )
             execution_client_container = self.start_execution_client(
                 container_network=containers_network,
+                pyroscope=alloy_pyroscope,
             )
 
             if self.limit_bandwidth:
@@ -510,7 +595,7 @@ class Executor:
 
             self.log.info(
                 "Running K6",
-                k6_docker_image=self.k6_image,
+                k6_docker_image=self.docker_images.get("k6", K6_DEFAULT_IMAGE),
             )
             _ = self.run_k6(
                 execution_client_container=execution_client_container,

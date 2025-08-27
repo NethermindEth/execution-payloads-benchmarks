@@ -29,16 +29,26 @@ class NethermindConfig(ClientConfig):
                 f"--JsonRpc.EnginePort={CLIENT_ENGINE_PORT}",
                 "--JsonRpc.EnabledModules=Eth,Subscribe,Trace,TxPool,Web3,Personal,Proof,Net,Parity,Health,Rpc,Debug,Admin",
                 "--Metrics.Enabled=true",
-                "--Metrics.NodeName=expb-el-nethermind",
                 f"--Metrics.ExposePort={CLIENT_METRICS_PORT}",
                 "--Metrics.ExposeHost=0.0.0.0",
-                "--log=DEBUG",
             ],
+            prometheus_metrics_path="/metrics",
         )
 
-    def get_command(self, network: Network) -> list[str]:
+    def get_command(
+        self,
+        instance: str,
+        network: Network,
+        extra_flags: list[str] = [],
+    ) -> list[str]:
+        command = [
+            f"--Metrics.NodeName={instance}",
+        ]
         if network == Network.MAINNET:
-            return self.default_command + [
-                "--config=mainnet",
-                "--Init.BaseDbPath=mainnet",
-            ]
+            command.extend(
+                [
+                    "--config=mainnet",
+                    "--Init.BaseDbPath=mainnet",
+                ]
+            )
+        return self.default_command + command + extra_flags

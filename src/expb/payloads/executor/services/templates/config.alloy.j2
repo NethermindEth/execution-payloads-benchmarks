@@ -1,0 +1,69 @@
+{# Alloy Configuration Template #}
+{# Variables available:
+  - pyroscope: Pyroscope object
+    - endpoint: Pyroscope endpoint
+    - basic_auth: Pyroscope basic auth
+      - username
+      - password
+    - port: Pyroscope port
+  - execution_metrics: Execution client prometheus metrics object
+    - address: Execution client prometheus metrics address
+    - metrics_path: Execution client prometheus metrics path
+    - scrape_interval: Execution client prometheus metrics scrape interval
+    - labels: Execution client prometheus metrics labels dictionary
+  - prometheus_rw: Prometheus remote write object
+    - endpoint: Prometheus remote write endpoint
+    - basic_auth: Prometheus remote write basic auth
+      - username
+      - password
+#}
+
+{% if pyroscope %}
+pyroscope.receive_http "default" {
+  http {
+    listen_address = "0.0.0.0"
+    listen_port = {{ pyroscope.port }}
+  }
+  forward_to = [pyroscope.write.pyroscope_backend.receiver]
+}
+
+pyroscope.write "pyroscope_backend" {
+  endpoint {
+    url = "{{ pyroscope.endpoint }}"
+    {% if pyroscope.basic_auth %}
+    basic_auth {
+      username = "{{ pyroscope.basic_auth.username }}"
+      password = "{{ pyroscope.basic_auth.password }}"
+    }
+    {% endif %}
+  }
+}
+{% endif %}
+
+{% if execution_metrics and prometheus_rw %}
+prometheus.remote_write "prometheus_backend" {
+  endpoint {
+    url = "{{ prometheus_rw.endpoint }}"
+    {% if prometheus_rw.basic_auth %}
+    basic_auth {
+      username = "{{ prometheus_rw.basic_auth.username }}"
+      password = "{{ prometheus_rw.basic_auth.password }}"
+    }
+    {% endif %}
+  }
+}
+
+prometheus.scrape "execution" {
+  targets = [{
+    "__address__" = "{{ execution_metrics.address }}"
+    {% for key, value in execution_metrics.labels.items() %}
+    "{{ key }}" = "{{ value }}"
+    {% endfor %}
+  }]
+
+  forward_to = [prometheus.remote_write.prometheus_backend.receiver]
+
+  scrape_interval = "{{ execution_metrics.scrape_interval }}"
+  metrics_path = "{{ execution_metrics.metrics_path }}"
+}
+{% endif %}
