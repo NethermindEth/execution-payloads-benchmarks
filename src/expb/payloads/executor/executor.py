@@ -498,6 +498,16 @@ class Executor:
         except docker.errors.NotFound:
             pass
 
+        # Clean alloy container
+        try:
+            alloy_container = self.docker_client.containers.get(
+                f"{self.executor_name}-alloy"
+            )
+            alloy_container.stop()
+            alloy_container.remove()
+        except docker.errors.NotFound:
+            pass
+
         # Clean docker network
         try:
             containers_network = self.docker_client.networks.get(
