@@ -30,6 +30,7 @@ class PrometheusRW:
         if self.endpoint is None:
             raise ValueError("Prometheus remote write endpoint is required")
         # Parse prometheus remote write basic auth
+        self.basic_auth = None
         basic_auth = prometheus_remote_write.get("basic_auth", None)
         if basic_auth is not None and isinstance(basic_auth, dict):
             self.basic_auth = BasicAuth(basic_auth)
@@ -48,6 +49,7 @@ class Pyroscope:
         if self.endpoint is None:
             raise ValueError("Pyroscope endpoint is required")
         # Parse pyroscope basic auth
+        self.basic_auth = None
         basic_auth = pyroscope.get("basic_auth", None)
         if basic_auth is not None and isinstance(basic_auth, dict):
             self.basic_auth = BasicAuth(basic_auth)
