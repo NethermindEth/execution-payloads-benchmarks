@@ -533,6 +533,9 @@ class Executor:
                 driver="bridge",
             )
 
+            self.log.info("Preparing Alloy config")
+            self.prepare_alloy_config()
+
             self.log.info(
                 "Starting Grafana Alloy",
                 image=self.docker_images.get("alloy", ALLOY_DEFAULT_IMAGE),

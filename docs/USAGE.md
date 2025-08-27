@@ -55,6 +55,7 @@ expb execute-scenario [OPTIONS]
 * `--scenario-name TEXT`: Scenario name  [required]
 * `--config-file PATH`: Config file  [default: expb.yaml]
 * `--log-level TEXT`: Log level (e.g., DEBUG, INFO, WARNING)  [default: INFO]
+* `--per-payload-metrics / --no-per-payload-metrics`: Collect per-payload metric. This generates a metric for each payload, which can overload the configured outputs.  [default: no-per-payload-metrics]
 * `--help`: Show this message and exit.
 
 ## `expb execute-scenarios`
@@ -72,4 +73,5 @@ expb execute-scenarios [OPTIONS]
 * `--loop / --no-loop`: Run in infinite loop  [default: no-loop]
 * `--config-file PATH`: Config file  [default: expb.yaml]
 * `--log-level TEXT`: Log level (e.g., DEBUG, INFO, WARNING)  [default: INFO]
+* `--per-payload-metrics / --no-per-payload-metrics`: Collect per-payload metric. This generates a metric for each payload, which can overload the configured outputs.  [default: no-per-payload-metrics]
 * `--help`: Show this message and exit.
