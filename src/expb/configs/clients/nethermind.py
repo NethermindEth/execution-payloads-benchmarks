@@ -32,6 +32,7 @@ class NethermindConfig(ClientConfig):
                 "--Metrics.NodeName=expb-el-nethermind",
                 f"--Metrics.ExposePort={CLIENT_METRICS_PORT}",
                 "--Metrics.ExposeHost=0.0.0.0",
+                "--log=DEBUG",
             ],
         )
 
