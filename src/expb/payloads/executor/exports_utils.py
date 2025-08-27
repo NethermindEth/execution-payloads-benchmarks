@@ -19,11 +19,6 @@ def add_pyroscope_config(
         environment["DOTNET_EnableDiagnostics_Profiler"] = "1"
         environment["PYROSCOPE_SERVER_ADDRESS"] = pyroscope.endpoint
         environment["PYROSCOPE_APPLICATION_NAME"] = executor_name
-        environment["PYROSCOPE_PROFILING_ENABLED"] = "1"
-        environment["CORECLR_ENABLE_PROFILING"] = "1"
-        environment["CORECLR_PROFILER"] = "{BD1A650D-AC5D-4896-B64F-D6FA25D6B26A}"
-        environment["CORECLR_PROFILER_PATH"] = "Pyroscope.Profiler.Native.so"
-        environment["LD_PRELOAD"] = "Pyroscope.Linux.ApiWrapper.x64.so"
         environment["PYROSCOPE_LOG_LEVEL"] = "debug"
         if pyroscope.basic_auth is not None:
             environment["PYROSCOPE_BASIC_AUTH_USER"] = pyroscope.basic_auth.username
