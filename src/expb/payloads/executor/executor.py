@@ -26,7 +26,10 @@ from expb.configs.clients import (
     CLIENT_METRICS_PORT,
 )
 from expb.payloads.utils.networking import limit_container_bandwidth
-from expb.payloads.k6_script import get_k6_script_content, build_k6_script_config
+from expb.payloads.executor.services.k6 import (
+    get_k6_script_content,
+    build_k6_script_config,
+)
 from expb.payloads.executor.exports_utils import add_pyroscope_config
 from expb.configs.defaults import (
     K6_DEFAULT_IMAGE,
