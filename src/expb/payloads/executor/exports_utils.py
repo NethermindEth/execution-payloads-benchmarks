@@ -30,8 +30,12 @@ def add_pyroscope_config(
             environment["PYROSCOPE_BASIC_AUTH_PASSWORD"] = pyroscope.basic_auth.password
         if pyroscope.tags:
             environment["PYROSCOPE_LABELS"] = ",".join(
-                [tag.replace("=", ":", 1) for tag in pyroscope.tags]
-                + [f"testid={scenario_name}client_type={client.value.name}"]
+                [t.replace("=", ":", 1) for t in pyroscope.tags]
+                + [f"testid:{scenario_name}", f"client_type:{client.value.name}"]
+            )
+        else:
+            environment["PYROSCOPE_LABELS"] = ",".join(
+                [f"testid:{scenario_name}", f"client_type:{client.value.name}"]
             )
     else:
         # Ignore other clients
