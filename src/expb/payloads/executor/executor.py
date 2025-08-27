@@ -304,7 +304,7 @@ class Executor:
             ports={
                 # f"{ALLOY_PYROSCOPE_PORT}/tcp": f"{ALLOY_PYROSCOPE_PORT}",
             },
-            command=["alloy", "run", "/etc/alloy/config.alloy"],
+            command=["run", "/etc/alloy/config.alloy"],
             detach=True,
             network=container_network.name if container_network else None,
         )

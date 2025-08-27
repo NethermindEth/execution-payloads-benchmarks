@@ -78,7 +78,7 @@ def get_k6_script_content() -> str:
 
     # Set up Jinja2 environment
     env = Environment(loader=FileSystemLoader(templates_dir))
-    template = env.get_template("k6-script.j2")
+    template = env.get_template("k6-script.js.j2")
 
     # Render the template (no variables needed for now)
     return template.render()
