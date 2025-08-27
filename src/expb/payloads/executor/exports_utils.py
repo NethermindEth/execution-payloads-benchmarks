@@ -1,3 +1,6 @@
+from expb.configs.clients import Client
+from expb.configs.exports import Pyroscope
+
 def add_pyroscope_config(
     client: Client,
     executor_name: str,
