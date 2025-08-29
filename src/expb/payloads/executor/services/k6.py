@@ -9,7 +9,7 @@ def build_k6_script_config(
     scenario_name: str,
     client: Client,
     iterations: int,
-    rate: Optional[int] = 4,  # iterations per second (IPS)
+    rate: Optional[int] = 2,  # iterations per second (IPS)
     duration: Optional[str] = None,
     pre_allocated_vus: int = 2,
     max_vus: int = 2,
