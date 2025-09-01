@@ -33,6 +33,10 @@ class NethermindConfig(ClientConfig):
                 "--Metrics.ExposeHost=0.0.0.0",
             ],
             prometheus_metrics_path="/metrics",
+            default_env={
+                "DOTNET_EnableDiagnostics": "1",
+                "COMPlus_EnableEventPipe": "1",
+            },
         )
 
     def get_command(
