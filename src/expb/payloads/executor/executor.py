@@ -70,6 +70,8 @@ class Executor:
         docker_container_upload_speed: str = DOCKER_CONTAINER_DEFAULT_UPLOAD_SPEED,
         execution_client_image: str | None = None,
         execution_client_extra_flags: list[str] = [],
+        execution_client_extra_env: dict[str, str] = {},
+        execution_client_extra_volumes: dict[str, dict[str, str]] = {},
         json_rpc_wait_max_retries: int = 16,
         pull_images: bool = False,
         limit_bandwidth: bool = False,
@@ -84,6 +86,8 @@ class Executor:
             execution_client_image or self.execution_client.value.default_image
         )
         self.execution_client_extra_flags = execution_client_extra_flags
+        self.execution_client_extra_env = execution_client_extra_env
+        self.execution_client_extra_volumes = execution_client_extra_volumes
 
         self.docker_images = docker_images
         self.k6_payloads_amount = k6_payloads_amount
@@ -146,12 +150,12 @@ class Executor:
                 "-o",
                 ",".join(
                     [
-                        f"lowerdir={self.snapshot_dir.absolute()}",
-                        f"upperdir={self._overlay_upper_dir.absolute()}",
-                        f"workdir={self._overlay_work_dir.absolute()}",
+                        f"lowerdir={self.snapshot_dir.resolve()}",
+                        f"upperdir={self._overlay_upper_dir.resolve()}",
+                        f"workdir={self._overlay_work_dir.resolve()}",
                     ]
                 ),
-                str(self._overlay_merged_dir.absolute()),
+                str(self._overlay_merged_dir.resolve()),
             ]
         )
         try:
@@ -182,12 +186,31 @@ class Executor:
         container_network: Network | None = None,
         pyroscope: Pyroscope | None = None,
     ) -> Container:
+        # Prepare execution container command
         execution_container_command = self.execution_client.value.get_command(
             instance=self.scenario_name,
             network=self.network,
             extra_flags=self.execution_client_extra_flags,
         )
-        execution_container_environment = {}
+        # Prepare execution container environment
+        execution_container_environment = self.execution_client_extra_env.copy()
+        # Prepare execution container volumes
+        execution_container_volumes = self.execution_client_extra_volumes.copy()
+        execution_container_volumes.update(
+            # Required volumes
+            {
+                self._overlay_merged_dir.resolve(): {
+                    "bind": CLIENTS_DATA_DIR,
+                    "mode": "rw",
+                },
+                self._jwt_secret_file.resolve(): {
+                    "bind": CLIENTS_JWT_SECRET_FILE,
+                    "mode": "rw",
+                },
+            }
+        )
+
+        # Add pyroscope config if available
         if pyroscope:
             add_pyroscope_config(
                 client=self.execution_client,
@@ -198,19 +221,11 @@ class Executor:
                 environment=execution_container_environment,
             )
 
+        # Run execution container
         container = self.docker_client.containers.run(
             image=self.execution_client_image,
             name=f"{self.executor_name}-{self.execution_client.value.name.lower()}",
-            volumes={
-                self._overlay_merged_dir.absolute(): {
-                    "bind": CLIENTS_DATA_DIR,
-                    "mode": "rw",
-                },
-                self._jwt_secret_file.absolute(): {
-                    "bind": CLIENTS_JWT_SECRET_FILE,
-                    "mode": "rw",
-                },
-            },
+            volumes=execution_container_volumes,
             ports={
                 f"{CLIENT_RPC_PORT}/tcp": f"{CLIENT_RPC_PORT}",
                 f"{CLIENT_ENGINE_PORT}/tcp": f"{CLIENT_ENGINE_PORT}",
@@ -298,7 +313,7 @@ class Executor:
             image=self.docker_images.get("alloy", ALLOY_DEFAULT_IMAGE),
             name=f"{self.executor_name}-alloy",
             volumes={
-                self._alloy_config_file.absolute(): {
+                self._alloy_config_file.resolve(): {
                     "bind": "/etc/alloy/config.alloy",
                     "mode": "rw",
                 },
@@ -357,19 +372,19 @@ class Executor:
         )
         k6_container_summary_file = f"{k6_container_work_dir}/k6-summary.json"
         k6_container_volumes = {
-            self.payloads_file.absolute(): {
+            self.payloads_file.resolve(): {
                 "bind": k6_container_payloads_file,
                 "mode": "rw",
             },
-            self.fcus_file.absolute(): {
+            self.fcus_file.resolve(): {
                 "bind": k6_container_fcus_file,
                 "mode": "rw",
             },
-            self._jwt_secret_file.absolute(): {
+            self._jwt_secret_file.resolve(): {
                 "bind": k6_container_jwt_secret_file,
                 "mode": "rw",
             },
-            self.outputs_dir.absolute(): {
+            self.outputs_dir.resolve(): {
                 "bind": k6_container_work_dir,
                 "mode": "rw",
             },
@@ -436,7 +451,7 @@ class Executor:
 
     # Scenario Cleanup
     def remove_directories(self) -> None:
-        umount_command = " ".join(["umount", str(self._overlay_merged_dir.absolute())])
+        umount_command = " ".join(["umount", str(self._overlay_merged_dir.resolve())])
         try:
             subprocess.run(umount_command, check=True, shell=True)
         except subprocess.CalledProcessError as e:
@@ -444,9 +459,9 @@ class Executor:
             raise e
         try:
             paths_to_remove = [
-                self._overlay_upper_dir.absolute(),
-                self._overlay_work_dir.absolute(),
-                self._overlay_merged_dir.absolute(),
+                self._overlay_upper_dir.resolve(),
+                self._overlay_work_dir.resolve(),
+                self._overlay_merged_dir.resolve(),
             ]
             for path in paths_to_remove:
                 shutil.rmtree(path)

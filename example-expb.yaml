@@ -69,3 +69,9 @@ scenarios:
     # Optional: Client extra flags
     extra_flags:
       - --flag1=value1
+    # Optional: Extra environment variables
+    extra_env:
+      KEY1: VALUE1
+    # Optional: Extra volumes to mount into the docker container
+    extra_volumes:
+      - ./extra_volume1:/extra_volume1 # <host_path>:<container_path>[:<mode>]

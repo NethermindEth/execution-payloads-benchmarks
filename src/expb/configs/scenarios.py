@@ -25,22 +25,59 @@ class Scenario:
         name: str,
         config: dict[str],
     ) -> None:
+        # Name of the scenario
         self.name = name
+        # Name of the client to use
         client_name: str = config.get("client")
         self.client: Client = Client[client_name.upper()]
+        # Image of the client to use
         self.client_image: str | None = config.get("image", None)
+        # Delay between payloads
         self.payloads_delay: float | None = config.get("delay", None)
         if self.payloads_delay is None:
             raise ValueError(f"Delay between payloads is required for scenario {name}")
+        # Amount of payloads to run
         self.payloads_amount: int | None = config.get("amount", None)
         if self.payloads_amount is None:
             raise ValueError(f"Amount of payloads is required for scenario {name}")
+        # Snapshot directory to use
         snapshot_dir: str | None = config.get("snapshot_dir", None)
         if snapshot_dir is None:
             raise ValueError(f"Snapshot directory is required for scenario {name}")
         self.snapshot_dir = Path(snapshot_dir)
+        # Payload to start from
         self.payloads_start: int | None = config.get("start", 1)
+        if self.payloads_start is not None and not isinstance(self.payloads_start, int):
+            raise ValueError(f"Payloads start must be an integer for scenario {name}")
+        # Extra flags to pass to the client
         self.extra_flags: list[str] = config.get("extra_flags", [])
+        if not isinstance(self.extra_flags, list):
+            raise ValueError(f"Extra flags must be a list for scenario {name}")
+        # Extra environment variables to pass to the client
+        self.extra_env: dict[str, str] = config.get("extra_env", {})
+        if not isinstance(self.extra_env, dict):
+            raise ValueError(
+                f"Extra environment variables must be a dict for scenario {name}"
+            )
+        # Extra volumes to mount into the docker container
+        self.extra_volumes: dict[str, dict[str, str]] = {}
+        extra_volumes: list[str] = config.get("extra_volumes", [])
+        if not isinstance(self.extra_volumes, list):
+            raise ValueError(f"Extra volumes must be a list for scenario {name}")
+        for volume in extra_volumes:
+            parts = volume.split(":")
+            if len(parts) < 2 or len(parts) > 3:
+                raise ValueError(
+                    f"Extra volume must be in the format <source_path>:<container_path>[:<mode>] for scenario {name}"
+                )
+            source_path = parts[0]
+            container_path = parts[1]
+            mode = parts[2] if len(parts) == 3 else "rw"
+            abs_source_path = Path(source_path).resolve()
+            self.extra_volumes[abs_source_path] = {
+                "bind": container_path,
+                "mode": mode,
+            }
 
 
 class Scenarios:
@@ -51,15 +88,18 @@ class Scenarios:
         if not isinstance(config, dict):
             raise ValueError("Invalid config file")
 
+        # Parse network configuration
         config_network: str = config.get("network", Network.MAINNET.name)
         self.network = Network[config_network.upper()]
 
+        # Parse docker images configurations
         pull_images: bool = config.get("pull_images", False)
         self.pull_images = pull_images
 
         images: dict[str, str] = config.get("images", {})
         self.docker_images = images
 
+        # Paths for the payloads jsonl file, fcus jsonl file, work directory, and outputs directory
         paths: dict[str, str] = config.get("paths", {})
 
         payloads_file: str = paths.get("payloads", PAYLOADS_DEFAULT_FILE)
@@ -79,6 +119,7 @@ class Scenarios:
         if exports and isinstance(exports, dict):
             self.exports = Exports(exports)
 
+        # Parse resources configurations
         resources: dict[str, str] = config.get("resources", {})
 
         docker_container_cpus: int = resources.get("cpu", DOCKER_CONTAINER_DEFAULT_CPUS)
@@ -99,6 +140,7 @@ class Scenarios:
         )
         self.docker_container_upload_speed = docker_container_upload_speed
 
+        # Parse scenarios configurations
         scenarios_configs: dict[str, dict[str]] = config.get("scenarios", {})
         if not isinstance(scenarios_configs, dict):
             raise ValueError("Invalid scenarios")
@@ -122,6 +164,8 @@ class Scenarios:
             execution_client=scenario.client,
             execution_client_image=scenario.client_image,
             execution_client_extra_flags=scenario.extra_flags,
+            execution_client_extra_env=scenario.extra_env,
+            execution_client_extra_volumes=scenario.extra_volumes,
             payloads_file=self.payloads_file,
             fcus_file=self.fcus_file,
             work_dir=self.work_dir,
