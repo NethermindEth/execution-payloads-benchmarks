@@ -82,3 +82,7 @@ scenarios:
         source: ./extra_volume1
         # Optional: Volume mode
         mode: rw
+    # Optional: Commands to run in the docker container during the test execution
+    # These will be executed using `docker exec` after the execution client is started and stopped once the test is done
+    extra_commands:
+      - ./extra_command1

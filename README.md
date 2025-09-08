@@ -33,4 +33,10 @@ expb execute-scenario --scenario-name example --config-file expb.yaml
 expb execute-scenarios --config-file expb.yaml --loop
 ```
 
+#### Single Scenario with duration metrics per payload
+
+```bash
+expb execute-scenario --scenario-name example --config-file expb.yaml --per-payload-metrics
+```
+
 For other use cases or more details see [CLI usage docs](docs/USAGE.md).

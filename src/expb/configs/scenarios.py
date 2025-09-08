@@ -2,7 +2,7 @@ import yaml
 
 from pathlib import Path
 
-from expb.payloads import Executor
+from expb.payloads import Executor, ExecutorConfig
 from expb.configs.clients import Client
 from expb.configs.networks import Network
 from expb.logging import Logger
@@ -78,6 +78,10 @@ class Scenario:
                 # This is a custom field not used by the docker api but it's used by the executor
                 "source": source_path,
             }
+        # Extra commands to run in the docker container during the test execution
+        self.extra_commands: list[str] = config.get("extra_commands", [])
+        if not isinstance(self.extra_commands, list):
+            raise ValueError(f"Extra commands must be a list for scenario {name}")
 
 
 class Scenarios:
@@ -159,28 +163,31 @@ class Scenarios:
         logger: Logger = Logger(),
     ) -> Executor:
         executor = Executor(
-            scenario_name=scenario.name,
-            network=self.network,
-            execution_client=scenario.client,
-            execution_client_image=scenario.client_image,
-            execution_client_extra_flags=scenario.extra_flags,
-            execution_client_extra_env=scenario.extra_env,
-            execution_client_extra_volumes=scenario.extra_volumes,
-            payloads_file=self.payloads_file,
-            fcus_file=self.fcus_file,
-            work_dir=self.work_dir,
-            snapshot_dir=scenario.snapshot_dir,
-            docker_container_cpus=self.docker_container_cpus,
-            docker_container_download_speed=self.docker_container_download_speed,
-            docker_container_upload_speed=self.docker_container_upload_speed,
-            docker_container_mem_limit=self.docker_container_mem_limit,
-            outputs_dir=self.outputs_dir,
-            pull_images=self.pull_images,
-            docker_images=self.docker_images,
-            k6_payloads_amount=scenario.payloads_amount,
-            k6_payloads_delay=scenario.payloads_delay,
-            k6_payloads_start=scenario.payloads_start,
-            exports=self.exports,
+            config=ExecutorConfig(
+                scenario_name=scenario.name,
+                network=self.network,
+                execution_client=scenario.client,
+                execution_client_image=scenario.client_image,
+                execution_client_extra_flags=scenario.extra_flags,
+                execution_client_extra_env=scenario.extra_env,
+                execution_client_extra_volumes=scenario.extra_volumes,
+                execution_client_extra_commands=scenario.extra_commands,
+                payloads_file=self.payloads_file,
+                fcus_file=self.fcus_file,
+                work_dir=self.work_dir,
+                snapshot_dir=scenario.snapshot_dir,
+                docker_container_cpus=self.docker_container_cpus,
+                docker_container_download_speed=self.docker_container_download_speed,
+                docker_container_upload_speed=self.docker_container_upload_speed,
+                docker_container_mem_limit=self.docker_container_mem_limit,
+                outputs_dir=self.outputs_dir,
+                pull_images=self.pull_images,
+                docker_images=self.docker_images,
+                k6_payloads_amount=scenario.payloads_amount,
+                k6_payloads_delay=scenario.payloads_delay,
+                k6_payloads_start=scenario.payloads_start,
+                exports=self.exports,
+            ),
             logger=logger,
         )
         return executor
