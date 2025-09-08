@@ -74,4 +74,11 @@ scenarios:
       KEY1: VALUE1
     # Optional: Extra volumes to mount into the docker container
     extra_volumes:
-      - ./extra_volume1:/extra_volume1 # <host_path>:<container_path>[:<mode>]
+      # Volume name
+      volume1:
+        # Volume bind path inside the container
+        bind: /extra_volume1
+        # Optional: Host path on the host, if not provided the test output directory will be used as base path plus the volume name
+        source: ./extra_volume1
+        # Optional: Volume mode
+        mode: rw

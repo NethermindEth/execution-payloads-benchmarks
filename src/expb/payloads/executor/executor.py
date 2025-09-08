@@ -114,6 +114,9 @@ class Executor:
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         self.outputs_dir = outputs_dir / f"{self.executor_name}-{timestamp}"
         self.outputs_dir.mkdir(parents=True, exist_ok=True)
+        self.volumes_dir = self.outputs_dir / "volumes"
+        if self.execution_client_extra_volumes:
+            self.volumes_dir.mkdir(parents=True, exist_ok=True)
         self._k6_script_file = self.outputs_dir / "k6-script.js"
         self._k6_config_file = self.outputs_dir / "k6-config.json"
         self._alloy_config_file = self.outputs_dir / "config.alloy"
@@ -195,7 +198,15 @@ class Executor:
         # Prepare execution container environment
         execution_container_environment = self.execution_client_extra_env.copy()
         # Prepare execution container volumes
-        execution_container_volumes = self.execution_client_extra_volumes.copy()
+        execution_container_volumes = {}
+        for volume_name, volume_config in self.execution_client_extra_volumes.items():
+            source_path = volume_config.get("source", None)
+            if source_path is None:
+                source_path = self.volumes_dir / volume_name
+            execution_container_volumes[source_path.resolve()] = {
+                "bind": volume_config["bind"],
+                "mode": volume_config["mode"],
+            }
         execution_container_volumes.update(
             # Required volumes
             {

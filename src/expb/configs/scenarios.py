@@ -61,22 +61,22 @@ class Scenario:
             )
         # Extra volumes to mount into the docker container
         self.extra_volumes: dict[str, dict[str, str]] = {}
-        extra_volumes: list[str] = config.get("extra_volumes", [])
-        if not isinstance(self.extra_volumes, list):
-            raise ValueError(f"Extra volumes must be a list for scenario {name}")
-        for volume in extra_volumes:
-            parts = volume.split(":")
-            if len(parts) < 2 or len(parts) > 3:
+        extra_volumes: dict[str, dict[str, str]] = config.get("extra_volumes", {})
+        if not isinstance(self.extra_volumes, dict):
+            raise ValueError(f"Extra volumes must be a dict for scenario {name}")
+        for volume_name, volume_config in extra_volumes.items():
+            bind_path = volume_config.get("bind", None)
+            if bind_path is None:
                 raise ValueError(
-                    f"Extra volume must be in the format <source_path>:<container_path>[:<mode>] for scenario {name}"
+                    f"Bind path is required for volume {volume_name} for scenario {name}"
                 )
-            source_path = parts[0]
-            container_path = parts[1]
-            mode = parts[2] if len(parts) == 3 else "rw"
-            abs_source_path = Path(source_path).resolve()
-            self.extra_volumes[abs_source_path] = {
-                "bind": container_path,
+            source_path = volume_config.get("source", None)
+            mode = volume_config.get("mode", "rw")
+            self.extra_volumes[volume_name] = {
+                "bind": bind_path,
                 "mode": mode,
+                # This is a custom field not used by the docker api but it's used by the executor
+                "source": source_path,
             }
 
 
