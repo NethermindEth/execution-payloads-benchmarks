@@ -1,4 +1,3 @@
-import os
 import json
 import time
 import shutil
@@ -291,7 +290,7 @@ class Executor:
                     stdout=True,
                     stderr=True,
                     stream=True,
-                    user=self.config.docker_user,
+                    user=str(self.config.docker_user),
                 )
                 for line in result.output:
                     f.write(line)
