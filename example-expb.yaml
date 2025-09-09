@@ -84,5 +84,6 @@ scenarios:
         mode: rw
     # Optional: Commands to run in the docker container during the test execution
     # These will be executed using `docker exec` after the execution client is started and stopped once the test is done
+    # Each command will be executed in a separate thread which can affect main process performance when too many commands
     extra_commands:
       - ./extra_command1

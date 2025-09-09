@@ -116,8 +116,19 @@ class ExecutorConfig:
 
         ## Client Additional Volumes directory
         self.volumes_dir = self.outputs_dir / "volumes"
-        if self.execution_client_extra_volumes:
+        if self.execution_client_extra_volumes and any(
+            [
+                volume
+                for volume in self.execution_client_extra_volumes.values()
+                if volume.get("source") is not None
+            ]
+        ):
             self.volumes_dir.mkdir(parents=True, exist_ok=True)
+
+        ## Client extra Commands outputs directory
+        self.extra_commands_outputs_dir = self.outputs_dir / "commands"
+        if self.execution_client_extra_commands:
+            self.extra_commands_outputs_dir.mkdir(parents=True, exist_ok=True)
 
         ## K6 script and config files
         self.k6_script_file = self.outputs_dir / "k6-script.js"

@@ -6,17 +6,16 @@ import docker
 import secrets
 import requests
 import subprocess
-
 import docker.errors
 
 from requests.adapters import HTTPAdapter
+from concurrent.futures import ThreadPoolExecutor, Future
 from urllib3.util.retry import Retry
 from docker.models.containers import Container
 from docker.models.networks import Network
 
 from expb.logging import Logger
 from expb.configs.exports import Pyroscope
-
 from expb.payloads.utils.networking import limit_container_bandwidth
 from expb.payloads.executor.services.k6 import (
     get_k6_script_content,
@@ -37,6 +36,8 @@ class Executor:
     ):
         self.config = config
         self.log = logger
+        self.running_command_futures: list[Future] = []
+        self.executor_pool: ThreadPoolExecutor | None = None
 
     # Scenario Setup
     def prepare_directories(self) -> None:
@@ -197,7 +198,7 @@ class Executor:
             )
         )
         self.log.info(
-            "Alloy config prepared", alloy_config_file=self._alloy_config_file
+            "Alloy config prepared", alloy_config_file=self.config.alloy_config_file
         )
 
     def start_alloy(
@@ -266,6 +267,94 @@ class Executor:
         )
         return container
 
+    # Extra Commands Execution
+    def _execute_single_command(
+        self,
+        container: Container,
+        command: str,
+        command_id: int,
+    ) -> None:
+        command_output_file = (
+            self.config.extra_commands_outputs_dir / f"cmd-{command_id}.log"
+        )
+        with command_output_file.open("wb") as f:
+            try:
+                self.log.info(
+                    "Starting extra command execution",
+                    id=command_id,
+                    output_file=str(command_output_file),
+                )
+
+                # Execute the command in the container
+                result = container.exec_run(
+                    command,
+                    stdout=True,
+                    stderr=True,
+                    stream=True,
+                )
+                for line in result.output:
+                    f.write(line)
+            except Exception as e:
+                self.log.error(
+                    "Command execution failed",
+                    command_id=command_id,
+                    error=str(e),
+                )
+            finally:
+                f.flush()
+
+    def start_extra_commands(
+        self,
+        execution_client_container: Container,
+    ) -> None:
+        # Check if there are any extra commands to execute
+        if not self.config.execution_client_extra_commands:
+            return
+
+        self.log.info(
+            "Starting extra commands execution",
+            commands_count=len(self.config.execution_client_extra_commands),
+        )
+
+        # Create thread pool executor for parallel execution
+        self.executor_pool = ThreadPoolExecutor(
+            max_workers=len(self.config.execution_client_extra_commands),
+            thread_name_prefix="extra-command",
+        )
+
+        # Submit all commands for parallel execution
+        for command_id, command in enumerate(
+            self.config.execution_client_extra_commands
+        ):
+            future = self.executor_pool.submit(
+                self._execute_single_command,
+                execution_client_container,
+                command,
+                command_id,
+            )
+            self.running_command_futures.append(future)
+
+    def stop_extra_commands(self) -> None:
+        # Check if there is any extra command
+        if not self.running_command_futures:
+            return
+
+        self.log.info(
+            "Stopping extra commands execution",
+            running_futures=len(self.running_command_futures),
+        )
+
+        # Cancel any pending futures
+        for future in self.running_command_futures:
+            if not future.done():
+                future.cancel()
+
+        # Clean up
+        self.running_command_futures.clear()
+        if self.executor_pool:
+            self.executor_pool.shutdown(wait=True)
+            self.executor_pool = None
+
     # Scenario Cleanup
     def remove_directories(self) -> None:
         umount_command = " ".join(
@@ -289,7 +378,11 @@ class Executor:
             raise e
 
     def cleanup_scenario(self) -> None:
-        self.log.info("Cleaning up scenario", scenario=self.executor_name)
+        self.log.info("Cleaning up scenario", scenario=self.config.executor_name)
+
+        # Stop all running extra commands first
+        self.stop_extra_commands()
+
         # Clean k6 container
         try:
             k6_container = self.config.docker_client.containers.get(
@@ -450,6 +543,9 @@ class Executor:
                 self.log.error("Failed to wait for client json rpc", error=e)
                 raise e
 
+            # Start extra commands in parallel
+            self.start_extra_commands(execution_client_container)
+
             self.log.info("Preparing K6 script")
             self.prepare_k6_script()
 
@@ -469,7 +565,7 @@ class Executor:
 
             self.log.info(
                 "Payloads execution completed",
-                execution_client=self.execution_client.value.name.lower(),
+                execution_client=self.config.get_execution_client_name(),
             )
         except Exception as e:
             self.log.error("Failed to execute scenario", error=e)
