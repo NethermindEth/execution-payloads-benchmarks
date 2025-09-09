@@ -135,8 +135,8 @@ class Executor:
             cpu_count=self.config.docker_container_cpus,  # Only works for windows
             nano_cpus=self.config.docker_container_cpus * 10**9,
             mem_limit=self.config.docker_container_mem_limit,
-            user=os.getuid(),
-            group_add=[os.getgid()],
+            user=self.config.docker_user,
+            group_add=self.config.docker_group_add,
         )
         return container
 
@@ -262,8 +262,8 @@ class Executor:
             command=k6_container_command,
             network=container_network.name if container_network else None,
             detach=False,
-            user=os.getuid(),
-            group_add=[os.getgid()],
+            user=self.config.docker_user,
+            group_add=self.config.docker_group_add,
         )
         return container
 
@@ -287,10 +287,11 @@ class Executor:
 
                 # Execute the command in the container
                 result = container.exec_run(
-                    command,
+                    cmd=command,
                     stdout=True,
                     stderr=True,
                     stream=True,
+                    user=self.config.docker_user,
                 )
                 for line in result.output:
                     f.write(line)

@@ -1,3 +1,4 @@
+import os
 import time
 import docker
 
@@ -80,6 +81,8 @@ class ExecutorConfig:
         self.docker_client = docker.from_env()
         self.docker_images = docker_images
         self.pull_images = pull_images
+        self.docker_user = os.getuid()
+        self.docker_group_add = [os.getgid()]
         ## Docker container config
         self.docker_container_cpus = docker_container_cpus
         self.docker_container_mem_limit = docker_container_mem_limit
