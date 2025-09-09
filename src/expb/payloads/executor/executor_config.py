@@ -120,7 +120,7 @@ class ExecutorConfig:
             [
                 volume
                 for volume in self.execution_client_extra_volumes.values()
-                if volume.get("source") is not None
+                if volume.get("source") is None
             ]
         ):
             self.volumes_dir.mkdir(parents=True, exist_ok=True)
@@ -238,6 +238,7 @@ class ExecutorConfig:
                 },
             }
         )
+        return execution_container_volumes
 
     ### Grafana Alloy
     def get_alloy_container_name(self) -> str:
