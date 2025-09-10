@@ -341,14 +341,13 @@ class Executor:
             return
 
         self.log.info(
-            "Stopping extra commands execution",
-            running_futures=len(self.running_command_futures),
+            "Cleaning up extra commands",
         )
 
         # Clean up
         self.running_command_futures.clear()
         if self.executor_pool:
-            self.executor_pool.shutdown(wait=True)
+            self.executor_pool.shutdown(wait=False, cancel_futures=True)
             self.executor_pool = None
 
     # Scenario Cleanup
