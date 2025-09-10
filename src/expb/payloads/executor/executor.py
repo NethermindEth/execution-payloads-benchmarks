@@ -294,6 +294,7 @@ class Executor:
                 )
                 for line in result.output:
                     f.write(line)
+                    f.flush()  # Write line to file as soon as possible
             except Exception as e:
                 self.log.error(
                     "Command execution failed",
@@ -343,11 +344,6 @@ class Executor:
             "Stopping extra commands execution",
             running_futures=len(self.running_command_futures),
         )
-
-        # Cancel any pending futures
-        for future in self.running_command_futures:
-            if not future.done():
-                future.cancel()
 
         # Clean up
         self.running_command_futures.clear()
