@@ -32,23 +32,25 @@ class Scenario:
         self.client: Client = Client[client_name.upper()]
         # Image of the client to use
         self.client_image: str | None = config.get("image", None)
-        # Delay between payloads
-        self.payloads_delay: float | None = config.get("delay", None)
-        if self.payloads_delay is None:
-            raise ValueError(f"Delay between payloads is required for scenario {name}")
+        # Skip number of payloads
+        self.payloads_skip: int = config.get("skip", 0)
+        if not isinstance(self.payloads_skip, int):
+            raise ValueError(f"Skip number of payloads is invalid for scenario {name}")
         # Amount of payloads to run
         self.payloads_amount: int | None = config.get("amount", None)
-        if self.payloads_amount is None:
+        if self.payloads_amount is None or not isinstance(self.payloads_amount, int):
             raise ValueError(f"Amount of payloads is required for scenario {name}")
+        # Payload to use as warmup(no metrics will be collected for those)
+        self.payloads_warmup: int = config.get("warmup", 0)
+        if not isinstance(self.payloads_warmup, int):
+            raise ValueError(
+                f"Warmup number of payloads is invalid for scenario {name}"
+            )
         # Snapshot directory to use
         snapshot_dir: str | None = config.get("snapshot_dir", None)
         if snapshot_dir is None:
             raise ValueError(f"Snapshot directory is required for scenario {name}")
         self.snapshot_dir = Path(snapshot_dir)
-        # Payload to start from
-        self.payloads_start: int | None = config.get("start", 1)
-        if self.payloads_start is not None and not isinstance(self.payloads_start, int):
-            raise ValueError(f"Payloads start must be an integer for scenario {name}")
         # Extra flags to pass to the client
         self.extra_flags: list[str] = config.get("extra_flags", [])
         if not isinstance(self.extra_flags, list):
@@ -184,8 +186,8 @@ class Scenarios:
                 pull_images=self.pull_images,
                 docker_images=self.docker_images,
                 k6_payloads_amount=scenario.payloads_amount,
-                k6_payloads_delay=scenario.payloads_delay,
-                k6_payloads_start=scenario.payloads_start,
+                k6_payloads_skip=scenario.payloads_skip,
+                k6_payloads_warmup=scenario.payloads_warmup,
                 exports=self.exports,
             ),
             logger=logger,

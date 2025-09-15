@@ -58,12 +58,12 @@ scenarios:
     client: nethermind
     # Required: Snapshot directory for the selected client and network
     snapshot_dir: ./snapthots/nethermind
-    # Required: Delay between payloads in seconds
-    delay: 12.0
     # Required: Number of payloads to run
     amount: 100
-    # Optional: Payloads row to start from the payloads file
-    start: 1
+    # Optional: Number of payloads to skip from the payloads file
+    skip: 0
+    # Optional: Number of payloads to execute as warmup(no metrics will be collected for those)
+    warmup: 0
     # Optional: Client image
     image: ethpandaops/nethermind:performance
     # Optional: Client extra flags

@@ -40,8 +40,8 @@ class ExecutorConfig:
         execution_client: Client,
         snapshot_dir: Path,
         k6_payloads_amount: int,
-        k6_payloads_delay: float,
-        k6_payloads_start: int = 1,
+        k6_payloads_skip: int = 0,
+        k6_payloads_warmup: int = 0,
         docker_images: dict[str, str] = {},
         payloads_file: Path = PAYLOADS_DEFAULT_FILE,
         fcus_file: Path = FCUS_DEFAULT_FILE,
@@ -90,10 +90,10 @@ class ExecutorConfig:
         self.docker_container_upload_speed = docker_container_upload_speed
         self.limit_bandwidth = limit_bandwidth
         self.json_rpc_wait_max_retries = json_rpc_wait_max_retries
-        ## K6 config
+        ## K6 script config
         self.k6_payloads_amount = k6_payloads_amount
-        self.k6_payloads_delay = k6_payloads_delay
-        self.k6_payloads_start = k6_payloads_start
+        self.k6_payloads_skip = k6_payloads_skip
+        self.k6_payloads_warmup = k6_payloads_warmup
 
         # Executor Directories
         ## Payloads and FCUs
@@ -340,8 +340,8 @@ class ExecutorConfig:
             f"--env=EXPB_PAYLOADS_FILE_PATH={self._k6_container_payloads_file}",
             f"--env=EXPB_FCUS_FILE_PATH={self._k6_container_fcus_file}",
             f"--env=EXPB_JWTSECRET_FILE_PATH={self._k6_container_jwt_secret_file}",
-            f"--env=EXPB_PAYLOADS_DELAY={self.k6_payloads_delay}",
-            f"--env=EXPB_PAYLOADS_START={self.k6_payloads_start}",
+            f"--env=EXPB_PAYLOADS_SKIP={self.k6_payloads_skip}",
+            f"--env=EXPB_PAYLOADS_WARMUP={self.k6_payloads_warmup}",
             f"--env=EXPB_ENGINE_ENDPOINT={execution_client_engine_url}",
             f"--env=EXPB_USE_PERPAYLOAD_METRIC={str(collect_per_payload_metrics).lower()}",
         ]
