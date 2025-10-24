@@ -277,10 +277,13 @@ class Compressor:
             self.prepare_directories()
             jwt_provider = self.prepare_jwt_secret_file()
             self.pull_docker_images()
-            self._nethermind_engine_url = self.start_nethermind()
-            self.wait_for_client_json_rpc(jwt_provider, self._nethermind_engine_url)
+            nethermind_engine_url = self.start_nethermind()
+            self.wait_for_client_json_rpc(jwt_provider, nethermind_engine_url)
             self._logger.info("Payloads compression setup prepared successfully")
-            self.start_payloads_compression()
+            self.start_payloads_compression(
+                jwt_provider,
+                nethermind_engine_url,
+            )
             self._logger.info("Payloads compression completed successfully")
         except Exception as e:
             self._logger.error("Failed to prepare payloads compression setup", error=e)
@@ -288,7 +291,11 @@ class Compressor:
         finally:
             self.cleanup_compression()
 
-    def start_payloads_compression(self) -> None:
+    def start_payloads_compression(
+        self,
+        jwt_provider: JWTProvider,
+        nethermind_engine_url: str,
+    ) -> None:
         self._logger.info("Starting payloads compression")
         with self._input_payloads_file.open("r") as f:
             payloads_to_compress = []
@@ -301,7 +308,12 @@ class Compressor:
                     current_block = int(payload_data["params"][0]["blockNumber"], 16)
                 # Check if there was a hard fork
                 if prev_method and payload_data["method"] != prev_method:
-                    self._compress_payloads(current_block, payloads_to_compress)
+                    self._compress_payloads(
+                        jwt_provider,
+                        current_block,
+                        nethermind_engine_url,
+                        payloads_to_compress,
+                    )
                     current_block += 1
                     payloads_to_compress = []
 
@@ -311,13 +323,23 @@ class Compressor:
 
                 # Check if compression factor is reached
                 if len(payloads_to_compress) % self._compression_factor == 0:
-                    self._compress_payloads(current_block, payloads_to_compress)
+                    self._compress_payloads(
+                        jwt_provider,
+                        current_block,
+                        nethermind_engine_url,
+                        payloads_to_compress,
+                    )
                     current_block += 1
                     payloads_to_compress = []
 
             # Check if there is any payload left
             if payloads_to_compress:
-                self._compress_payloads(current_block, payloads_to_compress)
+                self._compress_payloads(
+                    jwt_provider,
+                    current_block,
+                    nethermind_engine_url,
+                    payloads_to_compress,
+                )
 
         self._logger.info("Done compressing payloads")
 
