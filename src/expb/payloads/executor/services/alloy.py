@@ -1,5 +1,5 @@
 from pathlib import Path
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Template
 
 from expb.configs.clients import Client
 from expb.configs.exports import Pyroscope, PrometheusRW
@@ -19,10 +19,10 @@ def get_alloy_config(
     # Get the directory containing this file
     current_dir = Path(__file__).parent
     templates_dir = current_dir / "templates"
+    template_file = templates_dir / "config.alloy.j2"
 
     # Set up Jinja2 environment
-    env = Environment(loader=FileSystemLoader(templates_dir))
-    template = env.get_template("config.alloy.j2")
+    template = Template(template_file.read_text())
 
     pyroscope_config = (
         {

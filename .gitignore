@@ -195,6 +195,7 @@ cython_debug/
 
 # Payloads
 /payloads/
+/compressed-payloads/
 
 # DS_Store
 .DS_Store
