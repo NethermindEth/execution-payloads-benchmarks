@@ -203,6 +203,7 @@ class Compressor:
         jwt_provider: JWTProvider,
         execution_client_rpc_url: str,
     ) -> None:
+        self._logger.info("Waiting for client json rpc to be available")
         time.sleep(30)
         jwt = jwt_provider.get_jwt(expiration_seconds=300)  # 5 minutes expiration
         headers = {
@@ -484,9 +485,11 @@ class Compressor:
             payload = execution_payload
         elif method == "engine_newPayloadV3":
             payload = execution_payload
+            blobs_versioned_hashes = []
             parent_beacon_block_root = execution_payload["parentHash"]
         elif method == "engine_newPayloadV4":
             payload = execution_payload
+            blobs_versioned_hashes = []
             parent_beacon_block_root = execution_payload["parentHash"]
             execution_requests = []
         else:
