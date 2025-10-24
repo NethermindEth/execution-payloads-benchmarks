@@ -69,6 +69,9 @@ class Compressor:
         # Nethermind snapshot directory
         self._nethermind_snapshot_dir = nethermind_snapshot_dir
 
+        # Nethermind logs file
+        self._nethermind_conatainer_logs_file = output_payloads_dir / "nethermind.log"
+
         # Overlay directories
         self._overlay_work_dir = output_payloads_dir / "work"
         self._overlay_upper_dir = output_payloads_dir / "upper"
@@ -242,6 +245,16 @@ class Compressor:
                 self._nethermind_docker_name
             )
             nethermind_container.stop()
+            logs = nethermind_container.logs(
+                stream=True,
+                follow=False,
+                stdout=True,
+                stderr=True,
+            )
+            with open(self._nethermind_conatainer_logs_file, "wb") as f:
+                for line in logs:
+                    f.write(line)
+            logs.close()
             nethermind_container.remove()
             self._logger.info("Nethermind container stopped and removed successfully")
         except docker.errors.NotFound:
