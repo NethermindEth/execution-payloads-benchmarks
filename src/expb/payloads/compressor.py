@@ -182,7 +182,9 @@ class Compressor:
             command=Client.NETHERMIND.value.get_command(
                 instance=self._nethermind_docker_name,
                 network=self._network,
-                extra_flags=[],
+                extra_flags=[
+                    "--Blocks.TargetBlockGasLimit=4000000000",  # TODO: make it configurable
+                ],
             ),
             detach=True,
             network=self._nethermind_container_network_name,
@@ -411,6 +413,42 @@ class Compressor:
         with self._output_fcus_file.open("a") as f:
             f.write(json.dumps(compressed_fcu_req))
             f.write("\n")
+
+        # Send compressed payload requests to prepare for next one
+        jwt = jwt_provider.get_jwt()
+        r.post(
+            url=nethermind_engine_url,
+            headers={
+                "Authorization": f"Bearer {jwt}",
+                "Content-Type": "application/json",
+            },
+            json=compressed_new_payload_req,
+        )
+        if not resp.ok:
+            self._logger.error(
+                "Failed to send compressed new payload request",
+                status_code=resp.status_code,
+                response=resp.text,
+            )
+            raise Exception(resp.text)
+
+        # Send compressed forkchoice updated request
+        jwt = jwt_provider.get_jwt()
+        resp = r.post(
+            url=nethermind_engine_url,
+            headers={
+                "Authorization": f"Bearer {jwt}",
+                "Content-Type": "application/json",
+            },
+            json=compressed_fcu_req,
+        )
+        if not resp.ok:
+            self._logger.error(
+                "Failed to send compressed fcu request",
+                status_code=resp.status_code,
+                response=resp.text,
+            )
+            raise Exception(resp.text)
 
     def get_fcu_method_from_payload(
         self,
