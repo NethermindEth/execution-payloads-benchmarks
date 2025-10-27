@@ -419,7 +419,7 @@ class Compressor:
                 )
 
                 # Get gas limit
-                current_gas_limit = latest_block_result["gasLimit"]
+                current_gas_limit = int(latest_block_result["gasLimit"], 16)
                 current_block += 1
                 self._logger.info(
                     "Gas limit successfully increased",
