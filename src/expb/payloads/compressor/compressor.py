@@ -186,6 +186,7 @@ class Compressor:
                 instance=self._nethermind_docker_name,
                 network=self._network,
                 extra_flags=[
+                    "--log=DEBUG",
                     f"--Blocks.TargetBlockGasLimit={self._target_gas_limit}",
                 ],
             ),
