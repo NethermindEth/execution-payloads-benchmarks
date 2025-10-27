@@ -447,7 +447,7 @@ class Compressor:
                 )
                 raise e
         self._logger.info(
-            "Gas limit increased successfully",
+            "Target gas limit reached",
             current_block=(current_block - 1),
             target_gas_limit=self._target_gas_limit,
         )

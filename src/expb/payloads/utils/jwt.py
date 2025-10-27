@@ -12,6 +12,7 @@ class JWTProvider:
     def __init__(
         self,
         jwt_secret_file: Path,
+        expiration_threshold_seconds: int = 10,
     ) -> None:
         if not jwt_secret_file.is_file():
             raise FileNotFoundError(f"JWT secret file not found: {jwt_secret_file}")
@@ -24,10 +25,12 @@ class JWTProvider:
         self._jwt_cache: dict[str, int] = {"token": "", "exp": 0}
         # Semaphore for thread-safe cache access
         self._cache_lock = threading.Lock()
+        # Token expiration threshold
+        self._expiration_threshold_seconds = expiration_threshold_seconds
 
     def get_jwt(
         self,
-        expiration_seconds: int = 60,
+        expiration_seconds: int = 120,
     ) -> str:
         """
         Get JWT token with caching mechanism.
@@ -39,7 +42,9 @@ class JWTProvider:
         # Check cache with lock
         with self._cache_lock:
             # Return cached token if still valid (with 2-second buffer)
-            if self._jwt_cache["token"] and now < (self._jwt_cache["exp"] - 2):
+            if self._jwt_cache["token"] and now < (
+                self._jwt_cache["exp"] - self._expiration_threshold_seconds
+            ):
                 return self._jwt_cache["token"]
 
         # Generate new token (outside lock to avoid blocking other threads)
@@ -71,7 +76,10 @@ class JWTProvider:
         # Update cache with lock
         with self._cache_lock:
             # Double-check pattern: another thread might have updated the cache
-            if not (self._jwt_cache["token"] and now < (self._jwt_cache["exp"] - 2)):
+            if not (
+                self._jwt_cache["token"]
+                and now < (self._jwt_cache["exp"] - self._expiration_threshold_seconds)
+            ):
                 self._jwt_cache = {"token": token, "exp": exp}
 
         return token

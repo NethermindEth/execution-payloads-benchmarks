@@ -20,8 +20,9 @@ def engine_request(
     engine_url: str,
     jwt_provider: JWTProvider,
     rpc_request,
+    expiration_seconds: int = 60,
 ):
-    jwt = jwt_provider.get_jwt()
+    jwt = jwt_provider.get_jwt(expiration_seconds=expiration_seconds)
     resp = requests.post(
         url=engine_url,
         headers={
