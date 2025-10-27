@@ -410,7 +410,7 @@ class Compressor:
                     nethermind_engine_url,
                     jwt_provider,
                     {
-                        "method": "eth_blockByNumber",
+                        "method": "eth_getBlockByNumber",
                         "params": [
                             "latest",
                             False,
