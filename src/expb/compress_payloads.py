@@ -5,6 +5,10 @@ from typing_extensions import Annotated
 
 from expb.payloads import Compressor
 from expb.configs.networks import Network
+from expb.configs.defaults import (
+    DOCKER_CONTAINER_DEFAULT_CPUS,
+    DOCKER_CONTAINER_DEFAULT_MEM_LIMIT,
+)
 from expb.logging import setup_logging
 
 app = typer.Typer()
@@ -32,6 +36,12 @@ def compress_payloads(
     target_gas_limit: Annotated[
         int, typer.Option(help="Target Gas limit for compressed blocks")
     ] = 4000000000,  # 4 Giga gas
+    cpu_count: Annotated[
+        int, typer.Option(help="CPU count for the Nethermind container")
+    ] = DOCKER_CONTAINER_DEFAULT_CPUS,
+    mem_limit: Annotated[
+        str, typer.Option(help="Memory limit for the Nethermind container")
+    ] = DOCKER_CONTAINER_DEFAULT_MEM_LIMIT,
     log_level: Annotated[
         str, typer.Option(help="Log level (e.g., DEBUG, INFO, WARNING)")
     ] = "INFO",
@@ -43,6 +53,8 @@ def compress_payloads(
 
     compressor = Compressor(
         network=network,
+        cpu_count=cpu_count,
+        mem_limit=mem_limit,
         compression_factor=compression_factor,
         target_gas_limit=target_gas_limit,
         nethermind_snapshot_dir=nethermind_snapshot_dir,

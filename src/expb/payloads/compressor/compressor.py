@@ -29,6 +29,8 @@ class Compressor:
     def __init__(
         self,
         network: Network,
+        cpu_count: int,
+        mem_limit: str,
         compression_factor: int,
         target_gas_limit: int,
         nethermind_snapshot_dir: Path,
@@ -42,6 +44,8 @@ class Compressor:
 
         # General config
         self._network = network
+        self._cpu_count = cpu_count
+        self._mem_limit = mem_limit
         self._compression_factor = compression_factor
         self._target_gas_limit = target_gas_limit
 
@@ -194,6 +198,9 @@ class Compressor:
             ),
             detach=True,
             network=self._nethermind_container_network_name,
+            cpu_count=self._cpu_count,
+            nano_cpus=self._cpu_count * 10**9,
+            mem_limit=self._mem_limit,
             user=os.getuid(),
             group_add=os.getgid(),
         )
