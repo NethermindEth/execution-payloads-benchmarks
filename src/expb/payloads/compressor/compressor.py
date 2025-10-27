@@ -378,6 +378,8 @@ class Compressor:
                     nethermind_engine_url,
                     jwt_provider,
                     {
+                        "id": current_block,
+                        "jsonrpc": "2.0",
                         "method": hacked_method,
                         "params": [
                             [],
@@ -470,6 +472,8 @@ class Compressor:
         method: str = payloads[0]["method"]
         get_payload_method = method.replace("new", "get")
         hacked_get_payload_request = {
+            "id": block_number,
+            "jsonrpc": "2.0",
             "method": f"{get_payload_method}Hacked",
             "params": [
                 txs,
