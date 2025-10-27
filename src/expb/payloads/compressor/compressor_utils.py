@@ -39,6 +39,7 @@ def engine_request(
         if not resp.ok:
             if resp.status_code == 401:
                 expiration_seconds = min(expiration_seconds * 2, 3600)
+                jwt_provider.invalidate_jwt()
                 retries -= 1
                 continue
             raise RPCError(
@@ -66,7 +67,6 @@ def engine_request(
 
     raise RPCError(
         error="Authentication retries exhausted",
-        retries=retries,
         status_code=401,
         response=None,
     )

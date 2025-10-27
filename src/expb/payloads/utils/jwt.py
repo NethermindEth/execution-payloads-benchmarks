@@ -28,6 +28,10 @@ class JWTProvider:
         # Token expiration threshold
         self._expiration_threshold_seconds = expiration_threshold_seconds
 
+    def invalidate_jwt(self) -> None:
+        with self._cache_lock:
+            self._jwt_cache = {"token": "", "exp": 0}
+
     def get_jwt(
         self,
         expiration_seconds: int = 120,
