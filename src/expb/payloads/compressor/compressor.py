@@ -22,7 +22,11 @@ from expb.configs.clients import (
     CLIENT_ENGINE_PORT,
 )
 from expb.payloads.utils.jwt import JWTProvider
-from expb.payloads.compressor.compressor_utils import RPCError, engine_request
+from expb.payloads.compressor.compressor_utils import (
+    RPCError,
+    engine_request,
+    convert_mem_limit_to_bytes,
+)
 
 
 class Compressor:
@@ -171,6 +175,7 @@ class Compressor:
         container_network = self._docker_client.networks.create(
             name=self._nethermind_container_network_name,
         )
+        mem_limit_bytes = convert_mem_limit_to_bytes(self._mem_limit)
         container: Container = self._docker_client.containers.run(
             image=self._nethermind_docker_image,
             name=self._nethermind_docker_name,
@@ -191,6 +196,7 @@ class Compressor:
                 network=self._network,
                 extra_flags=[
                     "--TxPool.Size=200000",
+                    f"--Init.MemoryHint={mem_limit_bytes}",
                     "--Blocks.SecondsPerSlot=1000",
                     "--JsonRpc.MaxRequestBodySize=300000000",
                     f"--Blocks.TargetBlockGasLimit={self._target_gas_limit}",
