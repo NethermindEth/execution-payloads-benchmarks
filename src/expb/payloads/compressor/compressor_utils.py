@@ -37,6 +37,10 @@ def engine_request(
             timeout=timeout,
         )
         if not resp.ok:
+            if resp.status_code == 401:
+                expiration_seconds = min(expiration_seconds * 2, 3600)
+                retries -= 1
+                continue
             raise RPCError(
                 error=resp.text,
                 status_code=resp.status_code,
@@ -45,23 +49,6 @@ def engine_request(
 
         body = resp.json()
         if "error" in body:
-            # Check error
-            try:
-                error = json.loads(body["error"])
-                error_message = ""
-                if isinstance(error, dict) and "message" in error:
-                    error_message = str(error["message"])
-                elif isinstance(error, str):
-                    error_message = error
-
-                # Retry in case of authentication errors
-                if "authentication error" in error_message.lower():
-                    expiration_seconds = min(expiration_seconds * 2, 3600)
-                    retries -= 1
-                    continue
-            except Exception:
-                pass
-
             raise RPCError(
                 error=body["error"],
                 status_code=resp.status_code,
