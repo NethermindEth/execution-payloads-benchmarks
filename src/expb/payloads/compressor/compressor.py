@@ -186,6 +186,8 @@ class Compressor:
                 instance=self._nethermind_docker_name,
                 network=self._network,
                 extra_flags=[
+                    "--Blocks.SecondsPerSlot=1000",
+                    "--JsonRpc.MaxRequestBodySize=300000000",
                     f"--Blocks.TargetBlockGasLimit={self._target_gas_limit}",
                 ],
             ),
