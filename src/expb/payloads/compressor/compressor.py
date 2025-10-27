@@ -186,6 +186,7 @@ class Compressor:
                 instance=self._nethermind_docker_name,
                 network=self._network,
                 extra_flags=[
+                    "--TxPool.Size=200000",
                     "--Blocks.SecondsPerSlot=1000",
                     "--JsonRpc.MaxRequestBodySize=300000000",
                     f"--Blocks.TargetBlockGasLimit={self._target_gas_limit}",
@@ -462,19 +463,21 @@ class Compressor:
         nethermind_engine_url: str,
         payloads: list[dict],
     ) -> None:
-        self._logger.info(
-            "Compressing a batch of payloads",
-            block_number=block_number,
-            payloads=[
-                int(payload["params"][0]["blockNumber"], 16) for payload in payloads
-            ],
-        )
         txs = []
         for payload in payloads:
             for tx in payload["params"][0]["transactions"]:
                 if not isinstance(tx, str) or tx.startswith("0x03"):
                     continue
                 txs.append(tx)
+
+        self._logger.info(
+            "Compressing a batch of payloads",
+            block_number=block_number,
+            max_txs=len(txs),
+            payloads=[
+                int(payload["params"][0]["blockNumber"], 16) for payload in payloads
+            ],
+        )
 
         method: str = payloads[0]["method"]
         get_payload_method = method.replace("new", "get")

@@ -1,4 +1,3 @@
-import json
 import requests
 
 from expb.payloads.utils.jwt import JWTProvider
