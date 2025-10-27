@@ -186,7 +186,6 @@ class Compressor:
                 instance=self._nethermind_docker_name,
                 network=self._network,
                 extra_flags=[
-                    "--log=DEBUG",
                     f"--Blocks.TargetBlockGasLimit={self._target_gas_limit}",
                 ],
             ),
@@ -423,13 +422,14 @@ class Compressor:
 
                 # Get gas limit
                 current_gas_limit = int(latest_block_result["gasLimit"], 16)
+                if current_block % 1000 == 0 or current_block == starting_block:
+                    self._logger.info(
+                        "Gas limit successfully increased",
+                        current_block=current_block,
+                        current_gas_limit=current_gas_limit,
+                        target_gas_limit=self._target_gas_limit,
+                    )
                 current_block += 1
-                self._logger.info(
-                    "Gas limit successfully increased",
-                    current_gas_limit=current_gas_limit,
-                    target_gas_limit=self._target_gas_limit,
-                    current_block=current_block,
-                )
 
                 # Write requests to output files
                 with self._output_payloads_file.open("a") as f:
@@ -446,7 +446,12 @@ class Compressor:
                     status_code=e.status_code,
                 )
                 raise e
-        self._logger.info("Gas limit increased successfully")
+        self._logger.info(
+            "Gas limit increased successfully",
+            current_block=(current_block - 1),
+            target_gas_limit=self._target_gas_limit,
+        )
+        return current_block
 
     def _compress_payloads(
         self,
