@@ -29,6 +29,9 @@ def compress_payloads(
     ],
     network: Annotated[Network, typer.Option(help="Network")] = Network.MAINNET,
     compression_factor: Annotated[int, typer.Option(help="Compress factor")] = 2,
+    target_gas_limit: Annotated[
+        int, typer.Option(help="Target Gas limit for compressed blocks")
+    ] = 4000000000,  # 4 Giga gas
     log_level: Annotated[
         str, typer.Option(help="Log level (e.g., DEBUG, INFO, WARNING)")
     ] = "INFO",
@@ -41,6 +44,7 @@ def compress_payloads(
     compressor = Compressor(
         network=network,
         compression_factor=compression_factor,
+        target_gas_limit=target_gas_limit,
         nethermind_snapshot_dir=nethermind_snapshot_dir,
         nethermind_docker_image=nethermind_docker_image,
         input_payloads_file=input_payloads_file,

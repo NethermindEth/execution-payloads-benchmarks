@@ -22,6 +22,7 @@ from expb.configs.clients import (
     CLIENT_ENGINE_PORT,
 )
 from expb.payloads.utils.jwt import JWTProvider
+from expb.payloads.compressor.compressor_utils import RPCError, engine_request
 
 
 class Compressor:
@@ -29,6 +30,7 @@ class Compressor:
         self,
         network: Network,
         compression_factor: int,
+        target_gas_limit: int,
         nethermind_snapshot_dir: Path,
         nethermind_docker_image: str,
         input_payloads_file: Path,
@@ -41,6 +43,7 @@ class Compressor:
         # General config
         self._network = network
         self._compression_factor = compression_factor
+        self._target_gas_limit = target_gas_limit
 
         # Outputs files and directories
         self._input_payloads_file = input_payloads_file
@@ -183,7 +186,7 @@ class Compressor:
                 instance=self._nethermind_docker_name,
                 network=self._network,
                 extra_flags=[
-                    "--Blocks.TargetBlockGasLimit=4000000000",  # TODO: make it configurable
+                    f"--Blocks.TargetBlockGasLimit={self._target_gas_limit}",
                 ],
             ),
             detach=True,
@@ -306,9 +309,16 @@ class Compressor:
             prev_method = ""
             for line in f:
                 payload_data = json.loads(line)
-                # Get firs block number
+                # Get starting block number and proceed to increase gas limit
                 if current_block < 0:
-                    current_block = int(payload_data["params"][0]["blockNumber"], 16)
+                    starting_block = int(payload_data["params"][0]["blockNumber"], 16)
+                    method = payload_data["method"]
+                    current_block = self.increase_gas_limit(
+                        starting_block,
+                        method,
+                        jwt_provider,
+                        nethermind_engine_url,
+                    )
                 # Check if there was a hard fork
                 if prev_method and payload_data["method"] != prev_method:
                     self._compress_payloads(
@@ -346,6 +356,95 @@ class Compressor:
 
         self._logger.info("Done compressing payloads")
 
+    def increase_gas_limit(
+        self,
+        starting_block: int,
+        method: str,
+        jwt_provider: JWTProvider,
+        nethermind_engine_url: str,
+    ) -> int:
+        self._logger.info(
+            "Increasing gas limit to target gas limit",
+            target_gas_limit=self._target_gas_limit,
+        )
+        hacked_method = method.replace("new", "get") + "Hacked"
+        current_gas_limit = 0
+        current_block = starting_block
+        while current_gas_limit < self._target_gas_limit:
+            try:
+                # Generate empty payload
+                hacked_payload_result = engine_request(
+                    nethermind_engine_url,
+                    jwt_provider,
+                    {
+                        "method": hacked_method,
+                        "params": [
+                            [],
+                        ],
+                    },
+                )
+                # New empty block
+                generated_execution_payload = hacked_payload_result["executionPayload"]
+
+                empty_payload_request, empty_fcu_request = self.generate_requests(
+                    current_block,
+                    method,
+                    generated_execution_payload,
+                )
+
+                # Send empty payload request
+                engine_request(
+                    nethermind_engine_url,
+                    jwt_provider,
+                    empty_payload_request,
+                )
+                # Send empty fcu request
+                engine_request(
+                    nethermind_engine_url,
+                    jwt_provider,
+                    empty_fcu_request,
+                )
+
+                # Get latest block number
+                latest_block_result = engine_request(
+                    nethermind_engine_url,
+                    jwt_provider,
+                    {
+                        "method": "eth_blockByNumber",
+                        "params": [
+                            "latest",
+                            False,
+                        ],
+                    },
+                )
+
+                # Get gas limit
+                current_gas_limit = latest_block_result["gasLimit"]
+                current_block += 1
+                self._logger.info(
+                    "Gas limit successfully increased",
+                    current_gas_limit=current_gas_limit,
+                    target_gas_limit=self._target_gas_limit,
+                    current_block=current_block,
+                )
+
+                # Write requests to output files
+                with self._output_payloads_file.open("a") as f:
+                    f.write(json.dumps(empty_payload_request))
+                    f.write("\n")
+                with self._output_fcus_file.open("a") as f:
+                    f.write(json.dumps(empty_fcu_request))
+                    f.write("\n")
+
+            except RPCError as e:
+                self._logger.error(
+                    "Failed to increase gas limit",
+                    error=e.error,
+                    status_code=e.status_code,
+                )
+                raise e
+        self._logger.info("Gas limit increased successfully")
+
     def _compress_payloads(
         self,
         jwt_provider: JWTProvider,
@@ -369,39 +468,27 @@ class Compressor:
 
         method: str = payloads[0]["method"]
         get_payload_method = method.replace("new", "get")
-        req_body = {
+        hacked_get_payload_request = {
             "method": f"{get_payload_method}Hacked",
             "params": [
                 txs,
             ],
         }
-        jwt = jwt_provider.get_jwt()
-
-        resp = r.post(
-            url=nethermind_engine_url,
-            headers={
-                "Authorization": f"Bearer {jwt}",
-                "Content-Type": "application/json",
-            },
-            json=req_body,
-        )
-        if not resp.ok:
-            self._logger.error(
-                "Failed to compress payloads",
-                status_code=resp.status_code,
-                response=resp.text,
+        try:
+            result = engine_request(
+                nethermind_engine_url,
+                jwt_provider,
+                hacked_get_payload_request,
             )
-            raise Exception(resp.text)
-
-        body = resp.json()
-        if "error" in body:
+        except RPCError as e:
             self._logger.error(
-                "Failed to compress payloads",
-                error=body["error"],
+                "Failed to get hacked payload",
+                error=e.error,
+                status_code=e.status_code,
             )
-            raise Exception(body["error"])
+            raise e
 
-        generated_execution_payload = body["result"]["executionPayload"]
+        generated_execution_payload = result["executionPayload"]
 
         compressed_new_payload_req, compressed_fcu_req = self.generate_requests(
             block_number,
@@ -416,40 +503,34 @@ class Compressor:
             f.write("\n")
 
         # Send compressed payload requests to prepare for next one
-        jwt = jwt_provider.get_jwt()
-        r.post(
-            url=nethermind_engine_url,
-            headers={
-                "Authorization": f"Bearer {jwt}",
-                "Content-Type": "application/json",
-            },
-            json=compressed_new_payload_req,
-        )
-        if not resp.ok:
+        try:
+            result = engine_request(
+                nethermind_engine_url,
+                jwt_provider,
+                compressed_new_payload_req,
+            )
+        except RPCError as e:
             self._logger.error(
                 "Failed to send compressed new payload request",
-                status_code=resp.status_code,
-                response=resp.text,
+                error=e.error,
+                status_code=e.status_code,
             )
-            raise Exception(resp.text)
+            raise e
 
         # Send compressed forkchoice updated request
-        jwt = jwt_provider.get_jwt()
-        resp = r.post(
-            url=nethermind_engine_url,
-            headers={
-                "Authorization": f"Bearer {jwt}",
-                "Content-Type": "application/json",
-            },
-            json=compressed_fcu_req,
-        )
-        if not resp.ok:
-            self._logger.error(
-                "Failed to send compressed fcu request",
-                status_code=resp.status_code,
-                response=resp.text,
+        try:
+            result = engine_request(
+                nethermind_engine_url,
+                jwt_provider,
+                compressed_fcu_req,
             )
-            raise Exception(resp.text)
+        except RPCError as e:
+            self._logger.error(
+                "Failed to send compressed forkchoice updated request",
+                error=e.error,
+                status_code=e.status_code,
+            )
+            raise e
 
     def get_fcu_method_from_payload(
         self,
