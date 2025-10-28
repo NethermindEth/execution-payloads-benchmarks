@@ -4,19 +4,24 @@ import { SharedArray } from 'k6/data';
 import exec from 'k6/execution';
 import encoding from 'k6/encoding';
 import crypto from 'k6/crypto';
+import { Gauge } from 'k6/metrics';
 
 // --- Env / config ---
 const payloadsFilePath = __ENV.EXPB_PAYLOADS_FILE_PATH;
-const fcusFilePath     = __ENV.EXPB_FCUS_FILE_PATH;
-const payloadsSkip     = parseInt(__ENV.EXPB_PAYLOADS_SKIP || '0', 10);
-const payloadsWarmup   = parseInt(__ENV.EXPB_PAYLOADS_WARMUP || '0', 10);
-const ABORT_ON_EOF     = (__ENV.EXPB_ABORT_ON_EOF || '0') === '1';
+const fcusFilePath = __ENV.EXPB_FCUS_FILE_PATH;
+const payloadsSkip = parseInt(__ENV.EXPB_PAYLOADS_SKIP || '0', 10);
+const payloadsWarmup = parseInt(__ENV.EXPB_PAYLOADS_WARMUP || '0', 10);
+const ABORT_ON_EOF = (__ENV.EXPB_ABORT_ON_EOF || '0') === '1';
 const ADD_CORRELATION_HEADER = (__ENV.EXPB_ADD_CID || '1') === '1';
-const engineEndpoint   = __ENV.EXPB_ENGINE_ENDPOINT;
+const engineEndpoint = __ENV.EXPB_ENGINE_ENDPOINT;
+const PER_PAYLOAD_METRICS = (__ENV.EXPB_PER_PAYLOAD_METRICS || '0') === '1';
 
 // Load k6 options JSON
 const config = JSON.parse(open(__ENV.EXPB_CONFIG_FILE_PATH));
 export const options = config["options"];
+
+// --- Metrics ---
+const slowestPayloads = new Gauge('expb_slowest_payloads');
 
 // --- Data ---
 const payloadLines = new SharedArray('expb_payload_lines', () =>
@@ -27,7 +32,7 @@ const fcuLines = new SharedArray('expb_fcu_lines', () =>
 );
 
 const warmupIdx0 = Math.max(0, payloadsSkip);
-const startIdx0  = warmupIdx0 + Math.max(0, payloadsWarmup);
+const startIdx0 = warmupIdx0 + Math.max(0, payloadsWarmup);
 const totalPairs = Math.max(0, Math.min(payloadLines.length, fcuLines.length) - startIdx0);
 
 // --- Helpers ---
@@ -41,6 +46,18 @@ function extractMethodFast(raw) {
   const head = String(raw).slice(0, 256);
   const m = /"method"\s*:\s*"([^"]+)"/.exec(head);
   return m ? m[1] : undefined;
+}
+
+function extractJrpcIdFast(raw) {
+  const head = String(raw).slice(0, 256);
+  const m = /"id"\s*:\s*(\d+)/.exec(head);
+  return m ? parseInt(m[1], 10) : undefined;
+}
+
+function extractGasUsedFast(raw) {
+  const head = String(raw).slice(0, 256);
+  const m = /"gasUsed"\s*:\s*(\d+)/.exec(head);
+  return m ? parseInt(m[1], 10) : undefined;
 }
 
 function hex2ArrayBuffer(hex) {
@@ -57,7 +74,7 @@ function getJwtToken() {
   const now = Math.floor(Date.now() / 1000);
   if (jwtCache.token && now < (jwtCache.exp - 2)) return jwtCache.token;
 
-  const header  = encoding.b64encode(JSON.stringify({ typ: 'JWT', alg: 'HS256' }), 'rawurl');
+  const header = encoding.b64encode(JSON.stringify({ typ: 'JWT', alg: 'HS256' }), 'rawurl');
   const iat = now, exp = iat + 60;
   const payload = encoding.b64encode(JSON.stringify({ iat, exp }), 'rawurl');
   const h = crypto.createHMAC('sha256', jwtsecretBytes);
@@ -71,7 +88,7 @@ function cid() {
   return `${__ENV.testid || 'expb'}-vu${exec.vu.idInTest}-it${exec.scenario.iterationInTest}`;
 }
 
-function processPayload(idx, base_tags = {}) {
+function processPayload(idx, base_tags = {}, warmup = false) {
   // Out of data? graceful (default) or abort if explicitly requested
   if (idx >= startIdx0 + totalPairs) {
     if (ABORT_ON_EOF) exec.test.abort('No more payloads or fcus found');
@@ -79,16 +96,15 @@ function processPayload(idx, base_tags = {}) {
   }
 
   const payloadRaw = safeGetLine(payloadLines, idx);
-  const fcuRaw     = safeGetLine(fcuLines, idx);
+  const fcuRaw = safeGetLine(fcuLines, idx);
 
   if (!payloadRaw || !fcuRaw) {
     if (ABORT_ON_EOF) exec.test.abort('Dataset contains empty lines or ended prematurely');
     return;
   }
 
-  const tokGP = getJwtToken();
-
   // --- engine_newPayload ---
+  const tokGP = getJwtToken();
   group('engine_newPayload', function () {
     const tags = { jrpc_method: extractMethodFast(payloadRaw) || 'engine_newPayload', kind: 'newPayload', ...base_tags };
     const headers = { Authorization: 'Bearer ' + tokGP, 'Content-Type': 'application/json' };
@@ -96,11 +112,28 @@ function processPayload(idx, base_tags = {}) {
 
     const r = http.post(engineEndpoint, payloadRaw, { headers, tags });
     check(r, { 'status_200': (x) => x.status === 200 }, tags);
+    if (!warmup && PER_PAYLOAD_METRICS) {
+      const perPayloadMetricsTags = {
+        ...tags,
+      }
+      const jrpcId = extractJrpcIdFast(payloadRaw);
+      if (jrpcId) {
+        perPayloadMetricsTags.jrpc_id = jrpcId;
+      }
+      const gasUsed = extractGasUsedFast(payloadRaw);
+      if (gasUsed) {
+        perPayloadMetricsTags.gas_used = gasUsed;
+      }
+      slowestPayloads.add(
+        r.timings.duration,
+        perPayloadMetricsTags,
+      );
+    }
   });
 
-  const tokFC = getJwtToken();
 
   // --- engine_forkchoiceUpdated ---
+  const tokFC = getJwtToken();
   group('engine_forkchoiceUpdated', function () {
     const tags = { jrpc_method: extractMethodFast(fcuRaw) || 'engine_forkchoiceUpdated', kind: 'forkchoiceUpdated', ...base_tags };
     const headers = { Authorization: 'Bearer ' + tokFC, 'Content-Type': 'application/json' };
@@ -114,12 +147,12 @@ function processPayload(idx, base_tags = {}) {
 export function setup() {
   // execute warmup payloads
   for (let idx = warmupIdx0; idx < startIdx0; idx++) {
-    processPayload(idx, { warmup: "true" });
+    processPayload(idx, {}, true);
   }
 }
 
 export default function () {
   const idx = startIdx0 + exec.scenario.iterationInTest;
 
-  processPayload(idx, { warmup: "false" });
+  processPayload(idx, {}, false);
 }

@@ -343,7 +343,7 @@ class ExecutorConfig:
             f"--env=EXPB_PAYLOADS_SKIP={self.k6_payloads_skip}",
             f"--env=EXPB_PAYLOADS_WARMUP={self.k6_payloads_warmup}",
             f"--env=EXPB_ENGINE_ENDPOINT={execution_client_engine_url}",
-            f"--env=EXPB_USE_PERPAYLOAD_METRIC={str(collect_per_payload_metrics).lower()}",
+            f"--env=EXPB_PER_PAYLOAD_METRICS={int(collect_per_payload_metrics)}",
         ]
         if (
             self.exports is not None
