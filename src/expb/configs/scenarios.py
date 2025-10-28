@@ -46,6 +46,10 @@ class Scenario:
             raise ValueError(
                 f"Warmup number of payloads is invalid for scenario {name}"
             )
+        # Duration of the scenario
+        self.duration: str = config.get("duration", "10m")
+        if self.duration is None or not isinstance(self.duration, str):
+            raise ValueError(f"Duration is invalid for scenario {name}")
         # Snapshot directory to use
         snapshot_dir: str | None = config.get("snapshot_dir", None)
         if snapshot_dir is None:
@@ -185,6 +189,7 @@ class Scenarios:
                 outputs_dir=self.outputs_dir,
                 pull_images=self.pull_images,
                 docker_images=self.docker_images,
+                k6_duration=scenario.duration,
                 k6_payloads_amount=scenario.payloads_amount,
                 k6_payloads_skip=scenario.payloads_skip,
                 k6_payloads_warmup=scenario.payloads_warmup,

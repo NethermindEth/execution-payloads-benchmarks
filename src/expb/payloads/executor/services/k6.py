@@ -9,8 +9,10 @@ def build_k6_script_config(
     scenario_name: str,
     client: Client,
     iterations: int,
+    duration: Optional[
+        str
+    ] = "10m",  # Default duration is 10 minutes (the actual usage of this value depends on the executor type)
     rate: Optional[int] = None,  # Force sequantional running
-    duration: Optional[str] = None,
     pre_allocated_vus: int = 2,
     max_vus: int = 2,
     time_unit: str = "1s",
@@ -33,11 +35,11 @@ def build_k6_script_config(
             "tags": {"client_type": f"{client.value.name}"},
         }
     else:
-        # legacy single-stream behavior
         scenario = {
             "executor": "shared-iterations",
             "vus": 1,
             "iterations": iterations,
+            "maxDuration": duration,
             "env": {},
             "tags": {"client_type": f"{client.value.name}"},
         }

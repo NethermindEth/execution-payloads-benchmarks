@@ -226,6 +226,7 @@ class Executor:
             scenario_name=self.config.executor_name,
             client=self.config.execution_client,
             iterations=self.config.k6_payloads_amount,
+            duration=self.config.k6_duration,
         )
         self.config.k6_config_file.write_text(json.dumps(k6_config))
         self.log.info(

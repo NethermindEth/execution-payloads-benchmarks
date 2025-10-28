@@ -40,6 +40,7 @@ class ExecutorConfig:
         execution_client: Client,
         snapshot_dir: Path,
         k6_payloads_amount: int,
+        k6_duration: str = "10m",
         k6_payloads_skip: int = 0,
         k6_payloads_warmup: int = 0,
         docker_images: dict[str, str] = {},
@@ -92,6 +93,7 @@ class ExecutorConfig:
         self.json_rpc_wait_max_retries = json_rpc_wait_max_retries
         ## K6 script config
         self.k6_payloads_amount = k6_payloads_amount
+        self.k6_duration = k6_duration
         self.k6_payloads_skip = k6_payloads_skip
         self.k6_payloads_warmup = k6_payloads_warmup
 

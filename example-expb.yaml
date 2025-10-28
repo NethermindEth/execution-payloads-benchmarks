@@ -60,6 +60,8 @@ scenarios:
     snapshot_dir: ./snapthots/nethermind
     # Required: Number of payloads to run
     amount: 100
+    # Optional: Duration of the scenario. Default is 10 minutes.
+    duration: 10m
     # Optional: Number of payloads to skip from the payloads file
     skip: 0
     # Optional: Number of payloads to execute as warmup(no metrics will be collected for those)
