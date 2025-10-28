@@ -86,22 +86,24 @@ function processPayload(idx, base_tags = {}) {
     return;
   }
 
-  const tok = getJwtToken();
+  const tokGP = getJwtToken();
 
   // --- engine_newPayload ---
   group('engine_newPayload', function () {
     const tags = { jrpc_method: extractMethodFast(payloadRaw) || 'engine_newPayload', kind: 'newPayload', ...base_tags };
-    const headers = { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' };
+    const headers = { Authorization: 'Bearer ' + tokGP, 'Content-Type': 'application/json' };
     if (ADD_CORRELATION_HEADER) headers['X-Expb-Cid'] = cid();
 
     const r = http.post(engineEndpoint, payloadRaw, { headers, tags });
     check(r, { 'status_200': (x) => x.status === 200 }, tags);
   });
 
+  const tokFC = getJwtToken();
+
   // --- engine_forkchoiceUpdated ---
   group('engine_forkchoiceUpdated', function () {
     const tags = { jrpc_method: extractMethodFast(fcuRaw) || 'engine_forkchoiceUpdated', kind: 'forkchoiceUpdated', ...base_tags };
-    const headers = { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' };
+    const headers = { Authorization: 'Bearer ' + tokFC, 'Content-Type': 'application/json' };
     if (ADD_CORRELATION_HEADER) headers['X-Expb-Cid'] = cid();
 
     const r = http.post(engineEndpoint, fcuRaw, { headers, tags });
