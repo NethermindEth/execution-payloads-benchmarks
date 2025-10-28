@@ -47,7 +47,7 @@ def compress_payloads(
     ] = "INFO",
 ) -> None:
     """
-    Generate execution payloads for a given block range.
+    Compress execution payloads txs for a given block range into bigger blocks.
     """
     logger = setup_logging(log_level)
 

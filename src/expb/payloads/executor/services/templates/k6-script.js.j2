@@ -55,9 +55,9 @@ function extractJrpcIdFast(raw) {
 }
 
 function extractGasUsedFast(raw) {
-  const head = String(raw).slice(0, 256);
-  const m = /"gasUsed"\s*:\s*(\d+)/.exec(head);
-  return m ? parseInt(m[1], 10) : undefined;
+  const head = String(raw).slice(0, 2048);
+  const m = /"gasUsed"\s*:\s*"([^"]+)"/.exec(head);
+  return m ? parseInt(m[1], 16) : undefined;
 }
 
 function hex2ArrayBuffer(hex) {
