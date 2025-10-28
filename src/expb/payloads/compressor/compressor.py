@@ -438,6 +438,9 @@ class Compressor:
 
                 # Get gas limit
                 current_gas_limit = int(latest_block_result["gasLimit"], 16)
+                empty_payload_request["gasUsed"] = int(
+                    latest_block_result["gasUsed"], 16
+                )
                 if current_block % 1000 == 0 or current_block == starting_block:
                     self._logger.info(
                         "Gas limit successfully increased",
@@ -523,12 +526,6 @@ class Compressor:
             method,
             generated_execution_payload,
         )
-        with self._output_payloads_file.open("a") as f:
-            f.write(json.dumps(compressed_new_payload_req))
-            f.write("\n")
-        with self._output_fcus_file.open("a") as f:
-            f.write(json.dumps(compressed_fcu_req))
-            f.write("\n")
 
         # Send compressed payload requests to prepare for next one
         try:
@@ -559,6 +556,27 @@ class Compressor:
                 status_code=e.status_code,
             )
             raise e
+
+        # Get latest block gas Used
+        latest_block_result = engine_request(
+            nethermind_engine_url,
+            jwt_provider,
+            {
+                "method": "eth_getBlockByNumber",
+                "params": [
+                    "latest",
+                    False,
+                ],
+            },
+        )
+        compressed_new_payload_req["gasUsed"] = int(latest_block_result["gasUsed"], 16)
+
+        with self._output_payloads_file.open("a") as f:
+            f.write(json.dumps(compressed_new_payload_req))
+            f.write("\n")
+        with self._output_fcus_file.open("a") as f:
+            f.write(json.dumps(compressed_fcu_req))
+            f.write("\n")
 
     def get_fcu_method_from_payload(
         self,

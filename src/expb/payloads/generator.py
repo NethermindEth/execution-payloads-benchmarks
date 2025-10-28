@@ -260,6 +260,7 @@ class Generator:
         self.log.debug(
             "generating engine_forkChoiceUpdated request", block_number=block_number
         )
+        engine_new_payload_request["gasUsed"] = block["gasUsed"]
         fcu_request = asyncio.run(self.get_fcu_request(block))
         enp_req_file_name = os.path.join(
             self.output_dir, f"payload_{block_number}.json"
