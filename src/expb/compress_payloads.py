@@ -42,6 +42,9 @@ def compress_payloads(
     mem_limit: Annotated[
         str, typer.Option(help="Memory limit for the Nethermind container")
     ] = DOCKER_CONTAINER_DEFAULT_MEM_LIMIT,
+    include_blobs: Annotated[
+        bool, typer.Option(help="Include blobs in the compressed payloads transactions")
+    ] = False,
     log_level: Annotated[
         str, typer.Option(help="Log level (e.g., DEBUG, INFO, WARNING)")
     ] = "INFO",
@@ -61,6 +64,7 @@ def compress_payloads(
         nethermind_docker_image=nethermind_docker_image,
         input_payloads_file=input_payloads_file,
         output_payloads_dir=output_payloads_dir,
+        include_blobs=include_blobs,
         logger=logger,
     )
 

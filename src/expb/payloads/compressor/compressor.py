@@ -41,7 +41,8 @@ class Compressor:
         nethermind_docker_image: str,
         input_payloads_file: Path,
         output_payloads_dir: Path,
-        logger: Logger,
+        include_blobs: bool = False,
+        logger: Logger = Logger(),
     ) -> None:
         # Docker client
         self._docker_client = docker.from_env()
@@ -52,6 +53,7 @@ class Compressor:
         self._mem_limit = mem_limit
         self._compression_factor = compression_factor
         self._target_gas_limit = target_gas_limit
+        self._include_blobs = include_blobs
 
         # Outputs files and directories
         self._input_payloads_file = input_payloads_file
@@ -482,7 +484,9 @@ class Compressor:
         txs = []
         for payload in payloads:
             for tx in payload["params"][0]["transactions"]:
-                if not isinstance(tx, str) or tx.startswith("0x03"):
+                if not isinstance(tx, str) or (
+                    not self._include_blobs and tx.startswith("0x03")
+                ):
                     continue
                 txs.append(tx)
 

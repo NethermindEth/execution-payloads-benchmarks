@@ -100,6 +100,7 @@ class Executor:
         self,
         container_network: Network | None = None,
         pyroscope: Pyroscope | None = None,
+        stop_signal: str | None = None,
     ) -> Container:
         # Command
         execution_container_command = self.config.get_execution_client_command()
@@ -136,6 +137,7 @@ class Executor:
             mem_limit=self.config.docker_container_mem_limit,
             user=self.config.docker_user,
             group_add=self.config.docker_group_add,
+            stop_signal=stop_signal,
         )
         return container
 
@@ -504,9 +506,15 @@ class Executor:
                 docker_container_cpus=self.config.docker_container_cpus,
                 docker_container_mem_limit=self.config.docker_container_mem_limit,
             )
+            stop_signal = (
+                # If there are extra commands to execute, use SIGINT to stop the execution client
+                # instead of SIGTERM
+                "SIGINT" if self.config.execution_client_extra_commands else None
+            )
             execution_client_container = self.start_execution_client(
                 container_network=containers_network,
                 pyroscope=alloy_pyroscope,
+                stop_signal=stop_signal,
             )
 
             if self.config.limit_bandwidth:
