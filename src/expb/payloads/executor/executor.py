@@ -104,6 +104,7 @@ class Executor:
 
     # Execution Client Setup
     def prepare_jwt_secret_file(self) -> None:
+        self.config.jwt_secret_dir.mkdir(parents=True, exist_ok=True)
         self.config.jwt_secret_file.touch(
             mode=0o666,
             exist_ok=True,

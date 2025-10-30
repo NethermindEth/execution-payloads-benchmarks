@@ -11,7 +11,7 @@ from expb.configs.networks import Network as EthNetwork
 from expb.configs.clients import (
     Client,
     CLIENTS_DATA_DIR,
-    CLIENTS_JWT_SECRET_FILE,
+    CLIENTS_JWT_SECRET_DIR,
     CLIENT_RPC_PORT,
     CLIENT_ENGINE_PORT,
     CLIENT_METRICS_PORT,
@@ -110,7 +110,8 @@ class ExecutorConfig:
         self.overlay_upper_dir = self.work_dir / "upper"
         self.overlay_merged_dir = self.work_dir / "merged"
         ### JWT secret file
-        self.jwt_secret_file = self.work_dir / "jwtsecret.hex"
+        self.jwt_secret_dir = self.work_dir / "jwt-secret"
+        self.jwt_secret_file = self.jwt_secret_dir / "jwtsecret.hex"
 
         ## Snapshot directory
         self.snapshot_dir = snapshot_dir
@@ -260,14 +261,14 @@ class ExecutorConfig:
         )
         execution_container_volumes.append(
             {
-                "bind": CLIENTS_JWT_SECRET_FILE,
+                "bind": CLIENTS_JWT_SECRET_DIR,
                 "config": {
                     "name": f"{container_name}-jwt-secret",
                     "driver": "local",
                     "driver_opts": {
                         "type": "none",
                         "o": "bind,rw",
-                        "device": str(self.jwt_secret_file.resolve()),
+                        "device": str(self.jwt_secret_dir.resolve()),
                     },
                 },
             }

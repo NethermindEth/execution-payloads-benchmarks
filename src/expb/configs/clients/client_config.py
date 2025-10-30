@@ -1,7 +1,8 @@
 from expb.configs.networks import Network
 
 CLIENTS_DATA_DIR = "/execution-data"
-CLIENTS_JWT_SECRET_FILE = "/jwtsecret.hex"
+CLIENTS_JWT_SECRET_DIR = "/jwt-secret"
+CLIENTS_JWT_SECRET_FILE = f"{CLIENTS_JWT_SECRET_DIR}/jwtsecret.hex"
 
 CLIENT_RPC_PORT = 8545
 CLIENT_ENGINE_PORT = 8551

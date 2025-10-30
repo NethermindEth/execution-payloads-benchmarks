@@ -3,6 +3,7 @@ from enum import Enum
 from expb.configs.clients.client_config import (
     ClientConfig,
     CLIENTS_DATA_DIR,
+    CLIENTS_JWT_SECRET_DIR,
     CLIENTS_JWT_SECRET_FILE,
     CLIENT_RPC_PORT,
     CLIENT_ENGINE_PORT,
@@ -28,6 +29,7 @@ __all__ = [
     "Client",
     "ClientConfig",
     "CLIENTS_DATA_DIR",
+    "CLIENTS_JWT_SECRET_DIR",
     "CLIENTS_JWT_SECRET_FILE",
     "CLIENT_RPC_PORT",
     "CLIENT_ENGINE_PORT",
