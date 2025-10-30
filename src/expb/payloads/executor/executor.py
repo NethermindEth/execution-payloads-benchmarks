@@ -383,7 +383,7 @@ class Executor:
         try:
             subprocess.run(umount_command, check=True, shell=True)
         except subprocess.CalledProcessError as e:
-            self.log.error("failed to umount overlay", error=e)
+            self.log.error("Failed to umount overlay", error=e)
             raise e
         try:
             paths_to_remove = [
@@ -394,7 +394,7 @@ class Executor:
             for path in paths_to_remove:
                 shutil.rmtree(path)
         except Exception as e:
-            self.log.error("failed to cleanup work directory", error=e)
+            self.log.error("Failed to cleanup work directory", error=e)
             raise e
 
     def cleanup_scenario(self) -> None:
@@ -432,12 +432,6 @@ class Executor:
             )
             execution_client_container.reload()
             execution_client_volumes = execution_client_container.attrs["Mounts"]
-            for volume in execution_client_volumes:
-                if volume["Type"] == "volume":
-                    self.config.docker_client.volumes.get(volume["Name"]).remove()
-                    self.log.debug(
-                        "Cleaned execution client volume", volume=volume["Name"]
-                    )
             execution_client_container.stop()
             logs_file = (
                 self.config.outputs_dir
@@ -455,6 +449,13 @@ class Executor:
                     f.write(line)
             logs_stream.close()
             execution_client_container.remove()
+            # Clean execution client volumes
+            for volume in execution_client_volumes:
+                if volume["Type"] == "volume":
+                    self.config.docker_client.volumes.get(volume["Name"]).remove()
+                    self.log.debug(
+                        "Cleaned execution client volume", volume=volume["Name"]
+                    )
         except docker.errors.NotFound:
             pass
 
