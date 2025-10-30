@@ -65,6 +65,7 @@ class ExecutorConfig:
         # Executor Basic config
         self.scenario_name = scenario_name
         self.executor_name = f"expb-executor-{scenario_name}"
+        self.test_id = f"{scenario_name}-{time.strftime('%Y%m%d-%H%M%S')}"
 
         # Executor Client config
         self.network = network
@@ -337,7 +338,7 @@ class ExecutorConfig:
             self._k6_container_script_file,
             "--summary-mode=full",
             f"--summary-export={self._k6_container_summary_file}",
-            f"--tag=testid={self.scenario_name}",
+            f"--tag=testid={self.test_id}",
             f"--env=EXPB_CONFIG_FILE_PATH={self._k6_container_config_file}",
             f"--env=EXPB_PAYLOADS_FILE_PATH={self._k6_container_payloads_file}",
             f"--env=EXPB_FCUS_FILE_PATH={self._k6_container_fcus_file}",

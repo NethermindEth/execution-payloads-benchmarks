@@ -1,10 +1,11 @@
 from expb.configs.clients import Client
 from expb.configs.exports import Pyroscope
 
+
 def add_pyroscope_config(
     client: Client,
     executor_name: str,
-    scenario_name: str,
+    test_id: str,
     pyroscope: Pyroscope,
     command: list[str],
     environment: dict[str, str],
@@ -39,11 +40,11 @@ def add_pyroscope_config(
         if pyroscope.tags:
             environment["PYROSCOPE_LABELS"] = ",".join(
                 [t.replace("=", ":", 1) for t in pyroscope.tags]
-                + [f"testid:{scenario_name}", f"client_type:{client.value.name}"]
+                + [f"testid:{test_id}", f"client_type:{client.value.name}"]
             )
         else:
             environment["PYROSCOPE_LABELS"] = ",".join(
-                [f"testid:{scenario_name}", f"client_type:{client.value.name}"]
+                [f"testid:{test_id}", f"client_type:{client.value.name}"]
             )
     else:
         pass

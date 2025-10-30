@@ -8,7 +8,7 @@ ALLOY_PYROSCOPE_PORT = 9999
 
 
 def get_alloy_config(
-    scenario_name: str,
+    test_id: str,
     execution_client: Client,
     execution_client_address: str,
     execution_client_scrape_interval: str,
@@ -45,7 +45,7 @@ def get_alloy_config(
             "scrape_interval": execution_client_scrape_interval,
             "scrape_timeout": execution_client_scrape_timeout,
             "labels": {
-                "testid": scenario_name,
+                "testid": test_id,
                 "client_type": execution_client.value.name,
             },
         }

@@ -119,7 +119,7 @@ class Executor:
             add_pyroscope_config(
                 client=self.config.execution_client,
                 executor_name=self.config.executor_name,
-                scenario_name=self.config.scenario_name,
+                test_id=self.config.test_id,
                 pyroscope=pyroscope,
                 command=execution_container_command,
                 environment=execution_container_environment,
@@ -228,6 +228,7 @@ class Executor:
         self.config.k6_script_file.write_text(get_k6_script_content())
         # Write k6 script config file
         k6_config = build_k6_script_config(
+            test_id=self.config.test_id,
             scenario_name=self.config.executor_name,
             client=self.config.execution_client,
             iterations=self.config.k6_payloads_amount,

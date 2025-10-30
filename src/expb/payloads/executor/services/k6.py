@@ -6,6 +6,7 @@ from expb.configs.clients import Client
 
 
 def build_k6_script_config(
+    test_id: str,
     scenario_name: str,
     client: Client,
     iterations: int,
@@ -68,7 +69,7 @@ def build_k6_script_config(
                 "p(95)",
                 "p(99)",
             ],
-            "tags": {"testid": f"{scenario_name}"},
+            "tags": {"testid": f"{test_id}"},
         }
     }
 
