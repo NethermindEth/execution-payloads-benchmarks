@@ -237,7 +237,7 @@ class ExecutorConfig:
                         "driver_opts": {
                             "type": "none",
                             "o": f"bind,{volume_config['mode']},dirsync,noatime",
-                            "device": source_path.resolve(),
+                            "device": str(source_path.resolve()),
                         },
                         "labels": {},
                     },
@@ -253,7 +253,7 @@ class ExecutorConfig:
                     "driver_opts": {
                         "type": "none",
                         "o": "bind,rw,dirsync,noatime",
-                        "device": self.overlay_merged_dir.resolve(),
+                        "device": str(self.overlay_merged_dir.resolve()),
                     },
                 },
             }
@@ -267,7 +267,7 @@ class ExecutorConfig:
                     "driver_opts": {
                         "type": "none",
                         "o": "bind,rw,dirsync,noatime",
-                        "device": self.jwt_secret_file.resolve(),
+                        "device": str(self.jwt_secret_file.resolve()),
                     },
                 },
             }
