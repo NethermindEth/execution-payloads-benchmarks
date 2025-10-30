@@ -191,7 +191,7 @@ class Executor:
         # Write alloy config content
         self.config.alloy_config_file.write_text(
             get_alloy_config(
-                scenario_name=self.config.scenario_name,
+                test_id=self.config.test_id,
                 execution_client=self.config.execution_client,
                 execution_client_address=execution_client_metrics_address,
                 # TODO: Make scrape parameters configurable
