@@ -84,6 +84,17 @@ class Executor:
             self.log.error("failed to mount overlay", error=e)
             raise e
 
+    def clean_system_cache(self) -> None:
+        self.log.info("Cleaning system cache")
+        try:
+            subprocess.run("command -v sync", check=True, shell=True)
+            with open("/proc/sys/vm/drop_caches", "w") as f:
+                f.write("3")
+            self.log.info("System cache cleaned")
+        except subprocess.CalledProcessError as e:
+            self.log.error("Failed to clean system cache", error=e)
+            raise e
+
     def pull_docker_images(self) -> None:
         self.log.info("updating docker images")
         self.config.docker_client.images.pull(self.config.execution_client_image)
@@ -110,7 +121,14 @@ class Executor:
         # Environment
         execution_container_environment = self.config.get_execution_client_env()
         # Volumes
-        execution_container_volumes = self.config.get_execution_client_volumes()
+        execution_container_volumes_data = self.config.get_execution_client_volumes()
+        execution_container_volumes = []
+        for volume_data in execution_container_volumes_data:
+            self.log.debug(
+                "Creating execution client volume", volume=volume_data["config"]["name"]
+            )
+            volume = self.config.docker_client.volumes.create(**volume_data["config"])
+            execution_container_volumes.append(f"{volume.name}:{volume_data['bind']}")
         # Ports
         execution_container_ports = self.config.get_execution_client_ports()
 
@@ -412,6 +430,14 @@ class Executor:
             execution_client_container = self.config.docker_client.containers.get(
                 self.config.get_execution_client_container_name()
             )
+            execution_client_container.reload()
+            execution_client_volumes = execution_client_container.attrs["Mounts"]
+            for volume in execution_client_volumes:
+                if volume["Type"] == "volume":
+                    self.config.docker_client.volumes.get(volume["Name"]).remove()
+                    self.log.debug(
+                        "Cleaned execution client volume", volume=volume["Name"]
+                    )
             execution_client_container.stop()
             logs_file = (
                 self.config.outputs_dir
@@ -466,6 +492,7 @@ class Executor:
                 scenario=self.config.executor_name,
                 execution_client=self.config.get_execution_client_name(),
             )
+            self.clean_system_cache()
             self.prepare_directories()
             self.prepare_jwt_secret_file()
             if self.config.pull_images:

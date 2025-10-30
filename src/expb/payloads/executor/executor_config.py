@@ -221,26 +221,54 @@ class ExecutorConfig:
         ]
         return f"http://{container_ip}:{CLIENT_RPC_PORT}"
 
-    def get_execution_client_volumes(self) -> dict[str, dict[str, str]]:
-        execution_container_volumes = {}
+    def get_execution_client_volumes(self) -> list[dict[str, dict]]:
+        execution_container_volumes = []
+        container_name = self.get_execution_client_container_name()
         for volume_name, volume_config in self.execution_client_extra_volumes.items():
             source_path = volume_config.get("source", None)
             if source_path is None:
                 source_path = self.volumes_dir / volume_name
-            execution_container_volumes[source_path.resolve()] = {
-                "bind": volume_config["bind"],
-                "mode": volume_config["mode"],
-            }
-        execution_container_volumes.update(
-            # Required volumes
+            execution_container_volumes.append(
+                {
+                    "bind": volume_config["bind"],
+                    "config": {
+                        "name": f"{container_name}-{volume_name}",
+                        "driver": "local",
+                        "driver_opts": {
+                            "type": "none",
+                            "o": f"bind,{volume_config['mode']},dirsync,noatime",
+                            "device": source_path.resolve(),
+                        },
+                        "labels": {},
+                    },
+                }
+            )
+
+        execution_container_volumes.append(
             {
-                self.overlay_merged_dir.resolve(): {
-                    "bind": CLIENTS_DATA_DIR,
-                    "mode": "rw",
+                "bind": CLIENTS_DATA_DIR,
+                "config": {
+                    "name": f"{container_name}-overlay-merged",
+                    "driver": "local",
+                    "driver_opts": {
+                        "type": "none",
+                        "o": "bind,rw,dirsync,noatime",
+                        "device": self.overlay_merged_dir.resolve(),
+                    },
                 },
-                self.jwt_secret_file.resolve(): {
-                    "bind": CLIENTS_JWT_SECRET_FILE,
-                    "mode": "rw",
+            }
+        )
+        execution_container_volumes.append(
+            {
+                "bind": CLIENTS_JWT_SECRET_FILE,
+                "config": {
+                    "name": f"{container_name}-jwt-secret",
+                    "driver": "local",
+                    "driver_opts": {
+                        "type": "none",
+                        "o": "bind,rw,dirsync,noatime",
+                        "device": self.jwt_secret_file.resolve(),
+                    },
                 },
             }
         )
