@@ -508,13 +508,13 @@ class Compressor:
                     continue
                 txs.append(tx)
 
+        range_start = int(payloads[0]["params"][0]["blockNumber"], 16)
+        range_end = int(payloads[-1]["params"][0]["blockNumber"], 16)
         self._logger.info(
             "Compressing a batch of payloads",
             block_number=block_number,
             max_txs=len(txs),
-            payloads=[
-                int(payload["params"][0]["blockNumber"], 16) for payload in payloads
-            ],
+            payloads=f"{range_start}..{range_end}",
         )
 
         method: str = payloads[0]["method"]
