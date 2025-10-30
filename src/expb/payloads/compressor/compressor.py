@@ -84,6 +84,9 @@ class Compressor:
 
         # Nethermind logs file
         self._nethermind_conatainer_logs_file = output_payloads_dir / "nethermind.log"
+        self._nethermind_invalid_blocks_dump_dir = (
+            output_payloads_dir / "nethermind-tmp"
+        )
 
         # Overlay directories
         self._overlay_work_dir = output_payloads_dir / "work"
@@ -108,6 +111,12 @@ class Compressor:
             exist_ok=True,
         )
         self._overlay_merged_dir.mkdir(
+            mode=0o777,
+            parents=True,
+            exist_ok=True,
+        )
+        # Create invalid blocks dump directory
+        self._nethermind_invalid_blocks_dump_dir.mkdir(
             mode=0o777,
             parents=True,
             exist_ok=True,
@@ -185,12 +194,17 @@ class Compressor:
             image=self._nethermind_docker_image,
             name=self._nethermind_docker_name,
             volumes={
-                self._overlay_merged_dir.resolve(): {
+                str(self._overlay_merged_dir.resolve()): {
                     "bind": CLIENTS_DATA_DIR,
                     "mode": "rw",
                 },
-                self._jwt_secret_file.resolve(): {
+                str(self._jwt_secret_file.resolve()): {
                     "bind": CLIENTS_JWT_SECRET_FILE,
+                    "mode": "rw",
+                },
+                # For invalid blocks dump
+                str(self._nethermind_invalid_blocks_dump_dir.resolve()): {
+                    "bind": "/tmp",
                     "mode": "rw",
                 },
             },
@@ -200,6 +214,7 @@ class Compressor:
                 instance=self._nethermind_docker_name,
                 network=self._network,
                 extra_flags=[
+                    "--Init.AutoDump=All",
                     "--TxPool.Size=200000",
                     f"--Init.MemoryHint={mem_limit_bytes}",
                     "--Blocks.SecondsPerSlot=1000",
