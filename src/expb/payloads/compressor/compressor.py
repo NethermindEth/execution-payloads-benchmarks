@@ -126,6 +126,9 @@ class Compressor:
                         f"lowerdir={self._nethermind_snapshot_dir.resolve()}",
                         f"upperdir={self._overlay_upper_dir.resolve()}",
                         f"workdir={self._overlay_work_dir.resolve()}",
+                        "redirect_dir=on",
+                        "metacopy=on",
+                        "volatile",
                     ]
                 ),
                 str(self._overlay_merged_dir.resolve()),

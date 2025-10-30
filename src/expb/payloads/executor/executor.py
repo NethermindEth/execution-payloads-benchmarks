@@ -70,6 +70,9 @@ class Executor:
                         f"lowerdir={self.config.snapshot_dir.resolve()}",
                         f"upperdir={self.config.overlay_upper_dir.resolve()}",
                         f"workdir={self.config.overlay_work_dir.resolve()}",
+                        "redirect_dir=on",
+                        "metacopy=on",
+                        "volatile",
                     ]
                 ),
                 str(self.config.overlay_merged_dir.resolve()),
