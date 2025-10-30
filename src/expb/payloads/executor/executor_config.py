@@ -236,7 +236,7 @@ class ExecutorConfig:
                         "driver": "local",
                         "driver_opts": {
                             "type": "none",
-                            "o": f"bind,{volume_config['mode']},dirsync,noatime",
+                            "o": f"bind,{volume_config['mode']}",
                             "device": str(source_path.resolve()),
                         },
                         "labels": {},
@@ -266,7 +266,7 @@ class ExecutorConfig:
                     "driver": "local",
                     "driver_opts": {
                         "type": "none",
-                        "o": "bind,rw,dirsync,noatime",
+                        "o": "bind,rw",
                         "device": str(self.jwt_secret_file.resolve()),
                     },
                 },
