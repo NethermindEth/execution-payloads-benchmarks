@@ -218,6 +218,8 @@ class Compressor:
                     "--TxPool.Size=200000",
                     f"--Init.MemoryHint={mem_limit_bytes}",
                     "--Blocks.SecondsPerSlot=1000",
+                    "--Blocks.BlockProductionMaxTxKilobytes=100000",
+                    "--Blocks.BlockProductionTimeoutMs=400000",
                     "--JsonRpc.MaxRequestBodySize=300000000",
                     f"--Blocks.TargetBlockGasLimit={self._target_gas_limit}",
                 ],
