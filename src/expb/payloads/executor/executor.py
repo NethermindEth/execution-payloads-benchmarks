@@ -15,6 +15,7 @@ from docker.models.networks import Network
 
 from expb.logging import Logger
 from expb.configs.exports import Pyroscope
+from expb.configs.clients import Client
 from expb.payloads.utils.networking import limit_container_bandwidth
 from expb.payloads.executor.services.k6 import (
     get_k6_script_content,
@@ -56,6 +57,15 @@ class Executor:
             parents=True,
             exist_ok=True,
         )
+
+        ## Pre-copy Reth db from the snapshot to the overlay upper dir
+        if self.config.execution_client == Client.RETH:
+            reth_db_dir = self.config.snapshot_dir / "db"
+            reth_db_upper_dir = self.config.overlay_upper_dir / "db"
+            reth_db_upper_dir.mkdir(parents=True, exist_ok=True)
+            for file in reth_db_dir.glob("*"):
+                shutil.copy(file, reth_db_upper_dir / file.name)
+
         # run mount command
         device_name = self.config.executor_name
         mount_command: str = " ".join(
