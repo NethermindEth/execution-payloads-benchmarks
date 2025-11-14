@@ -1,5 +1,5 @@
 import http from 'k6/http';
-import { group, check } from 'k6';
+import { group, check, sleep } from 'k6';
 import { SharedArray } from 'k6/data';
 import exec from 'k6/execution';
 import encoding from 'k6/encoding';
@@ -155,4 +155,5 @@ export default function () {
   const idx = startIdx0 + exec.scenario.iterationInTest;
 
   processPayload(idx, {}, false);
+  sleep(1);
 }
