@@ -225,6 +225,7 @@ class Compressor:
                 ],
             ),
             detach=True,
+            restart_policy={"Name": "unless-stopped"},
             network=self._nethermind_container_network_name,
             cpu_count=self._cpu_count,
             nano_cpus=self._cpu_count * 10**9,

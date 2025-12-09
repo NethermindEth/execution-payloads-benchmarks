@@ -169,6 +169,7 @@ class Executor:
             environment=execution_container_environment,
             network=container_network.name if container_network else None,
             detach=True,
+            restart_policy={"Name": "unless-stopped"},
             cpu_count=self.config.docker_container_cpus,  # Only works for windows
             nano_cpus=self.config.docker_container_cpus * 10**9,
             mem_limit=self.config.docker_container_mem_limit,
@@ -250,6 +251,7 @@ class Executor:
             ports=self.config.get_alloy_ports(),
             command=self.config.get_alloy_command(),
             detach=True,
+            restart_policy={"Name": "unless-stopped"},
             network=container_network.name if container_network else None,
         )
         return alloy_container
@@ -302,6 +304,7 @@ class Executor:
             command=k6_container_command,
             network=container_network.name if container_network else None,
             detach=False,
+            restart_policy={"Name": "unless-stopped"},
             user=self.config.docker_user,
             group_add=self.config.docker_group_add,
         )
