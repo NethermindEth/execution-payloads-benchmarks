@@ -66,6 +66,8 @@ scenarios:
     skip: 0
     # Optional: Number of payloads to execute as warmup(no metrics will be collected for those)
     warmup: 0
+    # Optional: Wait time for client startup in seconds. Default is 30 seconds.
+    startup_wait: 30
     # Optional: Client image
     image: ethpandaops/nethermind:performance
     # Optional: Client extra flags

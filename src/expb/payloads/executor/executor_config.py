@@ -61,12 +61,13 @@ class ExecutorConfig:
         pull_images: bool = False,
         limit_bandwidth: bool = False,
         exports: Exports | None = None,
+        startup_wait: int = 30,
     ) -> None:
         # Executor Basic config
         self.scenario_name = scenario_name
         self.executor_name = f"expb-executor-{scenario_name}"
         self.test_id = f"{scenario_name}-{time.strftime('%Y%m%d-%H%M%S')}"
-
+        self.startup_wait = startup_wait
         # Executor Client config
         self.network = network
         self.execution_client = execution_client

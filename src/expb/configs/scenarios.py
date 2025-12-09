@@ -55,6 +55,10 @@ class Scenario:
         if snapshot_dir is None:
             raise ValueError(f"Snapshot directory is required for scenario {name}")
         self.snapshot_dir = Path(snapshot_dir)
+        # Wait time for client startup in seconds
+        self.startup_wait: int = config.get("startup_wait", 30)
+        if not isinstance(self.startup_wait, int):
+            raise ValueError(f"Startup wait time is invalid for scenario {name}")
         # Extra flags to pass to the client
         self.extra_flags: list[str] = config.get("extra_flags", [])
         if not isinstance(self.extra_flags, list):
@@ -178,6 +182,7 @@ class Scenarios:
                 execution_client_extra_env=scenario.extra_env,
                 execution_client_extra_volumes=scenario.extra_volumes,
                 execution_client_extra_commands=scenario.extra_commands,
+                startup_wait=scenario.startup_wait,
                 payloads_file=self.payloads_file,
                 fcus_file=self.fcus_file,
                 work_dir=self.work_dir,

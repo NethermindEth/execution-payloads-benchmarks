@@ -41,6 +41,7 @@ class Executor:
 
     # Scenario Setup
     def prepare_directories(self) -> None:
+        self.log.info("Preparing overlay directories")
         # Create overlay required directories
         self.config.overlay_work_dir.mkdir(
             mode=0o777,
@@ -60,6 +61,9 @@ class Executor:
 
         ## Pre-copy Reth db from the snapshot to the overlay upper dir
         if self.config.execution_client == Client.RETH:
+            self.log.info(
+                "Pre-copying Reth db from the snapshot to the overlay upper dir"
+            )
             reth_db_dir = self.config.snapshot_dir / "db"
             reth_db_upper_dir = self.config.overlay_upper_dir / "db"
             reth_db_upper_dir.mkdir(parents=True, exist_ok=True)
@@ -90,8 +94,9 @@ class Executor:
         )
         try:
             subprocess.run(mount_command, check=True, shell=True)
+            self.log.info("Directories prepared successfully")
         except subprocess.CalledProcessError as e:
-            self.log.error("failed to mount overlay", error=e)
+            self.log.error("Failed to mount overlay", error=e)
             raise e
 
     def clean_system_cache(self) -> None:
@@ -177,7 +182,7 @@ class Executor:
         self,
         execution_client_rpc_url: str,
     ) -> None:
-        time.sleep(30)
+        time.sleep(self.config.startup_wait)
         headers = {"Content-Type": "application/json"}
         payload = {
             "jsonrpc": "2.0",
