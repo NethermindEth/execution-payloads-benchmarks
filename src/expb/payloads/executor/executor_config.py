@@ -230,6 +230,7 @@ class ExecutorConfig:
             source_path = volume_config.get("source", None)
             if source_path is None:
                 source_path = self.volumes_dir / volume_name
+                source_path.mkdir(parents=True, exist_ok=True)
             execution_container_volumes.append(
                 {
                     "bind": volume_config["bind"],
