@@ -1,3 +1,4 @@
+import re
 import os
 import json
 import asyncio
@@ -19,6 +20,7 @@ class Generator:
         start_block: int,
         output_dir: Path,
         end_block: int | None = None,  # if None, will use the latest block
+        join_payloads: bool = True,
         threads: int = 10,
         workers: int = 30,
         logger=Logger(),
@@ -27,6 +29,7 @@ class Generator:
         self.network = network.value
         self.start_block = start_block
         self.output_dir = output_dir
+        self.join_payloads = join_payloads
         self.threads = threads
         self.workers = workers
         self.log = logger
@@ -251,14 +254,14 @@ class Generator:
         self,
         block_number: int,
     ) -> None:
-        self.log.info("generating payload", block_number=block_number)
+        self.log.info("Generating payload", block_number=block_number)
         block = self.w3.eth.get_block(block_number)
         self.log.debug(
-            "generating engine_newPayload request", block_number=block_number
+            "Generating engine_newPayload request", block_number=block_number
         )
         engine_new_payload_request = asyncio.run(self.get_new_payload_request(block))
         self.log.debug(
-            "generating engine_forkChoiceUpdated request", block_number=block_number
+            "Generating engine_forkChoiceUpdated request", block_number=block_number
         )
         engine_new_payload_request["gasUsed"] = block["gasUsed"]
         fcu_request = asyncio.run(self.get_fcu_request(block))
@@ -268,15 +271,57 @@ class Generator:
         fcu_req_file_name = os.path.join(
             self.output_dir, f"payload_{block_number}_fcu.json"
         )
-        self.log.debug("writing engine_newPayload request", block_number=block_number)
+        self.log.debug("Writing engine_newPayload request", block_number=block_number)
         with open(enp_req_file_name, "w") as f:
             json.dump(engine_new_payload_request, f)
         self.log.debug(
-            "writing engine_forkChoiceUpdated request", block_number=block_number
+            "Writing engine_forkChoiceUpdated request", block_number=block_number
         )
         with open(fcu_req_file_name, "w") as f:
             json.dump(fcu_request, f)
-        self.log.info("payload generated", block_number=block_number)
+        self.log.info("Payload generated", block_number=block_number)
+
+    def join_payloads_files(self) -> None:
+        payloads_file = self.output_dir / "payloads.jsonl"
+        fcus_file = self.output_dir / "fcus.jsonl"
+        self.log.info(
+            "Joining payloads files",
+            payloads_file=payloads_file,
+            fcus_file=fcus_file,
+        )
+
+        payloads_filepaths = [
+            p
+            for p in self.output_dir.glob("*.json")
+            if re.match(r"^payload_\d+\.json$", p.name)
+        ]
+        fcu_filepaths: list[Path] = [
+            p.parent / f"payload_{p.name.split('_')[1].split('.')[0]}_fcu.json"
+            for p in payloads_filepaths
+        ]
+
+        pairs = sorted(
+            zip(payloads_filepaths, fcu_filepaths),
+            key=lambda p: int(p[0].name.split("_")[1].split(".")[0]),
+        )
+
+        with payloads_file.open("w") as f_payloads, fcus_file.open("w") as f_fcus:
+            for payload_filepath, fcu_filepath in pairs:
+                with payload_filepath.open("r") as f:
+                    payload = f.readline().strip()
+                with fcu_filepath.open("r") as f:
+                    fcu = f.readline().strip()
+                f_payloads.write(payload + "\n")
+                f_fcus.write(fcu + "\n")
+
+        self.log.info(
+            "Cleaning output directory",
+            output_dir=self.output_dir,
+        )
+        for file in payloads_filepaths:
+            file.unlink()
+        for file in fcu_filepaths:
+            file.unlink()
 
     def generate_payloads(self) -> None:
         with ThreadPoolExecutor(max_workers=self.threads) as executor:
@@ -285,3 +330,6 @@ class Generator:
                     self.generate_payload, range(self.start_block, self.end_block + 1)
                 )
             )
+
+        if self.join_payloads:
+            self.join_payloads_files()

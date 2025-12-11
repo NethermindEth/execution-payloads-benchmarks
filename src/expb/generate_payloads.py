@@ -18,6 +18,12 @@ def generate_payloads(
     start_block: Annotated[int, typer.Option(help="Start block")] = 0,
     end_block: Annotated[int | None, typer.Option(help="End block")] = None,
     output_dir: Annotated[Path, typer.Option(help="Output directory")] = "payloads",
+    join_payloads: Annotated[
+        bool,
+        typer.Option(
+            help="Join payloads and FCUs into a single file (payloads.jsonl and fcus.jsonl)"
+        ),
+    ] = True,
     log_level: Annotated[
         str, typer.Option(help="Log level (e.g., DEBUG, INFO, WARNING)")
     ] = "INFO",
@@ -34,7 +40,7 @@ def generate_payloads(
     logger = setup_logging(log_level)
 
     logger.info(
-        "creating output directory",
+        "Creating output directory",
         output_dir=output_dir,
     )
     os.makedirs(output_dir, exist_ok=True)
@@ -45,13 +51,14 @@ def generate_payloads(
         start_block=start_block,
         end_block=end_block,
         output_dir=output_dir,
+        join_payloads=join_payloads,
         threads=threads,
         workers=workers,
         logger=logger,
     )
 
     logger.info(
-        "starting payloads generation",
+        "Starting payloads generation",
         network=network.value,
         rpc_url=rpc_url,
         start_block=start_block,
