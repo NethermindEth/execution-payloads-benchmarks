@@ -34,6 +34,9 @@ class ErigonConfig(ClientConfig):
                 "--ws",
                 "--prune.mode=full",
                 "--externalcl",
+                # Disable peering
+                "--nodiscover",
+                "--maxpeers=0",
             ],
             prometheus_metrics_path="/debug/metrics/prometheus",
         )

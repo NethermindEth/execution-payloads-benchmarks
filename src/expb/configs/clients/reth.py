@@ -28,6 +28,10 @@ class RethConfig(ClientConfig):
                 f"--authrpc.jwtsecret={CLIENTS_JWT_SECRET_FILE}",
                 f"--metrics=0.0.0.0:{CLIENT_METRICS_PORT}",
                 "--http.api=trace,rpc,eth,net,debug,web3,admin",
+                # Disable peering
+                "--disable-discovery",
+                "--max-inbound-peers=0",
+                "--max-outbound-peers=0",
             ],
             prometheus_metrics_path="/debug/metrics/prometheus",
         )

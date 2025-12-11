@@ -33,6 +33,9 @@ class BesuConfig(ClientConfig):
                 "--rpc-http-api=ADMIN,DEBUG,ETH,MINER,NET,TRACE,TXPOOL,WEB3",
                 "--sync-mode=FULL",
                 "--version-compatibility-protection=false",
+                # Disable peering
+                "--max-peers=0",
+                "--discovery-enabled=false",
             ],
             prometheus_metrics_path="/metrics",
         )

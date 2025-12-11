@@ -31,6 +31,9 @@ class NethermindConfig(ClientConfig):
                 "--Metrics.Enabled=true",
                 f"--Metrics.ExposePort={CLIENT_METRICS_PORT}",
                 "--Metrics.ExposeHost=0.0.0.0",
+                # Disable peering
+                "--Init.DiscoveryEnabled=false",
+                "--Network.MaxActivePeers=0",
             ],
             prometheus_metrics_path="/metrics",
             default_env={},

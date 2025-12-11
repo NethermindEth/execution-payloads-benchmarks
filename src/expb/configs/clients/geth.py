@@ -35,6 +35,9 @@ class GethConfig(ClientConfig):
                 "--ws.addr=0.0.0.0",
                 f"--ws.port={CLIENT_RPC_PORT}",
                 "--ws.api=eth,web3,net,debug,admin",
+                # Disable peering
+                "--nodiscover",
+                "--maxpeers=0",
             ],
             prometheus_metrics_path="/debug/metrics/prometheus",
         )
