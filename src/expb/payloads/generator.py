@@ -1,16 +1,15 @@
-import re
-import os
-import json
 import asyncio
-
-from pathlib import Path
+import json
+import os
+import re
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
 from web3 import Web3
 from web3.types import BlockData, HexBytes, TxData
 
-
+from expb.configs.networks import Fork, Network
 from expb.logging import Logger
-from expb.configs.networks import Network, Fork
 
 
 class Generator:

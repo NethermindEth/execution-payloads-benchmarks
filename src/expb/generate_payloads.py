@@ -1,12 +1,12 @@
 import os
-import typer
-
 from pathlib import Path
+
+import typer
 from typing_extensions import Annotated
 
-from expb.payloads import Generator
 from expb.configs.networks import Network
 from expb.logging import setup_logging
+from expb.payloads import Generator
 
 app = typer.Typer()
 

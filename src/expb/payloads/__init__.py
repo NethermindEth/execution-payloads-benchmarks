@@ -1,6 +1,6 @@
-from expb.payloads.generator import Generator
 from expb.payloads.compressor import Compressor
 from expb.payloads.executor import Executor, ExecutorConfig
+from expb.payloads.generator import Generator
 
 __all__ = [
     "Generator",

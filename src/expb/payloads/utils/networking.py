@@ -52,6 +52,9 @@ def limit_container_bandwidth(
     upload_speed: str,
 ) -> None:
     container.reload()
-    container_pid = container.attrs["State"]["Pid"]
-    veth_name = get_veth_name(container_pid)
-    apply_tc_limits(veth_name, download_speed, upload_speed)
+    if container.attrs is not None:
+        container_pid = container.attrs["State"]["Pid"]
+        veth_name = get_veth_name(container_pid)
+        apply_tc_limits(veth_name, download_speed, upload_speed)
+    else:
+        raise ValueError("Container attributes are not available")

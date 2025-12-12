@@ -1,31 +1,31 @@
 import json
-import time
-import shutil
-import docker
 import secrets
-import requests
+import shutil
 import subprocess
-import docker.errors
+import time
+from concurrent.futures import Future, ThreadPoolExecutor
 
-from requests.adapters import HTTPAdapter
-from concurrent.futures import ThreadPoolExecutor, Future
-from urllib3.util.retry import Retry
+import docker
+import docker.errors
+import requests
 from docker.models.containers import Container
 from docker.models.networks import Network
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
-from expb.logging import Logger
-from expb.configs.exports import Pyroscope
 from expb.configs.clients import Client
-from expb.payloads.utils.networking import limit_container_bandwidth
-from expb.payloads.executor.services.k6 import (
-    get_k6_script_content,
-    build_k6_script_config,
-)
+from expb.configs.exports import Pyroscope
+from expb.logging import Logger
+from expb.payloads.executor.executor_config import ExecutorConfig
+from expb.payloads.executor.exports_utils import add_pyroscope_config
 from expb.payloads.executor.services.alloy import (
     get_alloy_config,
 )
-from expb.payloads.executor.executor_config import ExecutorConfig
-from expb.payloads.executor.exports_utils import add_pyroscope_config
+from expb.payloads.executor.services.k6 import (
+    build_k6_script_config,
+    get_k6_script_content,
+)
+from expb.payloads.utils.networking import limit_container_bandwidth
 
 
 class Executor:

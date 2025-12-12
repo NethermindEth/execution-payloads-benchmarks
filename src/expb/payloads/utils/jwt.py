@@ -1,10 +1,9 @@
-import json
-import hmac
-import time
 import base64
 import hashlib
+import hmac
+import json
 import threading
-
+import time
 from pathlib import Path
 
 
@@ -22,7 +21,7 @@ class JWTProvider:
         self.jwt_secret_bytes = bytes.fromhex(raw_jwt_secret)
 
         # Cache for JWT token
-        self._jwt_cache: dict[str, int] = {"token": "", "exp": 0}
+        self._jwt_cache: dict[str, str | int] = {"token": "", "exp": 0}
         # Semaphore for thread-safe cache access
         self._cache_lock = threading.Lock()
         # Token expiration threshold
@@ -47,9 +46,9 @@ class JWTProvider:
         with self._cache_lock:
             # Return cached token if still valid (with 2-second buffer)
             if self._jwt_cache["token"] and now < (
-                self._jwt_cache["exp"] - self._expiration_threshold_seconds
+                int(self._jwt_cache["exp"]) - self._expiration_threshold_seconds
             ):
-                return self._jwt_cache["token"]
+                return str(self._jwt_cache["token"])
 
         # Generate new token (outside lock to avoid blocking other threads)
         iat = now
@@ -82,7 +81,8 @@ class JWTProvider:
             # Double-check pattern: another thread might have updated the cache
             if not (
                 self._jwt_cache["token"]
-                and now < (self._jwt_cache["exp"] - self._expiration_threshold_seconds)
+                and now
+                < (int(self._jwt_cache["exp"]) - self._expiration_threshold_seconds)
             ):
                 self._jwt_cache = {"token": token, "exp": exp}
 

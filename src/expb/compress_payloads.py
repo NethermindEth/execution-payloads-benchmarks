@@ -1,15 +1,15 @@
-import typer
-
 from pathlib import Path
+
+import typer
 from typing_extensions import Annotated
 
-from expb.payloads import Compressor
-from expb.configs.networks import Network
 from expb.configs.defaults import (
     DOCKER_CONTAINER_DEFAULT_CPUS,
     DOCKER_CONTAINER_DEFAULT_MEM_LIMIT,
 )
+from expb.configs.networks import Network
 from expb.logging import setup_logging
+from expb.payloads import Compressor
 
 app = typer.Typer()
 

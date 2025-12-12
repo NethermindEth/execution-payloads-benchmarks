@@ -1,9 +1,10 @@
 import typer
 
-from expb.generate_payloads import app as generate_payloads_app
+from expb.compress_payloads import app as compress_payloads_app
 from expb.execute_scenario import app as execute_scenario_app
 from expb.execute_scenarios import app as execute_scenarios_app
-from expb.compress_payloads import app as compress_payloads_app
+from expb.generate_payloads import app as generate_payloads_app
+from expb.send_payloads import app as send_payloads_app
 
 app = typer.Typer()
 
@@ -12,6 +13,7 @@ typer_apps = [
     execute_scenario_app,
     execute_scenarios_app,
     compress_payloads_app,
+    send_payloads_app,
 ]
 
 

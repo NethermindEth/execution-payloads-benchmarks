@@ -1,6 +1,6 @@
-import typer
-
 from pathlib import Path
+
+import typer
 from typing_extensions import Annotated
 
 from expb.configs.scenarios import Scenarios
@@ -12,7 +12,9 @@ app = typer.Typer()
 @app.command()
 def execute_scenario(
     scenario_name: Annotated[str, typer.Option(help="Scenario name")],
-    config_file: Annotated[Path, typer.Option(help="Config file")] = "expb.yaml",
+    config_file: Annotated[Path, typer.Option(help="Config file")] = Path(
+        "expb.yaml",
+    ),
     log_level: Annotated[
         str, typer.Option(help="Log level (e.g., DEBUG, INFO, WARNING)")
     ] = "INFO",

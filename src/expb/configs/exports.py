@@ -45,9 +45,10 @@ class Pyroscope:
         pyroscope: dict[str, str | None],
     ) -> None:
         # Parse pyroscope endpoint
-        self.endpoint = pyroscope.get("endpoint", None)
-        if self.endpoint is None:
+        pyroscope_endpoint = pyroscope.get("endpoint", None)
+        if pyroscope_endpoint is None:
             raise ValueError("Pyroscope endpoint is required")
+        self.endpoint = pyroscope_endpoint
         # Parse pyroscope basic auth
         self.basic_auth = None
         basic_auth = pyroscope.get("basic_auth", None)
@@ -66,10 +67,12 @@ class BasicAuth:
         basic_auth_config: dict[str, str | None],
     ) -> None:
         # Parse basic auth username
-        self.username = basic_auth_config.get("username", None)
-        if self.username is None:
+        username = basic_auth_config.get("username", None)
+        if username is None:
             raise ValueError("Basic auth username is required")
+        self.username = username
         # Parse basic auth password
-        self.password = basic_auth_config.get("password", None)
-        if self.password is None:
+        password = basic_auth_config.get("password", None)
+        if password is None:
             raise ValueError("Basic auth password is required")
+        self.password = password
