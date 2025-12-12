@@ -41,7 +41,7 @@ def engine_request(
             timeout=timeout,
         )
         if not resp.ok:
-            if resp.status_code == 401:
+            if resp.status_code == 401 or resp.status_code == 403:
                 expiration_seconds = min(expiration_seconds * 2, 3600)
                 jwt_provider.invalidate_jwt()
                 retries -= 1
