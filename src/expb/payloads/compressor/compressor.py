@@ -8,6 +8,7 @@ import requests as r
 import subprocess
 import docker.errors
 
+from typing import Any
 from pathlib import Path
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -22,9 +23,8 @@ from expb.configs.clients import (
     CLIENT_ENGINE_PORT,
 )
 from expb.payloads.utils.jwt import JWTProvider
-from expb.payloads.compressor.compressor_utils import (
-    RPCError,
-    engine_request,
+from expb.payloads.utils.engine import engine_request, RPCError
+from expb.payloads.compressor.utils import (
     convert_mem_limit_to_bytes,
 )
 
@@ -224,7 +224,6 @@ class Compressor:
                     f"--Blocks.TargetBlockGasLimit={self._target_gas_limit}",
                 ],
             ),
-            detach=True,
             restart_policy={"Name": "unless-stopped"},
             network=self._nethermind_container_network_name,
             cpu_count=self._cpu_count,
@@ -622,8 +621,8 @@ class Compressor:
         self,
         block_number: int,
         method: str,
-        execution_payload: dict[str],
-    ) -> tuple[dict[str], dict[str]]:
+        execution_payload: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         params = []
         (
             payload,

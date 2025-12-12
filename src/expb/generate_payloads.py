@@ -17,7 +17,9 @@ def generate_payloads(
     network: Annotated[Network, typer.Option(help="Network")] = Network.MAINNET,
     start_block: Annotated[int, typer.Option(help="Start block")] = 0,
     end_block: Annotated[int | None, typer.Option(help="End block")] = None,
-    output_dir: Annotated[Path, typer.Option(help="Output directory")] = "payloads",
+    output_dir: Annotated[Path, typer.Option(help="Output directory")] = Path(
+        "payloads",
+    ),
     join_payloads: Annotated[
         bool,
         typer.Option(

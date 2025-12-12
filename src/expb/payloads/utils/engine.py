@@ -8,7 +8,7 @@ class RPCError(Exception):
         self,
         error: str,
         status_code: int,
-        response: requests.Response,
+        response: requests.Response | None,
     ):
         super().__init__(error)
         self.error = error
@@ -69,16 +69,3 @@ def engine_request(
         status_code=401,
         response=None,
     )
-
-
-def convert_mem_limit_to_bytes(mem_limit: str) -> int:
-    if mem_limit.endswith("g"):
-        return int(mem_limit.replace("g", "")) * 1024 * 1024 * 1024
-    elif mem_limit.endswith("m"):
-        return int(mem_limit.replace("m", "")) * 1024 * 1024
-    elif mem_limit.endswith("k"):
-        return int(mem_limit.replace("k", "")) * 1024
-    elif mem_limit.endswith("b"):
-        return int(mem_limit.replace("b", ""))
-    else:
-        raise ValueError(f"Invalid memory limit: {mem_limit}")

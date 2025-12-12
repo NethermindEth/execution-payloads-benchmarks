@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from web3 import Web3
 from web3.types import BlockData, HexBytes, TxData
 
+
 from expb.logging import Logger
 from expb.configs.networks import Network, Fork
 
@@ -90,7 +91,7 @@ class Generator:
         self,
         block: BlockData,
         transactions: list[str],
-        withdrawals: list[str],
+        withdrawals: list[dict],
     ) -> dict:
         payload = self.compose_payload_v1(block, transactions)
         payload.update(
@@ -104,7 +105,7 @@ class Generator:
         self,
         block: BlockData,
         transactions: list[str],
-        withdrawals: list[str],
+        withdrawals: list[dict],
     ) -> dict:
         payload = self.compose_payload_v2(block, transactions, withdrawals)
         block["parentBeaconBlockRoot"]
@@ -128,7 +129,7 @@ class Generator:
         self,
         block: BlockData,
         transactions: list[str],
-        withdrawals: list[str],
+        withdrawals: list[dict],
     ) -> dict:
         payload = self.compose_payload_v3(block, transactions, withdrawals)
         # payload.update({})
@@ -140,7 +141,7 @@ class Generator:
         tx_hash: str,
     ) -> str:
         async with tx_semaphore:
-            raw = self.w3.eth.get_raw_transaction(tx_hash)
+            raw = self.w3.eth.get_raw_transaction(tx_hash)  # ty:ignore[invalid-argument-type]
         return self.w3.to_hex(raw)
 
     async def get_block_transactions(
@@ -189,7 +190,7 @@ class Generator:
         # TODO: implement this!
         return []
 
-    async def get_new_payload_request(self, block: BlockData) -> list:
+    async def get_new_payload_request(self, block: BlockData) -> dict:
         block_number = block["number"]
         txs_task = self.get_block_transactions(block)
         version = self.get_payload_version(block)
