@@ -17,10 +17,14 @@ class ForkConfig:
     def __gt__(self, other: "ForkConfig") -> bool:
         return self.order > other.order
 
-    def __eq__(self, other: "ForkConfig") -> bool:
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ForkConfig):
+            return False
         return self.name == other.name
 
-    def __ne__(self, other: "ForkConfig") -> bool:
+    def __ne__(self, other: object) -> bool:
+        if not isinstance(other, ForkConfig):
+            return False
         return self.name != other.name
 
 

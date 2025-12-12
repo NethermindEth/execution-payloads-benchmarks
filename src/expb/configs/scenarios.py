@@ -1,34 +1,37 @@
+from pathlib import Path
+from typing import Any
+
 import yaml
 
-from pathlib import Path
-
-from expb.payloads import Executor, ExecutorConfig
 from expb.configs.clients import Client
+from expb.configs.defaults import (
+    DOCKER_CONTAINER_DEFAULT_CPUS,
+    DOCKER_CONTAINER_DEFAULT_DOWNLOAD_SPEED,
+    DOCKER_CONTAINER_DEFAULT_MEM_LIMIT,
+    DOCKER_CONTAINER_DEFAULT_UPLOAD_SPEED,
+    FCUS_DEFAULT_FILE,
+    OUTPUTS_DEFAULT_DIR,
+    PAYLOADS_DEFAULT_FILE,
+    WORK_DEFAULT_DIR,
+)
+from expb.configs.exports import Exports
 from expb.configs.networks import Network
 from expb.logging import Logger
-from expb.configs.exports import Exports
-from expb.configs.defaults import (
-    PAYLOADS_DEFAULT_FILE,
-    FCUS_DEFAULT_FILE,
-    WORK_DEFAULT_DIR,
-    OUTPUTS_DEFAULT_DIR,
-    DOCKER_CONTAINER_DEFAULT_CPUS,
-    DOCKER_CONTAINER_DEFAULT_MEM_LIMIT,
-    DOCKER_CONTAINER_DEFAULT_DOWNLOAD_SPEED,
-    DOCKER_CONTAINER_DEFAULT_UPLOAD_SPEED,
-)
+from expb.payloads import Executor, ExecutorConfig
 
 
 class Scenario:
     def __init__(
         self,
         name: str,
-        config: dict[str],
+        config: dict[str, Any],
     ) -> None:
         # Name of the scenario
         self.name = name
         # Name of the client to use
-        client_name: str = config.get("client")
+        client_name = config.get("client", None)
+        if client_name is None or not isinstance(client_name, str):
+            raise ValueError(f"Client name is required for scenario {name}")
         self.client: Client = Client[client_name.upper()]
         # Image of the client to use
         self.client_image: str | None = config.get("image", None)
@@ -37,15 +40,20 @@ class Scenario:
         if not isinstance(self.payloads_skip, int):
             raise ValueError(f"Skip number of payloads is invalid for scenario {name}")
         # Amount of payloads to run
-        self.payloads_amount: int | None = config.get("amount", None)
-        if self.payloads_amount is None or not isinstance(self.payloads_amount, int):
+        payloads_amount = config.get("amount", None)
+        if payloads_amount is None or not isinstance(payloads_amount, int):
             raise ValueError(f"Amount of payloads is required for scenario {name}")
+        self.payloads_amount = payloads_amount
         # Payload to use as warmup(no metrics will be collected for those)
         self.payloads_warmup: int = config.get("warmup", 0)
         if not isinstance(self.payloads_warmup, int):
             raise ValueError(
                 f"Warmup number of payloads is invalid for scenario {name}"
             )
+        # Duration of the warmup (k6 setup duration)
+        self.warmup_duration: str = config.get("warmup_duration", "10m")
+        if self.warmup_duration is None or not isinstance(self.warmup_duration, str):
+            raise ValueError(f"Warmup duration is invalid for scenario {name}")
         # Duration of the scenario
         self.duration: str = config.get("duration", "10m")
         if self.duration is None or not isinstance(self.duration, str):
@@ -129,8 +137,10 @@ class Scenarios:
         self.outputs_dir = Path(outputs_dir)
 
         # Parse export configurations
-        exports: dict[str] = config.get("export", {})
-        if exports and isinstance(exports, dict):
+        exports: dict[str, Any] = config.get("export", {})
+        if not isinstance(exports, dict):
+            raise ValueError("Invalid exports configuration")
+        if exports:
             self.exports = Exports(exports)
 
         # Parse resources configurations
@@ -155,9 +165,11 @@ class Scenarios:
         self.docker_container_upload_speed = docker_container_upload_speed
 
         # Parse scenarios configurations
-        scenarios_configs: dict[str, dict[str]] = config.get("scenarios", {})
+        scenarios_configs: dict[str, dict[str, Any]] = config.get("scenarios", {})
         if not isinstance(scenarios_configs, dict):
-            raise ValueError("Invalid scenarios")
+            raise ValueError("Invalid scenarios configuration")
+        if not scenarios_configs:
+            raise ValueError("Scenarios configuration is required")
 
         self.scenarios: dict[str, Scenario] = {}
         for scenario_name, scenario_config in scenarios_configs.items():
@@ -198,6 +210,7 @@ class Scenarios:
                 k6_payloads_amount=scenario.payloads_amount,
                 k6_payloads_skip=scenario.payloads_skip,
                 k6_payloads_warmup=scenario.payloads_warmup,
+                k6_warmup_duration=scenario.warmup_duration,
                 exports=self.exports,
             ),
             logger=logger,

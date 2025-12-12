@@ -1,7 +1,8 @@
 import math
 from pathlib import Path
-from typing import Optional
+
 from jinja2 import Template
+
 from expb.configs.clients import Client
 
 
@@ -10,13 +11,13 @@ def build_k6_script_config(
     scenario_name: str,
     client: Client,
     iterations: int,
-    duration: Optional[
-        str
-    ] = "10m",  # Default duration is 10 minutes (the actual usage of this value depends on the executor type)
-    rate: Optional[int] = None,  # Force sequantional running
+    duration: str
+    | None = "10m",  # Default duration is 10 minutes (the actual usage of this value depends on the executor type)
+    rate: int | None = None,  # Force sequantional running
     pre_allocated_vus: int = 2,
     max_vus: int = 2,
     time_unit: str = "1s",
+    setup_timeout: str | None = "10m",
 ):
     if rate and rate > 0:
         # If duration not provided, compute from iterations/rate
@@ -70,6 +71,7 @@ def build_k6_script_config(
                 "p(99)",
             ],
             "tags": {"testid": f"{test_id}"},
+            "setupTimeout": setup_timeout,
         }
     }
 

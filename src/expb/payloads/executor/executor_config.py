@@ -43,6 +43,7 @@ class ExecutorConfig:
         k6_duration: str = "10m",
         k6_payloads_skip: int = 0,
         k6_payloads_warmup: int = 0,
+        k6_warmup_duration: str = "10m",
         docker_images: dict[str, str] = {},
         payloads_file: Path = PAYLOADS_DEFAULT_FILE,
         fcus_file: Path = FCUS_DEFAULT_FILE,
@@ -96,6 +97,7 @@ class ExecutorConfig:
         ## K6 script config
         self.k6_payloads_amount = k6_payloads_amount
         self.k6_duration = k6_duration
+        self.k6_warmup_duration = k6_warmup_duration
         self.k6_payloads_skip = k6_payloads_skip
         self.k6_payloads_warmup = k6_payloads_warmup
 
@@ -233,10 +235,13 @@ class ExecutorConfig:
         execution_container_volumes = []
         container_name = self.get_execution_client_container_name()
         for volume_name, volume_config in self.execution_client_extra_volumes.items():
-            source_path = volume_config.get("source", None)
-            if source_path is None:
+            source_path: Path | None = None
+            source_path_raw = volume_config.get("source", None)
+            if source_path_raw is None:
                 source_path = self.volumes_dir / volume_name
                 source_path.mkdir(parents=True, exist_ok=True)
+            else:
+                source_path = Path(source_path_raw)
             execution_container_volumes.append(
                 {
                     "bind": volume_config["bind"],
