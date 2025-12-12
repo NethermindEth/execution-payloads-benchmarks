@@ -28,7 +28,7 @@ def engine_request(
     while retries > 0:
         jwt = jwt_provider.get_jwt(expiration_seconds=expiration_seconds)
         req_json, req_data = (
-            (rpc_request, None) if skip_parsing else (None, rpc_request)
+            (None, rpc_request) if skip_parsing else (rpc_request, None)
         )
         resp = requests.post(
             url=engine_url,
