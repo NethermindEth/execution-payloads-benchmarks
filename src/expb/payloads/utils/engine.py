@@ -23,16 +23,21 @@ def engine_request(
     timeout: int = 3600,
     expiration_seconds: int = 120,
     retries=10,
+    skip_parsing: bool = False,
 ):
     while retries > 0:
         jwt = jwt_provider.get_jwt(expiration_seconds=expiration_seconds)
+        req_json, req_data = (
+            (rpc_request, None) if skip_parsing else (None, rpc_request)
+        )
         resp = requests.post(
             url=engine_url,
             headers={
                 "Authorization": f"Bearer {jwt}",
                 "Content-Type": "application/json",
             },
-            json=rpc_request,
+            json=req_json,
+            data=req_data,
             timeout=timeout,
         )
         if not resp.ok:

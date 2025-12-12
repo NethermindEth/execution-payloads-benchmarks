@@ -35,7 +35,7 @@ class PrometheusRW:
         if basic_auth is not None and isinstance(basic_auth, dict):
             self.basic_auth = BasicAuth(basic_auth)
         # Parse prometheus remote write tags
-        self.tags = prometheus_remote_write.get("tags", [])
+        self.tags: list[str] = prometheus_remote_write.get("tags", [])
 
 
 # Grafana Pyroscope (Profiling exporter)

@@ -40,8 +40,8 @@ def send_payloads(
             if not payload or not fcu:
                 break
             try:
-                engine_request(engine_url, jwt_provider, payload)
-                engine_request(engine_url, jwt_provider, fcu)
+                engine_request(engine_url, jwt_provider, payload, skip_parsing=True)
+                engine_request(engine_url, jwt_provider, fcu, skip_parsing=True)
             except RPCError as e:
                 logger.error(
                     "Failed to send payload", error=e.error, status_code=e.status_code

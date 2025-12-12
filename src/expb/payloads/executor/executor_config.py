@@ -1,33 +1,33 @@
 import os
 import time
-import docker
-
 from pathlib import Path
+
+import docker
 from docker.models.containers import Container
 from docker.models.networks import Network
 
-from expb.configs.exports import Exports
-from expb.configs.networks import Network as EthNetwork
 from expb.configs.clients import (
-    Client,
-    CLIENTS_DATA_DIR,
-    CLIENTS_JWT_SECRET_DIR,
-    CLIENT_RPC_PORT,
     CLIENT_ENGINE_PORT,
     CLIENT_METRICS_PORT,
+    CLIENT_RPC_PORT,
+    CLIENTS_DATA_DIR,
+    CLIENTS_JWT_SECRET_DIR,
+    Client,
 )
 from expb.configs.defaults import (
-    K6_DEFAULT_IMAGE,
     ALLOY_DEFAULT_IMAGE,
-    PAYLOADS_DEFAULT_FILE,
-    FCUS_DEFAULT_FILE,
-    WORK_DEFAULT_DIR,
-    OUTPUTS_DEFAULT_DIR,
     DOCKER_CONTAINER_DEFAULT_CPUS,
-    DOCKER_CONTAINER_DEFAULT_MEM_LIMIT,
     DOCKER_CONTAINER_DEFAULT_DOWNLOAD_SPEED,
+    DOCKER_CONTAINER_DEFAULT_MEM_LIMIT,
     DOCKER_CONTAINER_DEFAULT_UPLOAD_SPEED,
+    FCUS_DEFAULT_FILE,
+    K6_DEFAULT_IMAGE,
+    OUTPUTS_DEFAULT_DIR,
+    PAYLOADS_DEFAULT_FILE,
+    WORK_DEFAULT_DIR,
 )
+from expb.configs.exports import Exports
+from expb.configs.networks import Network as EthNetwork
 from expb.payloads.executor.services.alloy import ALLOY_PYROSCOPE_PORT
 
 
@@ -207,10 +207,13 @@ class ExecutorConfig:
         network: Network,
     ) -> str:
         container.reload()
-        container_ip = container.attrs["NetworkSettings"]["Networks"][network.name][
-            "IPAddress"
-        ]
-        return f"http://{container_ip}:{CLIENT_ENGINE_PORT}"
+        if container.attrs is not None:
+            container_ip = container.attrs["NetworkSettings"]["Networks"][network.name][
+                "IPAddress"
+            ]
+            return f"http://{container_ip}:{CLIENT_ENGINE_PORT}"
+        else:
+            raise ValueError("Container attributes are not available")
 
     def get_execution_client_rpc_url(
         self,
@@ -218,10 +221,13 @@ class ExecutorConfig:
         network: Network,
     ) -> str:
         container.reload()
-        container_ip = container.attrs["NetworkSettings"]["Networks"][network.name][
-            "IPAddress"
-        ]
-        return f"http://{container_ip}:{CLIENT_RPC_PORT}"
+        if container.attrs is not None:
+            container_ip = container.attrs["NetworkSettings"]["Networks"][network.name][
+                "IPAddress"
+            ]
+            return f"http://{container_ip}:{CLIENT_RPC_PORT}"
+        else:
+            raise ValueError("Container attributes are not available")
 
     def get_execution_client_volumes(self) -> list[dict[str, dict]]:
         execution_container_volumes = []
@@ -286,7 +292,7 @@ class ExecutorConfig:
 
     def get_alloy_volumes(self) -> dict[str, dict[str, str]]:
         return {
-            self.alloy_config_file.resolve(): {
+            str(self.alloy_config_file.resolve()): {
                 "bind": "/etc/alloy/config.alloy",
                 "mode": "rw",
             },
@@ -303,10 +309,13 @@ class ExecutorConfig:
         network: Network,
     ) -> str:
         container.reload()
-        container_ip = container.attrs["NetworkSettings"]["Networks"][network.name][
-            "IPAddress"
-        ]
-        return f"http://{container_ip}:{ALLOY_PYROSCOPE_PORT}"
+        if container.attrs is not None:
+            container_ip = container.attrs["NetworkSettings"]["Networks"][network.name][
+                "IPAddress"
+            ]
+            return f"http://{container_ip}:{ALLOY_PYROSCOPE_PORT}"
+        else:
+            raise ValueError("Container attributes are not available")
 
     def get_alloy_command(self) -> list[str]:
         return ["run", "/etc/alloy/config.alloy"]
@@ -320,19 +329,19 @@ class ExecutorConfig:
 
     def get_k6_volumes(self) -> dict[str, dict[str, str]]:
         return {
-            self.payloads_file.resolve(): {
+            str(self.payloads_file.resolve()): {
                 "bind": self._k6_container_payloads_file,
                 "mode": "rw",
             },
-            self.fcus_file.resolve(): {
+            str(self.fcus_file.resolve()): {
                 "bind": self._k6_container_fcus_file,
                 "mode": "rw",
             },
-            self.jwt_secret_file.resolve(): {
+            str(self.jwt_secret_file.resolve()): {
                 "bind": self._k6_container_jwt_secret_file,
                 "mode": "rw",
             },
-            self.outputs_dir.resolve(): {
+            str(self.outputs_dir.resolve()): {
                 "bind": self._k6_container_work_dir,
                 "mode": "rw",
             },

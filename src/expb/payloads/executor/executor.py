@@ -221,6 +221,8 @@ class Executor:
         self,
         execution_client_metrics_address: str,
     ) -> None:
+        if self.config.exports is None:
+            return
         # Create alloy config file
         self.config.alloy_config_file.touch(mode=0o666, exist_ok=True)
         # Write alloy config content
