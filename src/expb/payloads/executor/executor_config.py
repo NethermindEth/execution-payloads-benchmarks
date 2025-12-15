@@ -29,6 +29,7 @@ from expb.configs.defaults import (
 from expb.configs.exports import Exports
 from expb.configs.networks import Network as EthNetwork
 from expb.payloads.executor.services.alloy import ALLOY_PYROSCOPE_PORT
+from expb.payloads.executor.services.snapshots import SnapshotService
 
 
 # ExecutorConfig class is a collection of helper functions and configuration options for the Executor class
@@ -38,7 +39,8 @@ class ExecutorConfig:
         scenario_name: str,
         network: EthNetwork,
         execution_client: Client,
-        snapshot_dir: Path,
+        snapshot_source: str,
+        snapshot_service: SnapshotService,
         k6_payloads_amount: int,
         k6_duration: str = "10m",
         k6_payloads_skip: int = 0,
@@ -108,16 +110,13 @@ class ExecutorConfig:
 
         ## Work directories
         self.work_dir = work_dir
-        ### Overlay directories
-        self.overlay_work_dir = self.work_dir / "work"
-        self.overlay_upper_dir = self.work_dir / "upper"
-        self.overlay_merged_dir = self.work_dir / "merged"
         ### JWT secret file
         self.jwt_secret_dir = self.work_dir / "jwt-secret"
         self.jwt_secret_file = self.jwt_secret_dir / "jwtsecret.hex"
 
-        ## Snapshot directory
-        self.snapshot_dir = snapshot_dir
+        ## Snapshot config
+        self.snapshot_source = snapshot_source
+        self.snapshot_service = snapshot_service
 
         ## Outputs directory
         timestamp = time.strftime("%Y%m%d-%H%M%S")
@@ -258,6 +257,10 @@ class ExecutorConfig:
                 }
             )
 
+        # Add execution client snapshot volume, this must have been created beforehand
+        snapshot_path = self.snapshot_service.get_snapshot(
+            name=self.executor_name, source=self.snapshot_source
+        )
         execution_container_volumes.append(
             {
                 "bind": CLIENTS_DATA_DIR,
@@ -267,7 +270,7 @@ class ExecutorConfig:
                     "driver_opts": {
                         "type": "none",
                         "o": "bind,rw,dirsync,noatime",
-                        "device": str(self.overlay_merged_dir.resolve()),
+                        "device": str(snapshot_path.resolve()),
                     },
                 },
             }

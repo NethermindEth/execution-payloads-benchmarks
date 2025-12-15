@@ -1,6 +1,5 @@
 import json
 import secrets
-import shutil
 import subprocess
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -13,7 +12,6 @@ from docker.models.networks import Network
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from expb.configs.clients import Client
 from expb.configs.exports import Pyroscope
 from expb.logging import Logger
 from expb.payloads.executor.executor_config import ExecutorConfig
@@ -41,62 +39,14 @@ class Executor:
 
     # Scenario Setup
     def prepare_directories(self) -> None:
-        self.log.info("Preparing overlay directories")
-        # Create overlay required directories
-        self.config.overlay_work_dir.mkdir(
-            mode=0o777,
-            parents=True,
-            exist_ok=True,
-        )
-        self.config.overlay_upper_dir.mkdir(
-            mode=0o777,
-            parents=True,
-            exist_ok=True,
-        )
-        self.config.overlay_merged_dir.mkdir(
-            mode=0o777,
-            parents=True,
-            exist_ok=True,
-        )
-
-        ## Pre-copy Reth db from the snapshot to the overlay upper dir
-        if self.config.execution_client == Client.RETH:
-            self.log.info(
-                "Pre-copying Reth db from the snapshot to the overlay upper dir"
-            )
-            reth_db_dir = self.config.snapshot_dir / "db"
-            reth_db_upper_dir = self.config.overlay_upper_dir / "db"
-            reth_db_upper_dir.mkdir(parents=True, exist_ok=True)
-            for file in reth_db_dir.glob("*"):
-                shutil.copy(file, reth_db_upper_dir / file.name)
-
-        # run mount command
-        device_name = self.config.executor_name
-        mount_command: str = " ".join(
-            [
-                "mount",
-                "-t",
-                "overlay",
-                device_name,
-                "-o",
-                ",".join(
-                    [
-                        f"lowerdir={self.config.snapshot_dir.resolve()}",
-                        f"upperdir={self.config.overlay_upper_dir.resolve()}",
-                        f"workdir={self.config.overlay_work_dir.resolve()}",
-                        "redirect_dir=on",
-                        "metacopy=on",
-                        "volatile",
-                    ]
-                ),
-                str(self.config.overlay_merged_dir.resolve()),
-            ]
-        )
+        self.log.info("Preparing snapshot directory")
         try:
-            subprocess.run(mount_command, check=True, shell=True)
-            self.log.info("Directories prepared successfully")
-        except subprocess.CalledProcessError as e:
-            self.log.error("Failed to mount overlay", error=e)
+            self.config.snapshot_service.create_snapshot(
+                name=self.config.executor_name, source=self.config.snapshot_source
+            )
+            self.log.info("Snapshot created successfully")
+        except Exception as e:
+            self.log.error("Failed to create snapshot", error=e)
             raise e
 
     def clean_system_cache(self) -> None:
@@ -399,24 +349,13 @@ class Executor:
 
     # Scenario Cleanup
     def remove_directories(self) -> None:
-        umount_command = " ".join(
-            ["umount", str(self.config.overlay_merged_dir.resolve())]
-        )
         try:
-            subprocess.run(umount_command, check=True, shell=True)
-        except subprocess.CalledProcessError as e:
-            self.log.error("Failed to umount overlay", error=e)
-            raise e
-        try:
-            paths_to_remove = [
-                self.config.overlay_upper_dir.resolve(),
-                self.config.overlay_work_dir.resolve(),
-                self.config.overlay_merged_dir.resolve(),
-            ]
-            for path in paths_to_remove:
-                shutil.rmtree(path)
+            self.config.snapshot_service.delete_snapshot(
+                name=self.config.executor_name, source=self.config.snapshot_source
+            )
+            self.log.info("Snapshot deleted successfully")
         except Exception as e:
-            self.log.error("Failed to cleanup work directory", error=e)
+            self.log.error("Failed to delete snapshot", error=e)
             raise e
 
     def cleanup_scenario(self) -> None:

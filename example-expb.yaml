@@ -56,8 +56,10 @@ scenarios:
   example:
     # Required: Client name
     client: nethermind
-    # Required: Snapshot directory for the selected client and network
-    snapshot_dir: ./snapthots/nethermind
+    # Required: Snapshot source for the selected client and network (either a path or zfs snapshot name)
+    snapshot_source: ./snapthots/nethermind
+    # Optional: Snapshot backend to use. Default is overlay.
+    snapshot_backend: overlay
     # Required: Number of payloads to run
     amount: 100
     # Optional: Duration of the scenario. Default is 10 minutes.

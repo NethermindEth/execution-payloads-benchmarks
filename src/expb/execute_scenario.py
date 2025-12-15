@@ -47,7 +47,7 @@ def execute_scenario(
         "Executing scenario",
         client=scenario.client.value.name.lower(),
         image=scenario.client_image,
-        snapshot=scenario.snapshot_dir,
+        snapshot=scenario.snapshot_source,
     )
     executor.execute_scenario(
         collect_per_payload_metrics=per_payload_metrics,

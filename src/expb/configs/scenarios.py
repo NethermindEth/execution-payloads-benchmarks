@@ -16,8 +16,13 @@ from expb.configs.defaults import (
 )
 from expb.configs.exports import Exports
 from expb.configs.networks import Network
+from expb.configs.snapshots import SnapshotBackend
 from expb.logging import Logger
 from expb.payloads import Executor, ExecutorConfig
+from expb.payloads.executor.services.snapshots import (
+    OverlaySnapshotService,
+    SnapshotService,
+)
 
 
 class Scenario:
@@ -25,6 +30,7 @@ class Scenario:
         self,
         name: str,
         config: dict[str, Any],
+        snapshot_backend: SnapshotBackend = SnapshotBackend.OVERLAY,
     ) -> None:
         # Name of the scenario
         self.name = name
@@ -59,10 +65,12 @@ class Scenario:
         if self.duration is None or not isinstance(self.duration, str):
             raise ValueError(f"Duration is invalid for scenario {name}")
         # Snapshot directory to use
-        snapshot_dir: str | None = config.get("snapshot_dir", None)
-        if snapshot_dir is None:
-            raise ValueError(f"Snapshot directory is required for scenario {name}")
-        self.snapshot_dir = Path(snapshot_dir)
+        snapshot_source: str | None = config.get("snapshot_source", None)
+        if snapshot_source is None:
+            raise ValueError(f"Snapshot source is required for scenario {name}")
+        self.snapshot_source = snapshot_source
+        snapshot_backend = config.get("snapshot_backend", "overlay")
+        self.snapshot_backend = SnapshotBackend.from_string(snapshot_backend)
         # Wait time for client startup in seconds
         self.startup_wait: int = config.get("startup_wait", 30)
         if not isinstance(self.startup_wait, int):
@@ -80,7 +88,7 @@ class Scenario:
         # Extra volumes to mount into the docker container
         self.extra_volumes: dict[str, dict[str, str]] = {}
         extra_volumes: dict[str, dict[str, str]] = config.get("extra_volumes", {})
-        if not isinstance(self.extra_volumes, dict):
+        if not isinstance(extra_volumes, dict):
             raise ValueError(f"Extra volumes must be a dict for scenario {name}")
         for volume_name, volume_config in extra_volumes.items():
             bind_path = volume_config.get("bind", None)
@@ -184,9 +192,12 @@ class Scenarios:
         scenario: Scenario,
         logger: Logger = Logger(),
     ) -> Executor:
+        snapshot_service = self.setup_snapshot_service(scenario)
         executor = Executor(
             config=ExecutorConfig(
                 scenario_name=scenario.name,
+                snapshot_source=scenario.snapshot_source,
+                snapshot_service=snapshot_service,
                 network=self.network,
                 execution_client=scenario.client,
                 execution_client_image=scenario.client_image,
@@ -198,7 +209,6 @@ class Scenarios:
                 payloads_file=self.payloads_file,
                 fcus_file=self.fcus_file,
                 work_dir=self.work_dir,
-                snapshot_dir=scenario.snapshot_dir,
                 docker_container_cpus=self.docker_container_cpus,
                 docker_container_download_speed=self.docker_container_download_speed,
                 docker_container_upload_speed=self.docker_container_upload_speed,
@@ -216,3 +226,18 @@ class Scenarios:
             logger=logger,
         )
         return executor
+
+    def setup_snapshot_service(self, scenario: Scenario) -> SnapshotService:
+        if scenario.snapshot_backend == SnapshotBackend.OVERLAY:
+            overlay_work_dir = self.work_dir / "work"
+            overlay_upper_dir = self.work_dir / "upper"
+            overlay_merged_dir = self.work_dir / "merged"
+            return OverlaySnapshotService(
+                overlay_work_dir=overlay_work_dir,
+                overlay_upper_dir=overlay_upper_dir,
+                overlay_merged_dir=overlay_merged_dir,
+            )
+        # elif scenario.snapshot_backend == SnapshotBackend.ZFS:
+        #     return ZFSSnapshotService()
+        else:
+            raise ValueError(f"Invalid snapshot backend: {scenario.snapshot_backend}")

@@ -39,7 +39,7 @@ def execute_scenarios(
                 "Executing scenario",
                 client=scenario.client,
                 image=scenario.client_image,
-                snapshot=scenario.snapshot_dir,
+                snapshot=scenario.snapshot_source,
             )
             executor = config.get_scenario_executor(scenario, logger=logger)
             executor.execute_scenario(
