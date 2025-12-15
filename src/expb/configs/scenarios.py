@@ -22,6 +22,7 @@ from expb.payloads import Executor, ExecutorConfig
 from expb.payloads.executor.services.snapshots import (
     OverlaySnapshotService,
     SnapshotService,
+    ZFSSnapshotService,
 )
 
 
@@ -237,7 +238,7 @@ class Scenarios:
                 overlay_upper_dir=overlay_upper_dir,
                 overlay_merged_dir=overlay_merged_dir,
             )
-        # elif scenario.snapshot_backend == SnapshotBackend.ZFS:
-        #     return ZFSSnapshotService()
+        elif scenario.snapshot_backend == SnapshotBackend.ZFS:
+            return ZFSSnapshotService()
         else:
             raise ValueError(f"Invalid snapshot backend: {scenario.snapshot_backend}")
