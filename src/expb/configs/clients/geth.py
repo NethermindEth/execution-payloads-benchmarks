@@ -1,11 +1,11 @@
 from expb.configs.clients.client_config import (
-    ClientConfig,
-    CLIENTS_DATA_DIR,
-    CLIENTS_JWT_SECRET_FILE,
-    CLIENT_RPC_PORT,
     CLIENT_ENGINE_PORT,
     CLIENT_METRICS_PORT,
     CLIENT_P2P_PORT,
+    CLIENT_RPC_PORT,
+    CLIENTS_DATA_DIR,
+    CLIENTS_JWT_SECRET_FILE,
+    ClientConfig,
 )
 from expb.configs.networks import Network
 
@@ -30,7 +30,6 @@ class GethConfig(ClientConfig):
                 "--metrics",
                 f"--metrics.port={CLIENT_METRICS_PORT}",
                 "--metrics.addr=0.0.0.0",
-                "--discovery.v5",
                 "--ws",
                 "--ws.addr=0.0.0.0",
                 f"--ws.port={CLIENT_RPC_PORT}",
