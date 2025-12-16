@@ -58,8 +58,10 @@ scenarios:
     client: nethermind # Available clients: nethermind, besu, erigon, geth, reth
     # Required: Snapshot source for the selected client and network (either a path or zfs snapshot name)
     snapshot_source: ./snapthots/nethermind
-    # Optional: Snapshot backend to use. Available snapshot backends: overlay, zfs. Defaults to overlay
+    # Optional: Snapshot backend to use. Available snapshot backends: overlay, zfs, copy. Defaults to overlay
     snapshot_backend: overlay
+    # Optional: Snapshot path for copy backend. If defined, this path will be used instead of work_dir/snapshot. Only used when snapshot_backend is copy
+    snapshot_path: ./work_dir/snapshot
     # Required: Number of payloads to run
     amount: 100
     # Optional: Duration of the scenario. Defaults to 10 minutes.
