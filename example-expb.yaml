@@ -64,6 +64,8 @@ scenarios:
     amount: 100
     # Optional: Duration of the scenario. Defaults to 10 minutes.
     duration: 10m
+    # Optional: Duration of the warmup (k6 setup duration). Defaults to 10 minutes.
+    warmup_duration: 10m
     # Optional: Number of payloads to skip from the payloads file
     skip: 0
     # Optional: Number of payloads to execute as warmup(no metrics will be collected for those)
