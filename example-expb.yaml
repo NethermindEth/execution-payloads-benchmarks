@@ -4,12 +4,12 @@ network: mainnet
 # Pull images before execution
 pull_images: true
 
-# Grafana K6 image to use
+# Docker images to use
 images:
   k6: grafana/k6:latest
   alloy: grafana/alloy:latest
 
-# Paths for the payloads csv file, work directory, and outputs directory
+# Paths for the payloads jsonl file, work directory, and outputs directory
 paths:
   payloads: ./payloads.jsonl # Each line is a payload request body
   fcus: ./fcus.jsonl # Each line is a forkchoice update request body
@@ -54,21 +54,21 @@ resources:
 scenarios:
   # Scenario name
   example:
-    # Required: Client name
-    client: nethermind
+    # Required: Client type
+    client: nethermind # Available clients: nethermind, besu, erigon, geth, reth
     # Required: Snapshot source for the selected client and network (either a path or zfs snapshot name)
     snapshot_source: ./snapthots/nethermind
-    # Optional: Snapshot backend to use. Default is overlay.
+    # Optional: Snapshot backend to use. Available snapshot backends: overlay, zfs. Defaults to overlay
     snapshot_backend: overlay
     # Required: Number of payloads to run
     amount: 100
-    # Optional: Duration of the scenario. Default is 10 minutes.
+    # Optional: Duration of the scenario. Defaults to 10 minutes.
     duration: 10m
     # Optional: Number of payloads to skip from the payloads file
     skip: 0
     # Optional: Number of payloads to execute as warmup(no metrics will be collected for those)
     warmup: 0
-    # Optional: Wait time for client startup in seconds. Default is 30 seconds.
+    # Optional: Wait time for client startup in seconds. Defaults to 30 seconds.
     startup_wait: 30
     # Optional: Client image
     image: ethpandaops/nethermind:performance
@@ -90,6 +90,6 @@ scenarios:
         mode: rw
     # Optional: Commands to run in the docker container during the test execution
     # These will be executed using `docker exec` after the execution client is started and stopped once the test is done
-    # Each command will be executed in a separate thread which can affect main process performance when too many commands
+    # Each command will be executed in a separate thread which can affect main process performance when too many commands are executed
     extra_commands:
       - ./extra_command1
