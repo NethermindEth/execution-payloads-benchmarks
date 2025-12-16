@@ -20,6 +20,7 @@ from expb.configs.snapshots import SnapshotBackend
 from expb.logging import Logger
 from expb.payloads import Executor, ExecutorConfig
 from expb.payloads.executor.services.snapshots import (
+    CopySnapshotService,
     OverlaySnapshotService,
     SnapshotService,
     ZFSSnapshotService,
@@ -72,6 +73,9 @@ class Scenario:
         self.snapshot_source = snapshot_source
         snapshot_backend = config.get("snapshot_backend", "overlay")
         self.snapshot_backend = SnapshotBackend.from_string(snapshot_backend)
+        # Optional snapshot path for copy backend (overrides work_dir)
+        snapshot_path: str | None = config.get("snapshot_path", None)
+        self.snapshot_path: Path | None = Path(snapshot_path) if snapshot_path else None
         # Wait time for client startup in seconds
         self.startup_wait: int = config.get("startup_wait", 30)
         if not isinstance(self.startup_wait, int):
@@ -240,5 +244,11 @@ class Scenarios:
             )
         elif scenario.snapshot_backend == SnapshotBackend.ZFS:
             return ZFSSnapshotService()
+        elif scenario.snapshot_backend == SnapshotBackend.COPY:
+            if scenario.snapshot_path is not None:
+                copy_work_dir = scenario.snapshot_path
+            else:
+                copy_work_dir = self.work_dir / "snapshot"
+            return CopySnapshotService(work_dir=copy_work_dir)
         else:
             raise ValueError(f"Invalid snapshot backend: {scenario.snapshot_backend}")
