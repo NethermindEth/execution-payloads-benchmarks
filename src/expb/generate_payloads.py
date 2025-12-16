@@ -37,7 +37,7 @@ def generate_payloads(
     ] = 30,
 ) -> None:
     """
-    Generate execution payloads for a given block range.
+    Generate execution payloads requests for a given block range.
     """
     logger = setup_logging(log_level)
 

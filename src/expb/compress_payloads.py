@@ -50,7 +50,7 @@ def compress_payloads(
     ] = "INFO",
 ) -> None:
     """
-    Compress execution payloads txs for a given block range into bigger blocks.
+    Compress execution payloads transactions for a given block range into bigger blocks.
     """
     logger = setup_logging(log_level)
 
