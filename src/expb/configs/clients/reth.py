@@ -14,7 +14,7 @@ class RethConfig(ClientConfig):
     def __init__(self):
         super().__init__(
             name="reth",
-            default_image="ethpandaops/reth:performance",
+            default_image="paradigmxyz/reth:nightly",
             default_command=[
                 "node",
                 f"--datadir={CLIENTS_DATA_DIR}",
