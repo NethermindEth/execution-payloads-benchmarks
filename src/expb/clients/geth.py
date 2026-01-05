@@ -1,4 +1,4 @@
-from expb.configs.clients.client_config import (
+from expb.clients.client_config import (
     CLIENT_ENGINE_PORT,
     CLIENT_METRICS_PORT,
     CLIENT_P2P_PORT,
@@ -14,7 +14,7 @@ class GethConfig(ClientConfig):
     def __init__(self):
         super().__init__(
             name="geth",
-            default_image="ethpandaops/geth:performance",
+            default_image="ethereum/client-go:latest",
             default_command=[
                 f"--datadir={CLIENTS_DATA_DIR}",
                 f"--port={CLIENT_P2P_PORT}",

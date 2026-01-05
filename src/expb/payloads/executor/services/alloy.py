@@ -1,8 +1,9 @@
 from pathlib import Path
+
 from jinja2 import Template
 
-from expb.configs.clients import Client
-from expb.configs.exports import Pyroscope, PrometheusRW
+from expb.clients import Client
+from expb.configs.exports import PrometheusRW, Pyroscope
 
 ALLOY_PYROSCOPE_PORT = 9999
 

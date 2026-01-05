@@ -1,37 +1,42 @@
-from expb.configs.clients.client_config import (
-    ClientConfig,
-    CLIENTS_DATA_DIR,
-    CLIENTS_JWT_SECRET_FILE,
-    CLIENT_RPC_PORT,
+from expb.clients.client_config import (
     CLIENT_ENGINE_PORT,
     CLIENT_METRICS_PORT,
     CLIENT_P2P_PORT,
+    CLIENT_RPC_PORT,
+    CLIENTS_DATA_DIR,
+    CLIENTS_JWT_SECRET_FILE,
+    ClientConfig,
 )
 from expb.configs.networks import Network
 
 
-class RethConfig(ClientConfig):
+class ErigonConfig(ClientConfig):
     def __init__(self):
         super().__init__(
-            name="reth",
-            default_image="ethpandaops/reth:performance",
+            name="erigon",
+            default_image="erigontech/erigon:main-latest",
             default_command=[
-                "node",
                 f"--datadir={CLIENTS_DATA_DIR}",
-                f"--log.file.directory={CLIENTS_DATA_DIR}/logs",
                 f"--port={CLIENT_P2P_PORT}",
                 "--http",
                 "--http.addr=0.0.0.0",
                 f"--http.port={CLIENT_RPC_PORT}",
+                f"--torrent.port={CLIENT_P2P_PORT}",
+                f"--authrpc.jwtsecret={CLIENTS_JWT_SECRET_FILE}",
                 "--authrpc.addr=0.0.0.0",
                 f"--authrpc.port={CLIENT_ENGINE_PORT}",
-                f"--authrpc.jwtsecret={CLIENTS_JWT_SECRET_FILE}",
-                f"--metrics=0.0.0.0:{CLIENT_METRICS_PORT}",
-                "--http.api=trace,rpc,eth,net,debug,web3,admin",
+                "--authrpc.vhosts=*",
+                "--metrics",
+                "--metrics.addr=0.0.0.0",
+                f"--metrics.port={CLIENT_METRICS_PORT}",
+                "--http.api=eth,erigon,engine,web3,net,debug,trace,txpool,admin",
+                "--http.vhosts=*",
+                "--ws",
+                "--prune.mode=full",
+                "--externalcl",
                 # Disable peering
-                "--disable-discovery",
-                "--max-inbound-peers=0",
-                "--max-outbound-peers=0",
+                "--nodiscover",
+                "--maxpeers=0",
             ],
             prometheus_metrics_path="/debug/metrics/prometheus",
         )
@@ -47,7 +52,6 @@ class RethConfig(ClientConfig):
             command.extend(
                 [
                     "--chain=mainnet",
-                    "--full",
                 ]
             )
         return self.default_command + command + extra_flags

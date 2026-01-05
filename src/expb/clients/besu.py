@@ -1,11 +1,11 @@
-from expb.configs.clients.client_config import (
-    ClientConfig,
-    CLIENTS_DATA_DIR,
-    CLIENTS_JWT_SECRET_FILE,
-    CLIENT_RPC_PORT,
+from expb.clients.client_config import (
     CLIENT_ENGINE_PORT,
     CLIENT_METRICS_PORT,
     CLIENT_P2P_PORT,
+    CLIENT_RPC_PORT,
+    CLIENTS_DATA_DIR,
+    CLIENTS_JWT_SECRET_FILE,
+    ClientConfig,
 )
 from expb.configs.networks import Network
 
@@ -14,7 +14,7 @@ class BesuConfig(ClientConfig):
     def __init__(self):
         super().__init__(
             name="besu",
-            default_image="ethpandaops/besu:performance",
+            default_image="hyperledger/besu:develop",
             default_command=[
                 f"--data-path={CLIENTS_DATA_DIR}",
                 "--p2p-host=0.0.0.0",

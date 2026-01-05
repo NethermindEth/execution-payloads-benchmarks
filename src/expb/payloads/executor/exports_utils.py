@@ -1,4 +1,4 @@
-from expb.configs.clients import Client
+from expb.clients import Client
 from expb.configs.exports import Pyroscope
 
 

@@ -1,20 +1,20 @@
 from enum import Enum
 
-from expb.configs.clients.client_config import (
-    ClientConfig,
-    CLIENTS_DATA_DIR,
-    CLIENTS_JWT_SECRET_DIR,
-    CLIENTS_JWT_SECRET_FILE,
-    CLIENT_RPC_PORT,
+from expb.clients.besu import BesuConfig
+from expb.clients.client_config import (
     CLIENT_ENGINE_PORT,
     CLIENT_METRICS_PORT,
     CLIENT_P2P_PORT,
+    CLIENT_RPC_PORT,
+    CLIENTS_DATA_DIR,
+    CLIENTS_JWT_SECRET_DIR,
+    CLIENTS_JWT_SECRET_FILE,
+    ClientConfig,
 )
-from expb.configs.clients.nethermind import NethermindConfig
-from expb.configs.clients.geth import GethConfig
-from expb.configs.clients.reth import RethConfig
-from expb.configs.clients.erigon import ErigonConfig
-from expb.configs.clients.besu import BesuConfig
+from expb.clients.erigon import ErigonConfig
+from expb.clients.geth import GethConfig
+from expb.clients.nethermind import NethermindConfig
+from expb.clients.reth import RethConfig
 
 
 class Client(Enum):

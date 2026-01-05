@@ -1,11 +1,11 @@
-from expb.configs.clients.client_config import (
-    ClientConfig,
-    CLIENTS_DATA_DIR,
-    CLIENTS_JWT_SECRET_FILE,
-    CLIENT_RPC_PORT,
+from expb.clients.client_config import (
     CLIENT_ENGINE_PORT,
     CLIENT_METRICS_PORT,
     CLIENT_P2P_PORT,
+    CLIENT_RPC_PORT,
+    CLIENTS_DATA_DIR,
+    CLIENTS_JWT_SECRET_FILE,
+    ClientConfig,
 )
 from expb.configs.networks import Network
 
@@ -14,7 +14,7 @@ class NethermindConfig(ClientConfig):
     def __init__(self):
         super().__init__(
             name="nethermind",
-            default_image="ethpandaops/nethermind:performance",
+            default_image="nethermindeth/nethermind:master",
             default_command=[
                 f"--datadir={CLIENTS_DATA_DIR}",
                 f"--Network.P2PPort={CLIENT_P2P_PORT}",

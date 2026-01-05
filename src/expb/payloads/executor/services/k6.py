@@ -3,7 +3,7 @@ from pathlib import Path
 
 from jinja2 import Template
 
-from expb.configs.clients import Client
+from expb.clients import Client
 
 
 def build_k6_script_config(

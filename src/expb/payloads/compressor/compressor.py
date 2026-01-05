@@ -1,32 +1,32 @@
-import os
 import json
-import time
-import docker
-import shutil
+import os
 import secrets
-import requests as r
+import shutil
 import subprocess
-import docker.errors
-
-from typing import Any
+import time
 from pathlib import Path
+from typing import Any
+
+import docker
+import docker.errors
+import requests as r
+from docker.models.containers import Container
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from docker.models.containers import Container
 
-from expb.logging import Logger
-from expb.configs.networks import Network
-from expb.configs.clients import (
-    Client,
+from expb.clients import (
+    CLIENT_ENGINE_PORT,
     CLIENTS_DATA_DIR,
     CLIENTS_JWT_SECRET_FILE,
-    CLIENT_ENGINE_PORT,
+    Client,
 )
-from expb.payloads.utils.jwt import JWTProvider
-from expb.payloads.utils.engine import engine_request, RPCError
+from expb.configs.networks import Network
+from expb.logging import Logger
 from expb.payloads.compressor.utils import (
     convert_mem_limit_to_bytes,
 )
+from expb.payloads.utils.engine import RPCError, engine_request
+from expb.payloads.utils.jwt import JWTProvider
 
 
 class Compressor:

@@ -6,7 +6,7 @@ import docker
 from docker.models.containers import Container
 from docker.models.networks import Network
 
-from expb.configs.clients import (
+from expb.clients import (
     CLIENT_ENGINE_PORT,
     CLIENT_METRICS_PORT,
     CLIENT_RPC_PORT,

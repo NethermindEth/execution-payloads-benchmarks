@@ -3,7 +3,7 @@ from typing import Any
 
 import yaml
 
-from expb.configs.clients import Client
+from expb.clients import Client
 from expb.configs.defaults import (
     DOCKER_CONTAINER_DEFAULT_CPUS,
     DOCKER_CONTAINER_DEFAULT_DOWNLOAD_SPEED,
