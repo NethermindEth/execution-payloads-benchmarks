@@ -58,6 +58,12 @@ class Scenario:
             raise ValueError(
                 f"Warmup number of payloads is invalid for scenario {name}"
             )
+        payloads_delay = config.get("delay", 0.0)
+        if not isinstance(payloads_delay, float) or payloads_delay < 0.0:
+            raise ValueError(
+                f"Delay between payloads must be a positive number for scenario {name}"
+            )
+        self.payloads_delay = payloads_delay
         # Duration of the warmup (k6 setup duration)
         self.warmup_duration: str = config.get("warmup_duration", "10m")
         if self.warmup_duration is None or not isinstance(self.warmup_duration, str):
@@ -223,6 +229,7 @@ class Scenarios:
                 docker_images=self.docker_images,
                 k6_duration=scenario.duration,
                 k6_payloads_amount=scenario.payloads_amount,
+                k6_payloads_delay=scenario.payloads_delay,
                 k6_payloads_skip=scenario.payloads_skip,
                 k6_payloads_warmup=scenario.payloads_warmup,
                 k6_warmup_duration=scenario.warmup_duration,

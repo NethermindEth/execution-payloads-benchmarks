@@ -45,6 +45,7 @@ class ExecutorConfig:
         k6_duration: str = "10m",
         k6_payloads_skip: int = 0,
         k6_payloads_warmup: int = 0,
+        k6_payloads_delay: float = 0.0,
         k6_warmup_duration: str = "10m",
         docker_images: dict[str, str] = {},
         payloads_file: Path = PAYLOADS_DEFAULT_FILE,
@@ -98,6 +99,7 @@ class ExecutorConfig:
         self.json_rpc_wait_max_retries = json_rpc_wait_max_retries
         ## K6 script config
         self.k6_payloads_amount = k6_payloads_amount
+        self.k6_payloads_delay = k6_payloads_delay
         self.k6_duration = k6_duration
         self.k6_warmup_duration = k6_warmup_duration
         self.k6_payloads_skip = k6_payloads_skip
@@ -391,6 +393,7 @@ class ExecutorConfig:
             f"--env=EXPB_PAYLOADS_FILE_PATH={self._k6_container_payloads_file}",
             f"--env=EXPB_FCUS_FILE_PATH={self._k6_container_fcus_file}",
             f"--env=EXPB_JWTSECRET_FILE_PATH={self._k6_container_jwt_secret_file}",
+            f"--env=EXPB_PAYLOADS_DELAY={self.k6_payloads_delay}",
             f"--env=EXPB_PAYLOADS_SKIP={self.k6_payloads_skip}",
             f"--env=EXPB_PAYLOADS_WARMUP={self.k6_payloads_warmup}",
             f"--env=EXPB_ENGINE_ENDPOINT={execution_client_engine_url}",
