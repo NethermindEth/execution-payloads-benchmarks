@@ -12,8 +12,10 @@ from expb.clients.client_config import (
     ClientConfig,
 )
 from expb.clients.erigon import ErigonConfig
+from expb.clients.ethrex import EthrexConfig
 from expb.clients.geth import GethConfig
 from expb.clients.nethermind import NethermindConfig
+from expb.clients.nimbusel import NimbusELConfig
 from expb.clients.reth import RethConfig
 
 
@@ -23,6 +25,8 @@ class Client(Enum):
     RETH = RethConfig()
     GETH = GethConfig()
     ERIGON = ErigonConfig()
+    ETHREX = EthrexConfig()
+    NIMBUSEL = NimbusELConfig()
 
 
 __all__ = [
