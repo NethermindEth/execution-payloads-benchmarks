@@ -33,7 +33,7 @@ class Fork(Enum):
     SHANGHAI = ForkConfig("shanghai", 1)
     CANCUN = ForkConfig("cancun", 2)
     PRAGUE = ForkConfig("prague", 3)
-    # OSAKA = ForkConfig("osaka", 4)
+    OSAKA = ForkConfig("osaka", 4)
 
 
 class NetworkConfig:
@@ -70,5 +70,6 @@ class Network(Enum):
             Fork.SHANGHAI: 1681338455,
             Fork.CANCUN: 1710338135,
             Fork.PRAGUE: 1746612311,
+            Fork.OSAKA: 1764798551,
         },
     )

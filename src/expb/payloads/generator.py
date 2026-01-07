@@ -48,6 +48,8 @@ class Generator:
             return 3
         elif fork == Fork.PRAGUE:
             return 4
+        elif fork == Fork.OSAKA:
+            return 4
         else:
             raise ValueError(f"Unknown fork: {fork}")
 
@@ -60,6 +62,8 @@ class Generator:
         elif fork == Fork.CANCUN:
             return 3
         elif fork == Fork.PRAGUE:
+            return 3
+        elif fork == Fork.OSAKA:
             return 3
         else:
             raise ValueError(f"Unknown fork: {fork}")
@@ -235,7 +239,7 @@ class Generator:
         }
 
     async def get_fcu_request(self, block: BlockData) -> dict:
-        version = self.get_payload_version(block)
+        version = self.get_fcu_version(block)
         block_number = block["number"]
         return {
             "id": block_number,
