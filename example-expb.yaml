@@ -1,7 +1,4 @@
-﻿# Network to use
-network: mainnet
-
-# Pull images before execution
+﻿# Pull images before execution
 pull_images: true
 
 # Docker images to use
@@ -11,8 +8,6 @@ images:
 
 # Paths for the payloads jsonl file, work directory, and outputs directory
 paths:
-  payloads: ./payloads.jsonl # Each line is a payload request body
-  fcus: ./fcus.jsonl # Each line is a forkchoice update request body
   work: ./work
   outputs: ./outputs
 
@@ -58,6 +53,12 @@ scenarios:
     client: nethermind # Available clients: nethermind, besu, erigon, geth, reth
     # Required: Snapshot source for the selected client and network (either a path or zfs snapshot name)
     snapshot_source: ./snapthots/nethermind
+    # Required: Path to the new payloads requests.
+    payloads: ./payloads.jsonl # Each line is a payload request body
+    # Required: Path to the new forkchoice update requests.
+    fcus: ./fcus.jsonl # Each line is a forkchoice update request body
+    # Optional: Network to use for the scenario. Defaults to mainnet
+    network: mainnet
     # Optional: Snapshot backend to use. Available snapshot backends: overlay, zfs, copy. Defaults to overlay
     snapshot_backend: overlay
     # Optional: Snapshot path for copy backend. If defined, this path will be used instead of work_dir/snapshot. Only used when snapshot_backend is copy

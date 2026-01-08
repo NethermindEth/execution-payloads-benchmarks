@@ -41,6 +41,23 @@ class Scenario:
         if client_name is None or not isinstance(client_name, str):
             raise ValueError(f"Client name is required for scenario {name}")
         self.client: Client = Client[client_name.upper()]
+        # Path to the payloads requests
+        payloads_file: str = config.get("payloads", PAYLOADS_DEFAULT_FILE)
+        self.payloads_file = Path(payloads_file)
+        if not self.payloads_file.exists() or not self.payloads_file.is_file():
+            raise FileNotFoundError(
+                f"Payloads file {self.payloads_file} not found or not a file"
+            )
+        # Path to the forkchoice updated requests
+        fcus_file: str = config.get("fcus", FCUS_DEFAULT_FILE)
+        self.fcus_file = Path(fcus_file)
+        if not self.fcus_file.exists() or not self.fcus_file.is_file():
+            raise FileNotFoundError(
+                f"Fcus file {self.fcus_file} not found or not a file"
+            )
+        # Network of the scenario
+        config_network: str = config.get("network", Network.MAINNET.name)
+        self.network = Network[config_network.upper()]
         # Image of the client to use
         self.client_image: str | None = config.get("image", None)
         # Skip number of payloads
@@ -129,10 +146,6 @@ class Scenarios:
         if not isinstance(config, dict):
             raise ValueError("Invalid config file")
 
-        # Parse network configuration
-        config_network: str = config.get("network", Network.MAINNET.name)
-        self.network = Network[config_network.upper()]
-
         # Parse docker images configurations
         pull_images: bool = config.get("pull_images", False)
         self.pull_images = pull_images
@@ -142,12 +155,6 @@ class Scenarios:
 
         # Paths for the payloads jsonl file, fcus jsonl file, work directory, and outputs directory
         paths: dict[str, str] = config.get("paths", {})
-
-        payloads_file: str = paths.get("payloads", PAYLOADS_DEFAULT_FILE)
-        self.payloads_file = Path(payloads_file)
-
-        fcus_file: str = paths.get("fcus", FCUS_DEFAULT_FILE)
-        self.fcus_file = Path(fcus_file)
 
         work_dir: str = paths.get("work", WORK_DEFAULT_DIR)
         self.work_dir = Path(work_dir)
@@ -209,7 +216,7 @@ class Scenarios:
                 scenario_name=scenario.name,
                 snapshot_source=scenario.snapshot_source,
                 snapshot_service=snapshot_service,
-                network=self.network,
+                network=scenario.network,
                 execution_client=scenario.client,
                 execution_client_image=scenario.client_image,
                 execution_client_extra_flags=scenario.extra_flags,
@@ -217,8 +224,8 @@ class Scenarios:
                 execution_client_extra_volumes=scenario.extra_volumes,
                 execution_client_extra_commands=scenario.extra_commands,
                 startup_wait=scenario.startup_wait,
-                payloads_file=self.payloads_file,
-                fcus_file=self.fcus_file,
+                payloads_file=scenario.payloads_file,
+                fcus_file=scenario.fcus_file,
                 work_dir=self.work_dir,
                 docker_container_cpus=self.docker_container_cpus,
                 docker_container_download_speed=self.docker_container_download_speed,
