@@ -12,6 +12,7 @@ const fcusFilePath = __ENV.EXPB_FCUS_FILE_PATH;
 const payloadsSkip = parseInt(__ENV.EXPB_PAYLOADS_SKIP || '0', 10);
 const payloadsWarmup = parseInt(__ENV.EXPB_PAYLOADS_WARMUP || '0', 10);
 const payloadsDelay = parseFloat(__ENV.EXPB_PAYLOADS_DELAY || '0');
+const payloadsWarmupDelay = parseFloat(__ENV.EXPB_PAYLOADS_WARMUP_DELAY || '0');
 const ABORT_ON_EOF = (__ENV.EXPB_ABORT_ON_EOF || '0') === '1';
 const ADD_CORRELATION_HEADER = (__ENV.EXPB_ADD_CID || '1') === '1';
 const engineEndpoint = __ENV.EXPB_ENGINE_ENDPOINT;
@@ -145,8 +146,9 @@ function processPayload(idx, base_tags = {}, warmup = false) {
   });
 
   // delay between payloads
-  if (payloadsDelay > 0) {
-    sleep(payloadsDelay);
+  const delay = warmup ? payloadsWarmupDelay : payloadsDelay;
+  if (delay > 0) {
+    sleep(delay);
   }
 }
 

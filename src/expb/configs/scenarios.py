@@ -81,6 +81,17 @@ class Scenario:
                 f"Delay between payloads must be a positive number for scenario {name}"
             )
         self.payloads_delay = float(payloads_delay)
+        # Optional: Delay for warmup requests. If not defined, defaults to the general delay
+        warmup_delay = config.get("warmup_delay", None)
+        if warmup_delay is not None:
+            if not isinstance(warmup_delay, (int, float)) or warmup_delay < 0.0:
+                raise ValueError(
+                    f"Warmup delay must be a positive number for scenario {name}"
+                )
+            self.payloads_warmup_delay = float(warmup_delay)
+        else:
+            # Default to the general delay value
+            self.payloads_warmup_delay = self.payloads_delay
         # Duration of the warmup (k6 setup duration)
         self.warmup_duration: str = config.get("warmup_duration", "10m")
         if self.warmup_duration is None or not isinstance(self.warmup_duration, str):
@@ -237,6 +248,7 @@ class Scenarios:
                 k6_duration=scenario.duration,
                 k6_payloads_amount=scenario.payloads_amount,
                 k6_payloads_delay=scenario.payloads_delay,
+                k6_payloads_warmup_delay=scenario.payloads_warmup_delay,
                 k6_payloads_skip=scenario.payloads_skip,
                 k6_payloads_warmup=scenario.payloads_warmup,
                 k6_warmup_duration=scenario.warmup_duration,

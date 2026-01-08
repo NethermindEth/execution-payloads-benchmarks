@@ -67,6 +67,8 @@ scenarios:
     amount: 100
     # Optional: Delay between payloads requests in seconds. Defaults to 0 seconds.
     delay: 0
+    # Optional: Delay between warmup payloads requests in seconds. If not defined, uses the general delay.
+    warmup_delay: 0
     # Optional: Duration of the scenario. Defaults to 10 minutes.
     duration: 10m
     # Optional: Duration of the warmup (k6 setup duration). Defaults to 10 minutes.
