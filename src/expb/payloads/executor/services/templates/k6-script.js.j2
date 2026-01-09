@@ -13,6 +13,7 @@ const payloadsSkip = parseInt(__ENV.EXPB_PAYLOADS_SKIP || '0', 10);
 const payloadsWarmup = parseInt(__ENV.EXPB_PAYLOADS_WARMUP || '0', 10);
 const payloadsDelay = parseFloat(__ENV.EXPB_PAYLOADS_DELAY || '0');
 const payloadsWarmupDelay = parseFloat(__ENV.EXPB_PAYLOADS_WARMUP_DELAY || '0');
+const warmupWait = parseInt(__ENV.EXPB_WARMUP_WAIT || '0', 10);
 const ABORT_ON_EOF = (__ENV.EXPB_ABORT_ON_EOF || '0') === '1';
 const ADD_CORRELATION_HEADER = (__ENV.EXPB_ADD_CID || '1') === '1';
 const engineEndpoint = __ENV.EXPB_ENGINE_ENDPOINT;
@@ -161,6 +162,9 @@ export function setup() {
 
 export default function () {
   const idx = startIdx0 + exec.scenario.iterationInTest;
+  if (exec.scenario.iterationInTest === 0 && warmupWait > 0) {
+    sleep(warmupWait);
+  }
 
   processPayload(idx, {}, false);
 }

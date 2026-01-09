@@ -111,9 +111,15 @@ class Scenario:
         snapshot_path: str | None = config.get("snapshot_path", None)
         self.snapshot_path: Path | None = Path(snapshot_path) if snapshot_path else None
         # Wait time for client startup in seconds
-        self.startup_wait: int = config.get("startup_wait", 30)
-        if not isinstance(self.startup_wait, int):
+        startup_wait: int = config.get("startup_wait", 30)
+        if not isinstance(startup_wait, int):
             raise ValueError(f"Startup wait time is invalid for scenario {name}")
+        self.startup_wait = startup_wait
+        # Wait time between warmup and payloads requests in seconds
+        warmup_wait: int = config.get("warmup_wait", 0)
+        if not isinstance(warmup_wait, int):
+            raise ValueError(f"Warmup wait time is invalid for scenario {name}")
+        self.warmup_wait = warmup_wait
         # Extra flags to pass to the client
         self.extra_flags: list[str] = config.get("extra_flags", [])
         if not isinstance(self.extra_flags, list):
@@ -235,6 +241,7 @@ class Scenarios:
                 execution_client_extra_volumes=scenario.extra_volumes,
                 execution_client_extra_commands=scenario.extra_commands,
                 startup_wait=scenario.startup_wait,
+                warmup_wait=scenario.warmup_wait,
                 payloads_file=scenario.payloads_file,
                 fcus_file=scenario.fcus_file,
                 work_dir=self.work_dir,

@@ -68,6 +68,7 @@ class ExecutorConfig:
         limit_bandwidth: bool = False,
         exports: Exports | None = None,
         startup_wait: int = 30,
+        warmup_wait: int = 0,
     ) -> None:
         # Executor Basic config
         self.scenario_name = scenario_name
@@ -105,6 +106,7 @@ class ExecutorConfig:
         self.k6_payloads_warmup_delay = k6_payloads_warmup_delay
         self.k6_duration = k6_duration
         self.k6_warmup_duration = k6_warmup_duration
+        self.k6_warmup_wait = warmup_wait
         self.k6_payloads_skip = k6_payloads_skip
         self.k6_payloads_warmup = k6_payloads_warmup
 
@@ -403,6 +405,7 @@ class ExecutorConfig:
             f"--env=EXPB_PAYLOADS_WARMUP={self.k6_payloads_warmup}",
             f"--env=EXPB_ENGINE_ENDPOINT={execution_client_engine_url}",
             f"--env=EXPB_PER_PAYLOAD_METRICS={int(collect_per_payload_metrics)}",
+            f"--env=EXPB_WARMUP_WAIT={self.k6_warmup_wait}",
         ]
         if (
             self.exports is not None
