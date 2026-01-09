@@ -79,6 +79,8 @@ scenarios:
     warmup: 0
     # Optional: Wait time for client startup in seconds. Defaults to 30 seconds.
     startup_wait: 30
+    # Optional: Wait time between warmup and benchmark requests in seconds. Defaults to 0 seconds.
+    warmup_wait: 0
     # Optional: Client image
     image: ethpandaops/nethermind:performance
     # Optional: Client extra flags
