@@ -10,6 +10,7 @@ from expb.clients import (
     CLIENT_ENGINE_PORT,
     CLIENT_METRICS_PORT,
     CLIENT_RPC_PORT,
+    CLIENT_RPC_WS_PORT,
     CLIENTS_DATA_DIR,
     CLIENTS_JWT_SECRET_DIR,
     Client,
@@ -195,6 +196,7 @@ class ExecutorConfig:
     def get_execution_client_ports(self) -> dict[str, str]:
         return {
             f"{CLIENT_RPC_PORT}/tcp": f"{CLIENT_RPC_PORT}",
+            f"{CLIENT_RPC_WS_PORT}/tcp": f"{CLIENT_RPC_WS_PORT}",
             f"{CLIENT_ENGINE_PORT}/tcp": f"{CLIENT_ENGINE_PORT}",
             f"{CLIENT_METRICS_PORT}/tcp": f"{CLIENT_METRICS_PORT}",
             # Disable p2p
