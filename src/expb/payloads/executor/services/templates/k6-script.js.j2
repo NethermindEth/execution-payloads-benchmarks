@@ -14,10 +14,11 @@ const payloadsWarmup = parseInt(__ENV.EXPB_PAYLOADS_WARMUP || '0', 10);
 const payloadsDelay = parseFloat(__ENV.EXPB_PAYLOADS_DELAY || '0');
 const payloadsWarmupDelay = parseFloat(__ENV.EXPB_PAYLOADS_WARMUP_DELAY || '0');
 const warmupWait = parseInt(__ENV.EXPB_WARMUP_WAIT || '0', 10);
-const ABORT_ON_EOF = (__ENV.EXPB_ABORT_ON_EOF || '0') === '1';
-const ADD_CORRELATION_HEADER = (__ENV.EXPB_ADD_CID || '1') === '1';
+const abortOnEOF = (__ENV.EXPB_ABORT_ON_EOF || '0') === '1';
+const addCorrelationHeader = (__ENV.EXPB_ADD_CID || '1') === '1';
 const engineEndpoint = __ENV.EXPB_ENGINE_ENDPOINT;
-const PER_PAYLOAD_METRICS = (__ENV.EXPB_PER_PAYLOAD_METRICS || '0') === '1';
+const perPayloadMetrics = (__ENV.EXPB_PER_PAYLOAD_METRICS || '0') === '1';
+const discardResponses = (__ENV.EXPB_DISCARD_RESPONSES || '0') === '1';
 
 // Load k6 options JSON
 const config = JSON.parse(open(__ENV.EXPB_CONFIG_FILE_PATH));
@@ -101,7 +102,7 @@ function logPost(kind, idx, warmup, correlationId = '') {
 function processPayload(idx, base_tags = {}, warmup = false) {
   // Out of data? graceful (default) or abort if explicitly requested
   if (idx >= startIdx0 + totalPairs) {
-    if (ABORT_ON_EOF) exec.test.abort('No more payloads or fcus found');
+    if (abortOnEOF) exec.test.abort('No more payloads or fcus found');
     return;
   }
 
@@ -109,7 +110,7 @@ function processPayload(idx, base_tags = {}, warmup = false) {
   const fcuRaw = safeGetLine(fcuLines, idx);
 
   if (!payloadRaw || !fcuRaw) {
-    if (ABORT_ON_EOF) exec.test.abort('Dataset contains empty lines or ended prematurely');
+    if (abortOnEOF) exec.test.abort('Dataset contains empty lines or ended prematurely');
     return;
   }
 
@@ -118,13 +119,16 @@ function processPayload(idx, base_tags = {}, warmup = false) {
   group('engine_newPayload', function () {
     const tags = { jrpc_method: extractMethodFast(payloadRaw) || 'engine_newPayload', kind: 'newPayload', ...base_tags };
     const headers = { Authorization: 'Bearer ' + tokGP, 'Content-Type': 'application/json' };
-    const correlationId = (!warmup && ADD_CORRELATION_HEADER) ? cid() : '';
+    const correlationId = (!warmup && addCorrelationHeader) ? cid() : '';
     if (correlationId) headers['X-Expb-Cid'] = correlationId;
 
     logPost('engine_newPayload', idx, warmup, correlationId);
-    const r = http.post(engineEndpoint, payloadRaw, { headers, tags });
+    const r = http.post(engineEndpoint, payloadRaw, {
+      headers, tags,
+      responseType: discardResponses ? 'none' : 'text',
+    });
     check(r, { 'status_200': (x) => x.status === 200 }, tags);
-    if (!warmup && PER_PAYLOAD_METRICS) {
+    if (!warmup && perPayloadMetrics) {
       const perPayloadMetricsTags = {
         ...tags,
       }
@@ -149,11 +153,14 @@ function processPayload(idx, base_tags = {}, warmup = false) {
   group('engine_forkchoiceUpdated', function () {
     const tags = { jrpc_method: extractMethodFast(fcuRaw) || 'engine_forkchoiceUpdated', kind: 'forkchoiceUpdated', ...base_tags };
     const headers = { Authorization: 'Bearer ' + tokFC, 'Content-Type': 'application/json' };
-    const correlationId = (!warmup && ADD_CORRELATION_HEADER) ? cid() : '';
+    const correlationId = (!warmup && addCorrelationHeader) ? cid() : '';
     if (correlationId) headers['X-Expb-Cid'] = correlationId;
 
     logPost('engine_forkchoiceUpdated', idx, warmup, correlationId);
-    const r = http.post(engineEndpoint, fcuRaw, { headers, tags });
+    const r = http.post(engineEndpoint, fcuRaw, {
+      headers, tags,
+      responseType: discardResponses ? 'none' : 'text',
+    });
     check(r, { 'status_200': (x) => x.status === 200 }, tags);
   });
 

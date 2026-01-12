@@ -205,3 +205,4 @@ cython_debug/
 
 # Config file
 expb.yaml
+*.expb.yaml
