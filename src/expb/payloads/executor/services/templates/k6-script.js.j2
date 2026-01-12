@@ -18,7 +18,8 @@ const abortOnEOF = (__ENV.EXPB_ABORT_ON_EOF || '0') === '1';
 const addCorrelationHeader = (__ENV.EXPB_ADD_CID || '1') === '1';
 const engineEndpoint = __ENV.EXPB_ENGINE_ENDPOINT;
 const perPayloadMetrics = (__ENV.EXPB_PER_PAYLOAD_METRICS || '0') === '1';
-const discardResponses = (__ENV.EXPB_DISCARD_RESPONSES || '0') === '1';
+const discardResponses = (__ENV.EXPB_DISCARD_RESPONSES || '1') === '1';
+const enableLogging = (__ENV.EXPB_ENABLE_LOGGING || '0') === '1';
 
 // Load k6 options JSON
 const config = JSON.parse(open(__ENV.EXPB_CONFIG_FILE_PATH));
@@ -28,40 +29,79 @@ export const options = config["options"];
 const slowestPayloads = new Gauge('expb_slowest_payloads');
 
 // --- Data ---
-const payloadLines = new SharedArray('expb_payload_lines', () =>
-  open(payloadsFilePath).trim().split(/\r?\n/)
-);
-const fcuLines = new SharedArray('expb_fcu_lines', () =>
-  open(fcusFilePath).trim().split(/\r?\n/)
-);
+// Pre-process payloads: normalize once during load, extract metadata
+const payloadData = new SharedArray('expb_payload_data', () => {
+  const lines = open(payloadsFilePath).trim().split(/\r?\n/);
+  const processed = [];
+  // Pre-compile regex for better performance
+  const methodRegex = /"method"\s*:\s*"([^"]+)"/;
+  const idRegex = /"id"\s*:\s*(\d+)/;
+  const gasUsedRegex = /"gasUsed"\s*:\s*"([^"]+)"/;
+
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+    // Normalize once: remove BOM and trim
+    if (typeof line === 'string') {
+      line = line.replace(/^\uFEFF/, '').trim();
+    } else {
+      line = '';
+    }
+
+    // Pre-extract metadata to avoid regex on every request
+    const head = line.slice(0, 256);
+    const methodMatch = methodRegex.exec(head);
+    const idMatch = idRegex.exec(head);
+
+    // Extract gasUsed (always extract, use conditionally later)
+    const largerHead = line.slice(0, 2048);
+    const gasMatch = gasUsedRegex.exec(largerHead);
+    const gasUsed = gasMatch ? parseInt(gasMatch[1], 16) : undefined;
+
+    processed.push({
+      raw: line,
+      method: methodMatch ? methodMatch[1] : undefined,
+      jrpcId: idMatch ? parseInt(idMatch[1], 10) : undefined,
+      gasUsed: gasUsed,
+    });
+  }
+  return processed;
+});
+
+const fcuData = new SharedArray('expb_fcu_data', () => {
+  const lines = open(fcusFilePath).trim().split(/\r?\n/);
+  const processed = [];
+  const methodRegex = /"method"\s*:\s*"([^"]+)"/;
+
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+    if (typeof line === 'string') {
+      line = line.replace(/^\uFEFF/, '').trim();
+    } else {
+      line = '';
+    }
+
+    const head = line.slice(0, 256);
+    const methodMatch = methodRegex.exec(head);
+
+    processed.push({
+      raw: line,
+      method: methodMatch ? methodMatch[1] : undefined,
+    });
+  }
+  return processed;
+});
 
 const warmupIdx0 = Math.max(0, payloadsSkip);
 const startIdx0 = warmupIdx0 + Math.max(0, payloadsWarmup);
-const totalPairs = Math.max(0, Math.min(payloadLines.length, fcuLines.length) - startIdx0);
+const totalPairs = Math.max(0, Math.min(payloadData.length, fcuData.length) - startIdx0);
 
 // --- Helpers ---
-function safeGetLine(arr, idx) {
-  const v = (idx >= 0 && idx < arr.length) ? arr[idx] : '';
-  return typeof v === 'string' ? v.replace(/^\uFEFF/, '').trim() : '';
+function safeGetPayload(idx) {
+  return (idx >= 0 && idx < payloadData.length) ? payloadData[idx] : null;
 }
 
-// Tiny extractor to avoid full JSON.parse() just to tag the method
-function extractMethodFast(raw) {
-  const head = String(raw).slice(0, 256);
-  const m = /"method"\s*:\s*"([^"]+)"/.exec(head);
-  return m ? m[1] : undefined;
-}
-
-function extractJrpcIdFast(raw) {
-  const head = String(raw).slice(0, 256);
-  const m = /"id"\s*:\s*(\d+)/.exec(head);
-  return m ? parseInt(m[1], 10) : undefined;
-}
-
-function extractGasUsedFast(raw) {
-  const head = String(raw).slice(0, 2048);
-  const m = /"gasUsed"\s*:\s*"([^"]+)"/.exec(head);
-  return m ? parseInt(m[1], 16) : undefined;
+function safeGetFcu(idx) {
+  return (idx >= 0 && idx < fcuData.length) ? fcuData[idx] : null;
 }
 
 function hex2ArrayBuffer(hex) {
@@ -73,18 +113,19 @@ function hex2ArrayBuffer(hex) {
 const jwtsecretBytes = hex2ArrayBuffer(open(__ENV.EXPB_JWTSECRET_FILE_PATH).trim());
 
 // Per-VU JWT cache (refresh ~once/minute)
+// Pre-compute static JWT parts to avoid repeated JSON.stringify
+const jwtHeaderB64 = encoding.b64encode(JSON.stringify({ typ: 'JWT', alg: 'HS256' }), 'rawurl');
 let jwtCache = { token: '', exp: 0 };
 function getJwtToken() {
   const now = Math.floor(Date.now() / 1000);
   if (jwtCache.token && now < (jwtCache.exp - 2)) return jwtCache.token;
 
-  const header = encoding.b64encode(JSON.stringify({ typ: 'JWT', alg: 'HS256' }), 'rawurl');
   const iat = now, exp = iat + 60;
   const payload = encoding.b64encode(JSON.stringify({ iat, exp }), 'rawurl');
   const h = crypto.createHMAC('sha256', jwtsecretBytes);
-  h.update(header + '.' + payload);
+  h.update(jwtHeaderB64 + '.' + payload);
   const sig = h.digest('base64rawurl');
-  jwtCache = { token: `${header}.${payload}.${sig}`, exp };
+  jwtCache = { token: `${jwtHeaderB64}.${payload}.${sig}`, exp };
   return jwtCache.token;
 }
 
@@ -92,7 +133,10 @@ function cid() {
   return `${__ENV.testid || 'expb'}-vu${exec.vu.idInTest}-it${exec.scenario.iterationInTest}`;
 }
 
+
+
 function logPost(kind, idx, warmup, correlationId = '') {
+  if (!enableLogging) return;
   const ts = new Date().toISOString();
   const warmupTag = warmup ? ' warmup=1' : '';
   const cidTag = correlationId ? ` cid=${correlationId}` : '';
@@ -106,59 +150,76 @@ function processPayload(idx, base_tags = {}, warmup = false) {
     return;
   }
 
-  const payloadRaw = safeGetLine(payloadLines, idx);
-  const fcuRaw = safeGetLine(fcuLines, idx);
+  const payload = safeGetPayload(idx);
+  const fcu = safeGetFcu(idx);
 
-  if (!payloadRaw || !fcuRaw) {
+  if (!payload || !fcu || !payload.raw || !fcu.raw) {
     if (abortOnEOF) exec.test.abort('Dataset contains empty lines or ended prematurely');
     return;
   }
 
+  const correlationId = (!warmup && addCorrelationHeader) ? cid() : '';
+
   // --- engine_newPayload ---
-  const tokGP = getJwtToken();
   group('engine_newPayload', function () {
-    const tags = { jrpc_method: extractMethodFast(payloadRaw) || 'engine_newPayload', kind: 'newPayload', ...base_tags };
-    const headers = { Authorization: 'Bearer ' + tokGP, 'Content-Type': 'application/json' };
-    const correlationId = (!warmup && addCorrelationHeader) ? cid() : '';
-    if (correlationId) headers['X-Expb-Cid'] = correlationId;
+    // Generate fresh JWT token just before the request
+    const jwtToken = getJwtToken();
+    const headers = {
+      'Authorization': 'Bearer ' + jwtToken,
+      'Content-Type': 'application/json',
+    };
+    if (correlationId) {
+      headers['X-Expb-Cid'] = correlationId;
+    }
+
+    const tags = {
+      jrpc_method: payload.method || 'engine_newPayload',
+      kind: 'newPayload',
+      ...base_tags
+    };
 
     logPost('engine_newPayload', idx, warmup, correlationId);
-    const r = http.post(engineEndpoint, payloadRaw, {
-      headers, tags,
+    const r = http.post(engineEndpoint, payload.raw, {
+      headers: headers,
+      tags: tags,
       responseType: discardResponses ? 'none' : 'text',
     });
     check(r, { 'status_200': (x) => x.status === 200 }, tags);
+
     if (!warmup && perPayloadMetrics) {
-      const perPayloadMetricsTags = {
-        ...tags,
+      const perPayloadMetricsTags = { ...tags };
+      if (payload.jrpcId !== undefined) {
+        perPayloadMetricsTags.jrpc_id = payload.jrpcId;
       }
-      const jrpcId = extractJrpcIdFast(payloadRaw);
-      if (jrpcId) {
-        perPayloadMetricsTags.jrpc_id = jrpcId;
+      if (payload.gasUsed !== undefined) {
+        perPayloadMetricsTags.gas_used = payload.gasUsed;
       }
-      const gasUsed = extractGasUsedFast(payloadRaw);
-      if (gasUsed) {
-        perPayloadMetricsTags.gas_used = gasUsed;
-      }
-      slowestPayloads.add(
-        r.timings.duration,
-        perPayloadMetricsTags,
-      );
+      slowestPayloads.add(r.timings.duration, perPayloadMetricsTags);
     }
   });
 
-
   // --- engine_forkchoiceUpdated ---
-  const tokFC = getJwtToken();
   group('engine_forkchoiceUpdated', function () {
-    const tags = { jrpc_method: extractMethodFast(fcuRaw) || 'engine_forkchoiceUpdated', kind: 'forkchoiceUpdated', ...base_tags };
-    const headers = { Authorization: 'Bearer ' + tokFC, 'Content-Type': 'application/json' };
-    const correlationId = (!warmup && addCorrelationHeader) ? cid() : '';
-    if (correlationId) headers['X-Expb-Cid'] = correlationId;
+    // Generate fresh JWT token just before the request
+    const jwtToken = getJwtToken();
+    const headers = {
+      'Authorization': 'Bearer ' + jwtToken,
+      'Content-Type': 'application/json',
+    };
+    if (correlationId) {
+      headers['X-Expb-Cid'] = correlationId;
+    }
+
+    const tags = {
+      jrpc_method: fcu.method || 'engine_forkchoiceUpdated',
+      kind: 'forkchoiceUpdated',
+      ...base_tags
+    };
 
     logPost('engine_forkchoiceUpdated', idx, warmup, correlationId);
-    const r = http.post(engineEndpoint, fcuRaw, {
-      headers, tags,
+    const r = http.post(engineEndpoint, fcu.raw, {
+      headers: headers,
+      tags: tags,
       responseType: discardResponses ? 'none' : 'text',
     });
     check(r, { 'status_200': (x) => x.status === 200 }, tags);
