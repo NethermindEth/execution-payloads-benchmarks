@@ -163,6 +163,9 @@ class ExecutorConfig:
         self._k6_container_summary_file = (
             f"{self._k6_container_work_dir}/k6-summary.json"
         )
+        self._k6_container_console_output_file = (
+            f"{self._k6_container_work_dir}/k6-console.log"
+        )
 
         ## Alloy config file
         self.alloy_config_file = self.outputs_dir / "config.alloy"
@@ -394,6 +397,7 @@ class ExecutorConfig:
             self._k6_container_script_file,
             "--summary-mode=full",
             f"--summary-export={self._k6_container_summary_file}",
+            f"--console-output={self._k6_container_console_output_file}",
             f"--tag=testid={self.test_id}",
             f"--env=EXPB_CONFIG_FILE_PATH={self._k6_container_config_file}",
             f"--env=EXPB_PAYLOADS_FILE_PATH={self._k6_container_payloads_file}",
