@@ -260,6 +260,7 @@ class Executor:
             restart_policy={"Name": "unless-stopped"},
             user=self.config.docker_user,
             group_add=self.config.docker_group_add,
+            stop_signal="SIGINT",
         )
         return container
 
