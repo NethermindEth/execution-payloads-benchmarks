@@ -2,7 +2,7 @@ from pathlib import Path
 
 # Images
 ## Grafana K6
-K6_DEFAULT_IMAGE = "grafana/k6:latest"
+K6_DEFAULT_IMAGE = "grafana/k6:1.4.2"
 ## Grafana Alloy
 ALLOY_DEFAULT_IMAGE = "grafana/alloy:latest"
 
