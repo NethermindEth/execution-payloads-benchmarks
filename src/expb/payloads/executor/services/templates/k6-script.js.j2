@@ -91,6 +91,13 @@ function cid() {
   return `${__ENV.testid || 'expb'}-vu${exec.vu.idInTest}-it${exec.scenario.iterationInTest}`;
 }
 
+function logPost(kind, idx, warmup, correlationId = '') {
+  const ts = new Date().toISOString();
+  const warmupTag = warmup ? ' warmup=1' : '';
+  const cidTag = correlationId ? ` cid=${correlationId}` : '';
+  console.log(`[${ts}] POST ${kind} idx=${idx}${warmupTag}${cidTag}`);
+}
+
 function processPayload(idx, base_tags = {}, warmup = false) {
   // Out of data? graceful (default) or abort if explicitly requested
   if (idx >= startIdx0 + totalPairs) {
@@ -111,8 +118,10 @@ function processPayload(idx, base_tags = {}, warmup = false) {
   group('engine_newPayload', function () {
     const tags = { jrpc_method: extractMethodFast(payloadRaw) || 'engine_newPayload', kind: 'newPayload', ...base_tags };
     const headers = { Authorization: 'Bearer ' + tokGP, 'Content-Type': 'application/json' };
-    if (!warmup && ADD_CORRELATION_HEADER) headers['X-Expb-Cid'] = cid();
+    const correlationId = (!warmup && ADD_CORRELATION_HEADER) ? cid() : '';
+    if (correlationId) headers['X-Expb-Cid'] = correlationId;
 
+    logPost('engine_newPayload', idx, warmup, correlationId);
     const r = http.post(engineEndpoint, payloadRaw, { headers, tags });
     check(r, { 'status_200': (x) => x.status === 200 }, tags);
     if (!warmup && PER_PAYLOAD_METRICS) {
@@ -140,8 +149,10 @@ function processPayload(idx, base_tags = {}, warmup = false) {
   group('engine_forkchoiceUpdated', function () {
     const tags = { jrpc_method: extractMethodFast(fcuRaw) || 'engine_forkchoiceUpdated', kind: 'forkchoiceUpdated', ...base_tags };
     const headers = { Authorization: 'Bearer ' + tokFC, 'Content-Type': 'application/json' };
-    if (!warmup && ADD_CORRELATION_HEADER) headers['X-Expb-Cid'] = cid();
+    const correlationId = (!warmup && ADD_CORRELATION_HEADER) ? cid() : '';
+    if (correlationId) headers['X-Expb-Cid'] = correlationId;
 
+    logPost('engine_forkchoiceUpdated', idx, warmup, correlationId);
     const r = http.post(engineEndpoint, fcuRaw, { headers, tags });
     check(r, { 'status_200': (x) => x.status === 200 }, tags);
   });
