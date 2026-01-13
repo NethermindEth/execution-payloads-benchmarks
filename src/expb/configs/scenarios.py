@@ -213,6 +213,7 @@ class Scenarios(BaseModel):
     # Scenarios
     scenarios_configs: dict[str, Scenario] = Field(
         description="Scenarios configurations.",
+        alias="scenarios",
         default={},
     )
 
