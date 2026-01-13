@@ -13,6 +13,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from expb.configs.exports import Pyroscope
+from expb.configs.scenarios import Scenario, Scenarios
 from expb.logging import Logger
 from expb.payloads.executor.executor_config import ExecutorConfig
 from expb.payloads.executor.exports_utils import add_pyroscope_config
@@ -23,6 +24,7 @@ from expb.payloads.executor.services.k6 import (
     build_k6_script_config,
     get_k6_script_content,
 )
+from expb.payloads.executor.services.snapshots import setup_snapshot_service
 from expb.payloads.utils.networking import limit_container_bandwidth
 
 
@@ -587,3 +589,33 @@ class Executor:
             raise e
         finally:
             self.cleanup_scenario()
+
+    @classmethod
+    def from_scenarios(
+        self,
+        scenarios: Scenarios,
+        scenario_name: str,
+        logger: Logger = Logger(),
+    ) -> "Executor":
+        scenario = scenarios.scenarios_configs.get(scenario_name, None)
+        if scenario is None:
+            raise ValueError(f"Scenario {scenario_name} not found")
+        if scenario.name is None:
+            scenario.name = scenario_name
+        snapshot_service = setup_snapshot_service(
+            scenarios,
+            scenario,
+        )
+        executor = Executor(
+            config=ExecutorConfig(
+                scenario=scenario,
+                snapshot_service=snapshot_service,
+                paths=scenarios.paths,
+                resources=scenarios.resources,
+                pull_images=scenarios.pull_images,
+                docker_images=scenarios.docker_images,
+                exports=scenarios.exports,
+            ),
+            logger=logger,
+        )
+        return executor

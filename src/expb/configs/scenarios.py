@@ -16,14 +16,6 @@ from expb.configs.defaults import (
 from expb.configs.exports import Exports
 from expb.configs.networks import Network
 from expb.configs.snapshots import SnapshotBackend
-from expb.logging import Logger
-from expb.payloads import Executor, ExecutorConfig
-from expb.payloads.executor.services.snapshots import (
-    CopySnapshotService,
-    OverlaySnapshotService,
-    SnapshotService,
-    ZFSSnapshotService,
-)
 
 
 class ScenarioExtraVolume(BaseModel):
@@ -233,49 +225,3 @@ class Scenarios(BaseModel):
         for scenario_name, scenario_config in self.scenarios_configs.items():
             scenario_config.name = scenario_name
         return self
-
-    def get_scenario_executor(
-        self,
-        scenario_name: str,
-        logger: Logger = Logger(),
-    ) -> Executor:
-        scenario = self.scenarios_configs.get(scenario_name, None)
-        if scenario is None:
-            raise ValueError(f"Scenario {scenario_name} not found")
-        if scenario.name is None:
-            scenario.name = scenario_name
-        snapshot_service = self.setup_snapshot_service(scenario)
-        executor = Executor(
-            config=ExecutorConfig(
-                scenario=scenario,
-                snapshot_service=snapshot_service,
-                paths=self.paths,
-                resources=self.resources,
-                pull_images=self.pull_images,
-                docker_images=self.docker_images,
-                exports=self.exports,
-            ),
-            logger=logger,
-        )
-        return executor
-
-    def setup_snapshot_service(self, scenario: Scenario) -> SnapshotService:
-        if scenario.snapshot_backend == SnapshotBackend.OVERLAY:
-            overlay_work_dir = self.paths.work / "work"
-            overlay_upper_dir = self.paths.work / "upper"
-            overlay_merged_dir = self.paths.work / "merged"
-            return OverlaySnapshotService(
-                overlay_work_dir=overlay_work_dir,
-                overlay_upper_dir=overlay_upper_dir,
-                overlay_merged_dir=overlay_merged_dir,
-            )
-        elif scenario.snapshot_backend == SnapshotBackend.ZFS:
-            return ZFSSnapshotService()
-        elif scenario.snapshot_backend == SnapshotBackend.COPY:
-            if scenario.snapshot_path is not None:
-                copy_work_dir = scenario.snapshot_path
-            else:
-                copy_work_dir = self.paths.work / "snapshot"
-            return CopySnapshotService(work_dir=copy_work_dir)
-        else:
-            raise ValueError(f"Invalid snapshot backend: {scenario.snapshot_backend}")

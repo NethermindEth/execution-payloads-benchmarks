@@ -6,6 +6,7 @@ from typing_extensions import Annotated
 
 from expb.configs.scenarios import Scenarios
 from expb.logging import setup_logging
+from expb.payloads import Executor
 
 app = typer.Typer()
 
@@ -45,7 +46,13 @@ def execute_scenarios(
                 image=scenario.client_image,
                 snapshot=scenario.snapshot_source,
             )
-            executor = config.get_scenario_executor(scenario, logger=logger)
+            if scenario.name is None:
+                raise ValueError("Invalid scenario configuration: scenario has no name")
+            executor = Executor.from_scenarios(
+                scenarios,
+                scenario.name,
+                logger=logger,
+            )
             executor.execute_scenario(
                 collect_per_payload_metrics=per_payload_metrics,
             )

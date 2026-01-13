@@ -6,6 +6,7 @@ from typing_extensions import Annotated
 
 from expb.configs.scenarios import Scenarios
 from expb.logging import setup_logging
+from expb.payloads import Executor
 
 app = typer.Typer()
 
@@ -43,7 +44,11 @@ def execute_scenario(
         raise ValueError(
             f"Scenario {scenario_name} not found in config file {config_file}"
         )
-    executor = scenarios.get_scenario_executor(scenario_name, logger=logger)
+    executor = Executor.from_scenarios(
+        scenarios,
+        scenario_name=scenario_name,
+        logger=logger,
+    )
 
     logger.info(
         "Executing scenario",
