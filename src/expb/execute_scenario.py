@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import typer
+import yaml
 from typing_extensions import Annotated
 
 from expb.configs.scenarios import Scenarios
@@ -33,15 +34,16 @@ def execute_scenario(
     if not config_file.exists() or not config_file.is_file():
         raise FileNotFoundError(f"Config file {config_file} not found or not a file")
 
-    config = Scenarios(config_file)
+    with config_file.open() as f:
+        config = yaml.safe_load(f)
 
-    scenario = config.scenarios.get(scenario_name, None)
+    scenarios = Scenarios(**config)
+    scenario = scenarios.scenarios_configs.get(scenario_name, None)
     if scenario is None:
         raise ValueError(
             f"Scenario {scenario_name} not found in config file {config_file}"
         )
-
-    executor = config.get_scenario_executor(scenario, logger=logger)
+    executor = scenarios.get_scenario_executor(scenario_name, logger=logger)
 
     logger.info(
         "Executing scenario",

@@ -330,6 +330,7 @@ source = { editable = "." }
 dependencies = [
     { name = "docker" },
     { name = "jinja2" },
+    { name = "pydantic" },
     { name = "pyyaml" },
     { name = "rich" },
     { name = "structlog" },
@@ -341,6 +342,7 @@ dependencies = [
 requires-dist = [
     { name = "docker", specifier = ">=7.1.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
+    { name = "pydantic", specifier = ">=2.11.7" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "rich", specifier = ">=14.0.0" },
     { name = "structlog", specifier = ">=25.4.0" },

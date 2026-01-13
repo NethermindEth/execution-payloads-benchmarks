@@ -1,17 +1,16 @@
 from pathlib import Path
-from typing import Any
 
-import yaml
+from pydantic import BaseModel, Field, FilePath, NewPath, model_validator
 
 from expb.clients import Client
 from expb.configs.defaults import (
+    ALLOY_DEFAULT_IMAGE,
     DOCKER_CONTAINER_DEFAULT_CPUS,
     DOCKER_CONTAINER_DEFAULT_DOWNLOAD_SPEED,
     DOCKER_CONTAINER_DEFAULT_MEM_LIMIT,
     DOCKER_CONTAINER_DEFAULT_UPLOAD_SPEED,
-    FCUS_DEFAULT_FILE,
+    K6_DEFAULT_IMAGE,
     OUTPUTS_DEFAULT_DIR,
-    PAYLOADS_DEFAULT_FILE,
     WORK_DEFAULT_DIR,
 )
 from expb.configs.exports import Exports
@@ -27,238 +26,233 @@ from expb.payloads.executor.services.snapshots import (
 )
 
 
-class Scenario:
-    def __init__(
-        self,
-        name: str,
-        config: dict[str, Any],
-        snapshot_backend: SnapshotBackend = SnapshotBackend.OVERLAY,
-    ) -> None:
-        # Name of the scenario
-        self.name = name
-        # Name of the client to use
-        client_name = config.get("client", None)
-        if client_name is None or not isinstance(client_name, str):
-            raise ValueError(f"Client name is required for scenario {name}")
-        self.client: Client = Client[client_name.upper()]
-        # Path to the payloads requests
-        payloads_file: str = config.get("payloads", PAYLOADS_DEFAULT_FILE)
-        self.payloads_file = Path(payloads_file)
-        if not self.payloads_file.exists() or not self.payloads_file.is_file():
-            raise FileNotFoundError(
-                f"Payloads file {self.payloads_file} not found or not a file"
-            )
-        # Path to the forkchoice updated requests
-        fcus_file: str = config.get("fcus", FCUS_DEFAULT_FILE)
-        self.fcus_file = Path(fcus_file)
-        if not self.fcus_file.exists() or not self.fcus_file.is_file():
-            raise FileNotFoundError(
-                f"Fcus file {self.fcus_file} not found or not a file"
-            )
-        # Network of the scenario
-        config_network: str = config.get("network", Network.MAINNET.name)
-        self.network = Network[config_network.upper()]
-        # Image of the client to use
-        self.client_image: str | None = config.get("image", None)
-        # Skip number of payloads
-        self.payloads_skip: int = config.get("skip", 0)
-        if not isinstance(self.payloads_skip, int):
-            raise ValueError(f"Skip number of payloads is invalid for scenario {name}")
-        # Amount of payloads to run
-        payloads_amount = config.get("amount", None)
-        if payloads_amount is None or not isinstance(payloads_amount, int):
-            raise ValueError(f"Amount of payloads is required for scenario {name}")
-        self.payloads_amount = payloads_amount
-        # Payload to use as warmup(no metrics will be collected for those)
-        self.payloads_warmup: int = config.get("warmup", 0)
-        if not isinstance(self.payloads_warmup, int):
-            raise ValueError(
-                f"Warmup number of payloads is invalid for scenario {name}"
-            )
-        payloads_delay = config.get("delay", 0.0)
-        if not isinstance(payloads_delay, (int, float)) or payloads_delay < 0.0:
-            raise ValueError(
-                f"Delay between payloads must be a positive number for scenario {name}"
-            )
-        self.payloads_delay = float(payloads_delay)
-        # Optional: Delay for warmup requests. If not defined, defaults to the general delay
-        warmup_delay = config.get("warmup_delay", None)
-        if warmup_delay is not None:
-            if not isinstance(warmup_delay, (int, float)) or warmup_delay < 0.0:
-                raise ValueError(
-                    f"Warmup delay must be a positive number for scenario {name}"
-                )
-            self.payloads_warmup_delay = float(warmup_delay)
-        else:
-            # Default to the general delay value
+class ScenarioExtraVolume(BaseModel):
+    bind: str = Field(
+        description="Path to the volume bind inside the execution client docker container.",
+        min_length=1,
+    )
+    source: NewPath | None = Field(
+        description="Path to the volume source on the host.",
+        default=None,
+    )
+    mode: str = Field(
+        description="Mode of the volume.",
+        default="rw",
+    )
+
+
+class Scenario(BaseModel):
+    # General
+    name: str | None = Field(
+        description="Name of the scenario.",
+    )
+    client: Client = Field(
+        description="Execution client.",
+    )
+    payloads_file: FilePath = Field(
+        description="Path to the payloads requests.",
+        alias="payloads",
+    )
+    fcus_file: FilePath = Field(
+        description="Path to the forkchoice updated requests.",
+        alias="fcus",
+    )
+    network: Network = Field(
+        description="Ethereum network to use for the scenario.",
+        default=Network.MAINNET,
+    )
+    client_image: str | None = Field(
+        description="Execution client image.",
+        alias="image",
+        default=None,
+    )
+    # Payloads configuration
+    payloads_skip: int | None = Field(
+        description="Number of payloads to skip.",
+        alias="skip",
+        default=0,
+        ge=0,
+    )
+    payloads_amount: int = Field(
+        description="Number of payloads to execute.",
+        alias="amount",
+        default=1,
+        ge=1,
+    )
+    payloads_warmup: int | None = Field(
+        description="Number of payloads to execute as warmup(no metrics will be collected for those).",
+        alias="warmup",
+        default=None,
+        ge=0,
+    )
+    payloads_delay: float = Field(
+        description="Delay between payloads requests in seconds.",
+        alias="delay",
+        default=0.0,
+        ge=0.0,
+    )
+    payloads_warmup_delay: float | None = Field(
+        description="Delay between warmup payloads requests in seconds.",
+        alias="warmup_delay",
+        default=None,
+        ge=0.0,
+    )
+    # Bench execution configuration
+    duration: str = Field(
+        description="Duration of the scenario.",
+        default="10m",
+    )
+    warmup_duration: str = Field(
+        description="Duration of the scenario warmup (k6 setup duration).",
+        default="10m",
+    )
+    startup_wait: int = Field(
+        description="Wait time for client startup in seconds.",
+        default=30,
+        ge=0,
+    )
+    warmup_wait: int = Field(
+        description="Wait time between warmup and payloads requests in seconds.",
+        default=0,
+        ge=0,
+    )
+    # Snapshot
+    snapshot_source: str = Field(
+        description="Snapshot source for the selected client and network (either a path or zfs snapshot name).",
+    )
+    snapshot_backend: SnapshotBackend = Field(
+        description="Snapshot backend to use.",
+        default=SnapshotBackend.OVERLAY,
+    )
+    snapshot_path: NewPath | None = Field(
+        description="Path to the snapshot directory for copy backend (overrides work_dir).",
+        default=None,
+    )
+    # Execution client configuration
+    extra_flags: list[str] = Field(
+        description="Extra flags to pass to the execution client.",
+        default=[],
+    )
+    extra_env: dict[str, str] = Field(
+        description="Extra environment variables to pass to the execution client.",
+        default={},
+    )
+    extra_volumes: dict[str, ScenarioExtraVolume] = Field(
+        description="Extra volumes to mount into the execution client docker container.",
+        default={},
+    )
+    extra_commands: list[str] = Field(
+        description="Extra commands to run in the execution client docker container during the test execution.",
+        default=[],
+    )
+
+    @model_validator(mode="after")
+    def validate_payloads_delays(self):
+        if self.payloads_warmup_delay is None:
             self.payloads_warmup_delay = self.payloads_delay
-        # Duration of the warmup (k6 setup duration)
-        self.warmup_duration: str = config.get("warmup_duration", "10m")
-        if self.warmup_duration is None or not isinstance(self.warmup_duration, str):
-            raise ValueError(f"Warmup duration is invalid for scenario {name}")
-        # Duration of the scenario
-        self.duration: str = config.get("duration", "10m")
-        if self.duration is None or not isinstance(self.duration, str):
-            raise ValueError(f"Duration is invalid for scenario {name}")
-        # Snapshot directory to use
-        snapshot_source: str | None = config.get("snapshot_source", None)
-        if snapshot_source is None:
-            raise ValueError(f"Snapshot source is required for scenario {name}")
-        self.snapshot_source = snapshot_source
-        snapshot_backend = config.get("snapshot_backend", "overlay")
-        self.snapshot_backend = SnapshotBackend.from_string(snapshot_backend)
-        # Optional snapshot path for copy backend (overrides work_dir)
-        snapshot_path: str | None = config.get("snapshot_path", None)
-        self.snapshot_path: Path | None = Path(snapshot_path) if snapshot_path else None
-        # Wait time for client startup in seconds
-        startup_wait: int = config.get("startup_wait", 30)
-        if not isinstance(startup_wait, int):
-            raise ValueError(f"Startup wait time is invalid for scenario {name}")
-        self.startup_wait = startup_wait
-        # Wait time between warmup and payloads requests in seconds
-        warmup_wait: int = config.get("warmup_wait", 0)
-        if not isinstance(warmup_wait, int):
-            raise ValueError(f"Warmup wait time is invalid for scenario {name}")
-        self.warmup_wait = warmup_wait
-        # Extra flags to pass to the client
-        self.extra_flags: list[str] = config.get("extra_flags", [])
-        if not isinstance(self.extra_flags, list):
-            raise ValueError(f"Extra flags must be a list for scenario {name}")
-        # Extra environment variables to pass to the client
-        self.extra_env: dict[str, str] = config.get("extra_env", {})
-        if not isinstance(self.extra_env, dict):
-            raise ValueError(
-                f"Extra environment variables must be a dict for scenario {name}"
-            )
-        # Extra volumes to mount into the docker container
-        self.extra_volumes: dict[str, dict[str, str]] = {}
-        extra_volumes: dict[str, dict[str, str]] = config.get("extra_volumes", {})
-        if not isinstance(extra_volumes, dict):
-            raise ValueError(f"Extra volumes must be a dict for scenario {name}")
-        for volume_name, volume_config in extra_volumes.items():
-            bind_path = volume_config.get("bind", None)
-            if bind_path is None:
-                raise ValueError(
-                    f"Bind path is required for volume {volume_name} for scenario {name}"
-                )
-            source_path = volume_config.get("source", None)
-            mode = volume_config.get("mode", "rw")
-            self.extra_volumes[volume_name] = {
-                "bind": bind_path,
-                "mode": mode,
-                # This is a custom field not used by the docker api but it's used by the executor
-                "source": source_path,
-            }
-        # Extra commands to run in the docker container during the test execution
-        self.extra_commands: list[str] = config.get("extra_commands", [])
-        if not isinstance(self.extra_commands, list):
-            raise ValueError(f"Extra commands must be a list for scenario {name}")
+        return self
 
 
-class Scenarios:
-    def __init__(self, config_file: Path):
-        with open(config_file, "r") as f:
-            config = yaml.safe_load(f)
+class ScenariosPaths(BaseModel):
+    work: Path = Field(
+        description="Path to the work directory.",
+        default=WORK_DEFAULT_DIR,
+    )
+    outputs: Path = Field(
+        description="Path to the outputs directory.",
+        default=OUTPUTS_DEFAULT_DIR,
+    )
 
-        if not isinstance(config, dict):
-            raise ValueError("Invalid config file")
 
-        # Parse docker images configurations
-        pull_images: bool = config.get("pull_images", False)
-        self.pull_images = pull_images
+class ScenariosResources(BaseModel):
+    cpu: int = Field(
+        description="Number of CPUs to use for the scenario.",
+        default=DOCKER_CONTAINER_DEFAULT_CPUS,
+    )
+    mem: str = Field(
+        description="Memory limit for the scenario.",
+        default=DOCKER_CONTAINER_DEFAULT_MEM_LIMIT,
+    )
+    download_speed: str = Field(
+        description="Download speed for the scenario.",
+        default=DOCKER_CONTAINER_DEFAULT_DOWNLOAD_SPEED,
+    )
+    upload_speed: str = Field(
+        description="Upload speed for the scenario.",
+        default=DOCKER_CONTAINER_DEFAULT_UPLOAD_SPEED,
+    )
 
-        images: dict[str, str] = config.get("images", {})
-        self.docker_images = images
 
-        # Paths for the payloads jsonl file, fcus jsonl file, work directory, and outputs directory
-        paths: dict[str, str] = config.get("paths", {})
+class ScenariosImages(BaseModel):
+    k6: str = Field(
+        description="Image to use for the k6 container.",
+        default=K6_DEFAULT_IMAGE,
+    )
+    alloy: str = Field(
+        description="Image to use for the alloy container.",
+        default=ALLOY_DEFAULT_IMAGE,
+    )
 
-        work_dir: str = paths.get("work", WORK_DEFAULT_DIR)
-        self.work_dir = Path(work_dir)
 
-        outputs_dir: str = paths.get("outputs", OUTPUTS_DEFAULT_DIR)
-        self.outputs_dir = Path(outputs_dir)
+class Scenarios(BaseModel):
+    # General
+    pull_images: bool = Field(
+        description="Pull the docker images before execution.",
+        default=False,
+    )
+    docker_images: ScenariosImages = Field(
+        description="Images configuration for the scenarios.",
+        alias="images",
+        default=ScenariosImages(),
+    )
+    paths: ScenariosPaths = Field(
+        description="Paths configuration for the scenarios.",
+    )
+    # Exports
+    exports: Exports | None = Field(
+        description="Exports configuration for the scenarios.",
+        default=None,
+    )
+    # Resources
+    resources: ScenariosResources | None = Field(
+        description="Resources configuration for the scenarios.",
+        default=None,
+    )
+    # Scenarios
+    scenarios_configs: dict[str, Scenario] = Field(
+        description="Scenarios configurations.",
+        default={},
+    )
 
-        # Parse export configurations
-        exports: dict[str, Any] = config.get("export", {})
-        if not isinstance(exports, dict):
-            raise ValueError("Invalid exports configuration")
-        if exports:
-            self.exports = Exports(exports)
+    @model_validator(mode="after")
+    def validate_scenarios(self):
+        if len(self.scenarios_configs) == 0:
+            raise ValueError("Scenarios configuration cannot be empty")
 
-        # Parse resources configurations
-        resources: dict[str, str] = config.get("resources", {})
-
-        docker_container_cpus: int = resources.get("cpu", DOCKER_CONTAINER_DEFAULT_CPUS)
-        self.docker_container_cpus = docker_container_cpus
-
-        docker_container_mem_limit: str = resources.get(
-            "mem", DOCKER_CONTAINER_DEFAULT_MEM_LIMIT
-        )
-        self.docker_container_mem_limit = docker_container_mem_limit
-
-        docker_container_download_speed: str = resources.get(
-            "download_speed", DOCKER_CONTAINER_DEFAULT_DOWNLOAD_SPEED
-        )
-        self.docker_container_download_speed = docker_container_download_speed
-
-        docker_container_upload_speed: str = resources.get(
-            "upload_speed", DOCKER_CONTAINER_DEFAULT_UPLOAD_SPEED
-        )
-        self.docker_container_upload_speed = docker_container_upload_speed
-
-        # Parse scenarios configurations
-        scenarios_configs: dict[str, dict[str, Any]] = config.get("scenarios", {})
-        if not isinstance(scenarios_configs, dict):
-            raise ValueError("Invalid scenarios configuration")
-        if not scenarios_configs:
-            raise ValueError("Scenarios configuration is required")
-
-        self.scenarios: dict[str, Scenario] = {}
-        for scenario_name, scenario_config in scenarios_configs.items():
-            scenario = Scenario(
-                name=scenario_name,
-                config=scenario_config,
-            )
-            self.scenarios[scenario_name] = scenario
+        # Set scenario name to the scenario config key
+        for scenario_name, scenario_config in self.scenarios_configs.items():
+            scenario_config.name = scenario_name
+        return self
 
     def get_scenario_executor(
         self,
-        scenario: Scenario,
+        scenario_name: str,
         logger: Logger = Logger(),
     ) -> Executor:
+        scenario = self.scenarios_configs.get(scenario_name, None)
+        if scenario is None:
+            raise ValueError(f"Scenario {scenario_name} not found")
+        if scenario.name is None:
+            scenario.name = scenario_name
         snapshot_service = self.setup_snapshot_service(scenario)
         executor = Executor(
             config=ExecutorConfig(
-                scenario_name=scenario.name,
-                snapshot_source=scenario.snapshot_source,
+                scenario=scenario,
                 snapshot_service=snapshot_service,
-                network=scenario.network,
-                execution_client=scenario.client,
-                execution_client_image=scenario.client_image,
-                execution_client_extra_flags=scenario.extra_flags,
-                execution_client_extra_env=scenario.extra_env,
-                execution_client_extra_volumes=scenario.extra_volumes,
-                execution_client_extra_commands=scenario.extra_commands,
-                startup_wait=scenario.startup_wait,
-                warmup_wait=scenario.warmup_wait,
-                payloads_file=scenario.payloads_file,
-                fcus_file=scenario.fcus_file,
-                work_dir=self.work_dir,
-                docker_container_cpus=self.docker_container_cpus,
-                docker_container_download_speed=self.docker_container_download_speed,
-                docker_container_upload_speed=self.docker_container_upload_speed,
-                docker_container_mem_limit=self.docker_container_mem_limit,
-                outputs_dir=self.outputs_dir,
+                paths=self.paths,
+                resources=self.resources,
                 pull_images=self.pull_images,
                 docker_images=self.docker_images,
-                k6_duration=scenario.duration,
-                k6_payloads_amount=scenario.payloads_amount,
-                k6_payloads_delay=scenario.payloads_delay,
-                k6_payloads_warmup_delay=scenario.payloads_warmup_delay,
-                k6_payloads_skip=scenario.payloads_skip,
-                k6_payloads_warmup=scenario.payloads_warmup,
-                k6_warmup_duration=scenario.warmup_duration,
                 exports=self.exports,
             ),
             logger=logger,
@@ -267,9 +261,9 @@ class Scenarios:
 
     def setup_snapshot_service(self, scenario: Scenario) -> SnapshotService:
         if scenario.snapshot_backend == SnapshotBackend.OVERLAY:
-            overlay_work_dir = self.work_dir / "work"
-            overlay_upper_dir = self.work_dir / "upper"
-            overlay_merged_dir = self.work_dir / "merged"
+            overlay_work_dir = self.paths.work / "work"
+            overlay_upper_dir = self.paths.work / "upper"
+            overlay_merged_dir = self.paths.work / "merged"
             return OverlaySnapshotService(
                 overlay_work_dir=overlay_work_dir,
                 overlay_upper_dir=overlay_upper_dir,
@@ -281,7 +275,7 @@ class Scenarios:
             if scenario.snapshot_path is not None:
                 copy_work_dir = scenario.snapshot_path
             else:
-                copy_work_dir = self.work_dir / "snapshot"
+                copy_work_dir = self.paths.work / "snapshot"
             return CopySnapshotService(work_dir=copy_work_dir)
         else:
             raise ValueError(f"Invalid snapshot backend: {scenario.snapshot_backend}")

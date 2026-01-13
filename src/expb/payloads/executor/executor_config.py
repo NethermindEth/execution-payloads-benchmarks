@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 
 import docker
+from docker.client import DockerClient
 from docker.models.containers import Container
 from docker.models.networks import Network
 
@@ -17,18 +18,16 @@ from expb.clients import (
 )
 from expb.configs.defaults import (
     ALLOY_DEFAULT_IMAGE,
-    DOCKER_CONTAINER_DEFAULT_CPUS,
-    DOCKER_CONTAINER_DEFAULT_DOWNLOAD_SPEED,
-    DOCKER_CONTAINER_DEFAULT_MEM_LIMIT,
-    DOCKER_CONTAINER_DEFAULT_UPLOAD_SPEED,
-    FCUS_DEFAULT_FILE,
     K6_DEFAULT_IMAGE,
-    OUTPUTS_DEFAULT_DIR,
-    PAYLOADS_DEFAULT_FILE,
-    WORK_DEFAULT_DIR,
 )
 from expb.configs.exports import Exports
-from expb.configs.networks import Network as EthNetwork
+from expb.configs.scenarios import (
+    Scenario,
+    ScenarioExtraVolume,
+    ScenariosImages,
+    ScenariosPaths,
+    ScenariosResources,
+)
 from expb.payloads.executor.services.alloy import ALLOY_PYROSCOPE_PORT
 from expb.payloads.executor.services.snapshots import SnapshotService
 
@@ -37,138 +36,113 @@ from expb.payloads.executor.services.snapshots import SnapshotService
 class ExecutorConfig:
     def __init__(
         self,
-        scenario_name: str,
-        network: EthNetwork,
-        execution_client: Client,
-        snapshot_source: str,
+        scenario: Scenario,
         snapshot_service: SnapshotService,
-        k6_payloads_amount: int,
-        k6_duration: str = "10m",
-        k6_payloads_skip: int = 0,
-        k6_payloads_warmup: int = 0,
-        k6_payloads_delay: float = 0.0,
-        k6_payloads_warmup_delay: float = 0.0,
-        k6_warmup_duration: str = "10m",
-        docker_images: dict[str, str] = {},
-        payloads_file: Path = PAYLOADS_DEFAULT_FILE,
-        fcus_file: Path = FCUS_DEFAULT_FILE,
-        work_dir: Path = WORK_DEFAULT_DIR,
-        outputs_dir: Path = OUTPUTS_DEFAULT_DIR,
-        docker_container_cpus: int = DOCKER_CONTAINER_DEFAULT_CPUS,
-        docker_container_mem_limit: str = DOCKER_CONTAINER_DEFAULT_MEM_LIMIT,
-        docker_container_download_speed: str = DOCKER_CONTAINER_DEFAULT_DOWNLOAD_SPEED,
-        docker_container_upload_speed: str = DOCKER_CONTAINER_DEFAULT_UPLOAD_SPEED,
-        execution_client_image: str | None = None,
-        execution_client_extra_flags: list[str] = [],
-        execution_client_extra_env: dict[str, str] = {},
-        execution_client_extra_volumes: dict[str, dict[str, str]] = {},
-        execution_client_extra_commands: list[str] = [],
-        json_rpc_wait_max_retries: int = 16,
+        paths: ScenariosPaths,
+        resources: ScenariosResources | None = None,
         pull_images: bool = False,
-        limit_bandwidth: bool = False,
+        docker_images: ScenariosImages = ScenariosImages(),
         exports: Exports | None = None,
-        startup_wait: int = 30,
-        warmup_wait: int = 0,
+        json_rpc_wait_max_retries: int = 16,
+        limit_bandwidth: bool = False,
     ) -> None:
         # Executor Basic config
-        self.scenario_name = scenario_name
-        self.executor_name = f"expb-executor-{scenario_name}"
-        self.test_id = f"{scenario_name}-{time.strftime('%Y%m%d-%H%M%S')}"
-        self.startup_wait = startup_wait
+        self.scenario_name: str = scenario.name
+        self.executor_name: str = f"expb-executor-{self.scenario_name}"
+        self.test_id: str = f"{self.scenario_name}-{time.strftime('%Y%m%d-%H%M%S')}"
+        self.startup_wait = scenario.startup_wait
         # Executor Client config
-        self.network = network
-        self.execution_client = execution_client
-        self.execution_client_image = (
-            execution_client_image or self.execution_client.value.default_image
+        self.network: Network = scenario.network
+        self.execution_client: Client = scenario.client
+        execution_client_image = scenario.client_image
+        if execution_client_image is None:
+            execution_client_image = self.execution_client.value.default_image
+        self.execution_client_image = execution_client_image
+        self.execution_client_extra_flags = scenario.extra_flags
+        self.execution_client_extra_env = scenario.extra_env
+        self.execution_client_extra_volumes: dict[str, ScenarioExtraVolume] = (
+            scenario.extra_volumes
         )
-        self.execution_client_extra_flags = execution_client_extra_flags
-        self.execution_client_extra_env = execution_client_extra_env
-        self.execution_client_extra_volumes = execution_client_extra_volumes
-        self.execution_client_extra_commands = execution_client_extra_commands
+        self.execution_client_extra_commands = scenario.extra_commands
 
         # Executor Additional Tooling config
         ## Docker client
-        self.docker_client = docker.from_env()
-        self.docker_images = docker_images
-        self.pull_images = pull_images
-        self.docker_user = os.getuid()
-        self.docker_group_add = [os.getgid()]
+        self.docker_client: DockerClient = docker.from_env()
+        self.docker_images: ScenariosImages = docker_images
+        self.pull_images: bool = pull_images
+        self.docker_user: int = os.getuid()
+        self.docker_group_add: list[int] = [os.getgid()]
         ## Docker container config
-        self.docker_container_cpus = docker_container_cpus
-        self.docker_container_mem_limit = docker_container_mem_limit
-        self.docker_container_download_speed = docker_container_download_speed
-        self.docker_container_upload_speed = docker_container_upload_speed
-        self.limit_bandwidth = limit_bandwidth
-        self.json_rpc_wait_max_retries = json_rpc_wait_max_retries
+        self.resources: ScenariosResources | None = resources
+        self.limit_bandwidth: bool = limit_bandwidth
+        self.json_rpc_wait_max_retries: int = json_rpc_wait_max_retries
         ## K6 script config
-        self.k6_payloads_amount = k6_payloads_amount
-        self.k6_payloads_delay = k6_payloads_delay
-        self.k6_payloads_warmup_delay = k6_payloads_warmup_delay
-        self.k6_duration = k6_duration
-        self.k6_warmup_duration = k6_warmup_duration
-        self.k6_warmup_wait = warmup_wait
-        self.k6_payloads_skip = k6_payloads_skip
-        self.k6_payloads_warmup = k6_payloads_warmup
+        self.k6_payloads_amount: int = scenario.payloads_amount
+        self.k6_payloads_delay: float = scenario.payloads_delay
+        self.k6_payloads_warmup_delay: float | None = scenario.payloads_warmup_delay
+        self.k6_duration: str = scenario.duration
+        self.k6_warmup_duration: str = scenario.warmup_duration
+        self.k6_warmup_wait: int = scenario.warmup_wait
+        self.k6_payloads_skip: int | None = scenario.payloads_skip
+        self.k6_payloads_warmup: int | None = scenario.payloads_warmup
 
         # Executor Directories
         ## Payloads and FCUs
-        self.payloads_file = payloads_file
-        self.fcus_file = fcus_file
+        self.payloads_file: Path = scenario.payloads_file
+        self.fcus_file: Path = scenario.fcus_file
 
         ## Work directories
-        self.work_dir = work_dir
+        self.work_dir: Path = paths.work
         ### JWT secret file
-        self.jwt_secret_dir = self.work_dir / "jwt-secret"
-        self.jwt_secret_file = self.jwt_secret_dir / "jwtsecret.hex"
+        self.jwt_secret_dir: Path = self.work_dir / "jwt-secret"
+        self.jwt_secret_file: Path = self.jwt_secret_dir / "jwtsecret.hex"
 
         ## Snapshot config
-        self.snapshot_source = snapshot_source
-        self.snapshot_service = snapshot_service
+        self.snapshot_source: str = scenario.snapshot_source
+        self.snapshot_service: SnapshotService = snapshot_service
 
         ## Outputs directory
-        timestamp = time.strftime("%Y%m%d-%H%M%S")
-        self.outputs_dir = outputs_dir / f"{self.executor_name}-{timestamp}"
+        timestamp: str = time.strftime("%Y%m%d-%H%M%S")
+        self.outputs_dir: Path = paths.outputs / f"{self.executor_name}-{timestamp}"
         self.outputs_dir.mkdir(parents=True, exist_ok=True)
 
         ## Client Additional Volumes directory
-        self.volumes_dir = self.outputs_dir / "volumes"
+        self.volumes_dir: Path = self.outputs_dir / "volumes"
         if self.execution_client_extra_volumes and any(
-            [
-                volume
-                for volume in self.execution_client_extra_volumes.values()
-                if volume.get("source") is None
-            ]
+            volume
+            for volume in self.execution_client_extra_volumes.values()
+            if volume.source is None
         ):
             self.volumes_dir.mkdir(parents=True, exist_ok=True)
 
         ## Client extra Commands outputs directory
-        self.extra_commands_outputs_dir = self.outputs_dir / "commands"
+        self.extra_commands_outputs_dir: Path = self.outputs_dir / "commands"
         if self.execution_client_extra_commands:
             self.extra_commands_outputs_dir.mkdir(parents=True, exist_ok=True)
 
         ## K6 script and config files
-        self.k6_script_file = self.outputs_dir / "k6-script.js"
-        self.k6_config_file = self.outputs_dir / "k6-config.json"
+        self.k6_script_file: Path = self.outputs_dir / "k6-script.js"
+        self.k6_config_file: Path = self.outputs_dir / "k6-config.json"
         ### K6 container directories
-        self._k6_container_work_dir = "/expb"
-        self._k6_container_payloads_file = f"/payloads/{self.payloads_file.name}"
-        self._k6_container_fcus_file = f"/payloads/{self.fcus_file.name}"
-        self._k6_container_jwt_secret_file = f"/{self.jwt_secret_file.name}"
-        self._k6_container_script_file = (
+        self._k6_container_work_dir: str = "/expb"
+        self._k6_container_payloads_file: str = f"/payloads/{self.payloads_file.name}"
+        self._k6_container_fcus_file: str = f"/payloads/{self.fcus_file.name}"
+        self._k6_container_jwt_secret_file: str = f"/{self.jwt_secret_file.name}"
+        self._k6_container_script_file: str = (
             f"{self._k6_container_work_dir}/{self.k6_script_file.name}"
         )
-        self._k6_container_config_file = (
+        self._k6_container_config_file: str = (
             f"{self._k6_container_work_dir}/{self.k6_config_file.name}"
         )
-        self._k6_container_summary_file = (
+        self._k6_container_summary_file: str = (
             f"{self._k6_container_work_dir}/k6-summary.json"
         )
 
         ## Alloy config file
-        self.alloy_config_file = self.outputs_dir / "config.alloy"
+        self.alloy_config_file: Path = self.outputs_dir / "config.alloy"
 
         # Executor Exports config
-        self.exports = exports
+        self.exports: Exports | None = exports
 
     # Executor Helper functions
     def get_execution_client_name(self) -> str:
@@ -242,8 +216,10 @@ class ExecutorConfig:
         execution_container_volumes = []
         container_name = self.get_execution_client_container_name()
         for volume_name, volume_config in self.execution_client_extra_volumes.items():
+            if not volume_config:
+                continue
             source_path: Path | None = None
-            source_path_raw = volume_config.get("source", None)
+            source_path_raw = volume_config.source
             if source_path_raw is None:
                 source_path = self.volumes_dir / volume_name
                 source_path.mkdir(parents=True, exist_ok=True)
@@ -251,13 +227,13 @@ class ExecutorConfig:
                 source_path = Path(source_path_raw)
             execution_container_volumes.append(
                 {
-                    "bind": volume_config["bind"],
+                    "bind": volume_config.bind,
                     "config": {
                         "name": f"{container_name}-{volume_name}",
                         "driver": "local",
                         "driver_opts": {
                             "type": "none",
-                            "o": f"bind,{volume_config['mode']}",
+                            "o": f"bind,{volume_config.mode}",
                             "device": str(source_path.resolve()),
                         },
                         "labels": {},
@@ -304,7 +280,7 @@ class ExecutorConfig:
         return self.get_container_name("alloy")
 
     def get_alloy_container_image(self) -> str:
-        return self.docker_images.get("alloy", ALLOY_DEFAULT_IMAGE)
+        return self.docker_images.alloy
 
     def get_alloy_volumes(self) -> dict[str, dict[str, str]]:
         return {
@@ -341,7 +317,7 @@ class ExecutorConfig:
         return self.get_container_name("k6")
 
     def get_k6_container_image(self) -> str:
-        return self.docker_images.get("k6", K6_DEFAULT_IMAGE)
+        return self.docker_images.k6
 
     def get_k6_volumes(self) -> dict[str, dict[str, str]]:
         return {
@@ -365,22 +341,19 @@ class ExecutorConfig:
 
     def get_k6_environment(self) -> dict[str, str]:
         environment = {}
-        if (
-            self.exports is not None
-            and self.exports.prometheus_remote_write is not None
-        ):
+        if self.exports and self.exports.prometheus_rw:
             environment["K6_PROMETHEUS_RW_TREND_STATS"] = (
                 "min,max,avg,med,p(90),p(95),p(99)"
             )
             environment["K6_PROMETHEUS_RW_SERVER_URL"] = (
-                self.exports.prometheus_remote_write.endpoint
+                self.exports.prometheus_rw.endpoint
             )
-            if self.exports.prometheus_remote_write.basic_auth is not None:
+            if self.exports.prometheus_rw.basic_auth:
                 environment["K6_PROMETHEUS_RW_USERNAME"] = (
-                    self.exports.prometheus_remote_write.basic_auth.username
+                    self.exports.prometheus_rw.basic_auth.username
                 )
                 environment["K6_PROMETHEUS_RW_PASSWORD"] = (
-                    self.exports.prometheus_remote_write.basic_auth.password
+                    self.exports.prometheus_rw.basic_auth.password
                 )
         return environment
 
@@ -407,12 +380,9 @@ class ExecutorConfig:
             f"--env=EXPB_PER_PAYLOAD_METRICS={int(collect_per_payload_metrics)}",
             f"--env=EXPB_WARMUP_WAIT={self.k6_warmup_wait}",
         ]
-        if (
-            self.exports is not None
-            and self.exports.prometheus_remote_write is not None
-        ):
+        if self.exports is not None and self.exports.prometheus_rw is not None:
             command.append("--out=experimental-prometheus-rw")
-            for tag in self.exports.prometheus_remote_write.tags:
+            for tag in self.exports.prometheus_rw.tags:
                 command.append(f"--tag={tag}")
         else:
             k6_results_jsonl_file = f"{self._k6_container_work_dir}/k6-results.jsonl"

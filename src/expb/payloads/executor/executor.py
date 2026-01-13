@@ -32,8 +32,8 @@ class Executor:
         config: ExecutorConfig,
         logger=Logger(),
     ):
-        self.config = config
-        self.log = logger
+        self.config: ExecutorConfig = config
+        self.log: Logger = logger
         self.running_command_futures: list[Future] = []
         self.executor_pool: ThreadPoolExecutor | None = None
 
@@ -110,6 +110,8 @@ class Executor:
             )
 
         # Run execution container
+        cpu_count = self.config.resources.cpu if self.config.resources else None
+        mem_limit = self.config.resources.mem if self.config.resources else None
         container = self.config.docker_client.containers.run(
             image=self.config.execution_client_image,
             name=self.config.get_execution_client_container_name(),
@@ -120,9 +122,9 @@ class Executor:
             network=container_network.name if container_network else None,
             detach=True,
             restart_policy={"Name": "unless-stopped"},
-            cpu_count=self.config.docker_container_cpus,  # Only works for windows
-            nano_cpus=self.config.docker_container_cpus * 10**9,
-            mem_limit=self.config.docker_container_mem_limit,
+            cpu_count=cpu_count,  # Only works for windows
+            nano_cpus=cpu_count * 10**9 if cpu_count else None,
+            mem_limit=mem_limit,
             user=self.config.docker_user,
             group_add=self.config.docker_group_add,
             stop_signal=stop_signal,
@@ -184,7 +186,7 @@ class Executor:
                 # TODO: Make scrape parameters configurable
                 execution_client_scrape_interval="4s",
                 execution_client_scrape_timeout="3s",  # Has to be lower than the scrape interval
-                prometheus_rw=self.config.exports.prometheus_remote_write,
+                prometheus_rw=self.config.exports.prometheus_rw,
                 pyroscope=self.config.exports.pyroscope,
             )
         )
@@ -481,12 +483,10 @@ class Executor:
             )
             alloy_pyroscope: Pyroscope | None = (
                 Pyroscope(
-                    {
-                        "endpoint": self.config.get_alloy_pyroscope_url(
-                            container=alloy_container,
-                            network=containers_network,
-                        ),
-                    }
+                    endpoint=self.config.get_alloy_pyroscope_url(
+                        container=alloy_container,
+                        network=containers_network,
+                    ),
                 )
                 if self.config.exports is not None
                 and self.config.exports.pyroscope is not None
@@ -497,8 +497,12 @@ class Executor:
                 "Starting execution client",
                 execution_client=self.config.get_execution_client_name(),
                 execution_client_image=self.config.execution_client_image,
-                docker_container_cpus=self.config.docker_container_cpus,
-                docker_container_mem_limit=self.config.docker_container_mem_limit,
+                docker_container_cpus=self.config.resources.cpu
+                if self.config.resources
+                else None,
+                docker_container_mem_limit=self.config.resources.mem
+                if self.config.resources
+                else None,
             )
             stop_signal = (
                 # If there are extra commands to execute, use SIGINT to stop the execution client
@@ -511,18 +515,22 @@ class Executor:
                 stop_signal=stop_signal,
             )
 
-            if self.config.limit_bandwidth:
+            if self.config.resources and self.config.limit_bandwidth:
                 self.log.info(
                     "Limiting container bandwidth",
                     execution_client=self.config.get_execution_client_name(),
-                    download_speed=self.config.docker_container_download_speed,
-                    upload_speed=self.config.docker_container_upload_speed,
+                    download_speed=self.config.resources.download_speed
+                    if self.config.resources
+                    else None,
+                    upload_speed=self.config.resources.upload_speed
+                    if self.config.resources
+                    else None,
                 )
                 try:
                     limit_container_bandwidth(
                         execution_client_container,
-                        self.config.docker_container_download_speed,
-                        self.config.docker_container_upload_speed,
+                        self.config.resources.download_speed,
+                        self.config.resources.upload_speed,
                     )
                 except Exception as e:
                     self.log.error("Failed to limit container bandwidth", error=e)
