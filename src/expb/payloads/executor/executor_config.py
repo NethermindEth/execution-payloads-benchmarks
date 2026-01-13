@@ -16,10 +16,6 @@ from expb.clients import (
     CLIENTS_JWT_SECRET_DIR,
     Client,
 )
-from expb.configs.defaults import (
-    ALLOY_DEFAULT_IMAGE,
-    K6_DEFAULT_IMAGE,
-)
 from expb.configs.exports import Exports
 from expb.configs.scenarios import (
     Scenario,

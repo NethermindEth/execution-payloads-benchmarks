@@ -13,7 +13,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from expb.configs.exports import Pyroscope
-from expb.configs.scenarios import Scenario, Scenarios
+from expb.configs.scenarios import Scenarios
 from expb.logging import Logger
 from expb.payloads.executor.executor_config import ExecutorConfig
 from expb.payloads.executor.exports_utils import add_pyroscope_config
@@ -175,20 +175,28 @@ class Executor:
         self,
         execution_client_metrics_address: str,
     ) -> None:
-        if self.config.exports is None:
-            return
         # Create alloy config file
         self.config.alloy_config_file.touch(mode=0o666, exist_ok=True)
         # Write alloy config content
+        prometheus_rw = (
+            self.config.exports.prometheus_rw
+            if self.config.exports is not None
+            else None
+        )
         scrape_interval = (
             self.config.exports.prometheus_rw.scrape_interval
-            if self.config.exports.prometheus_rw is not None
+            if self.config.exports is not None
+            and self.config.exports.prometheus_rw is not None
             else None
         )
         scrape_timeout = (
             self.config.exports.prometheus_rw.scrape_timeout
-            if self.config.exports.prometheus_rw is not None
+            if self.config.exports is not None
+            and self.config.exports.prometheus_rw is not None
             else None
+        )
+        pyroscope = (
+            self.config.exports.pyroscope if self.config.exports is not None else None
         )
         self.config.alloy_config_file.write_text(
             get_alloy_config(
@@ -197,8 +205,8 @@ class Executor:
                 execution_client_address=execution_client_metrics_address,
                 scrape_interval=scrape_interval,
                 scrape_timeout=scrape_timeout,
-                prometheus_rw=self.config.exports.prometheus_rw,
-                pyroscope=self.config.exports.pyroscope,
+                prometheus_rw=prometheus_rw,
+                pyroscope=pyroscope,
             )
         )
         self.log.info(
@@ -480,29 +488,30 @@ class Executor:
                 driver="bridge",
             )
 
-            self.log.info("Preparing Alloy config")
-            self.prepare_alloy_config(
-                self.config.get_execution_metrics_address(),
-            )
-
-            self.log.info(
-                "Starting Grafana Alloy",
-                image=self.config.get_alloy_container_image(),
-            )
-            alloy_container = self.start_alloy(
-                container_network=containers_network,
-            )
-            alloy_pyroscope: Pyroscope | None = (
-                Pyroscope(
-                    endpoint=self.config.get_alloy_pyroscope_url(
-                        container=alloy_container,
-                        network=containers_network,
-                    ),
+            if self.config.exports is not None:
+                self.log.info("Preparing Alloy config")
+                self.prepare_alloy_config(
+                    self.config.get_execution_metrics_address(),
                 )
-                if self.config.exports is not None
-                and self.config.exports.pyroscope is not None
-                else None
-            )
+
+                self.log.info(
+                    "Starting Grafana Alloy",
+                    image=self.config.get_alloy_container_image(),
+                )
+                alloy_container = self.start_alloy(
+                    container_network=containers_network,
+                )
+                alloy_pyroscope: Pyroscope | None = (
+                    Pyroscope(
+                        endpoint=self.config.get_alloy_pyroscope_url(
+                            container=alloy_container,
+                            network=containers_network,
+                        ),
+                    )
+                    if self.config.exports is not None
+                    and self.config.exports.pyroscope is not None
+                    else None
+                )
 
             self.log.info(
                 "Starting execution client",

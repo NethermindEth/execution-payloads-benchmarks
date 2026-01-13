@@ -240,6 +240,7 @@ class Scenarios(BaseModel):
     # Exports
     exports: Exports | None = Field(
         description="Exports configuration for the scenarios.",
+        alias="export",
         default=None,
     )
     # Resources
