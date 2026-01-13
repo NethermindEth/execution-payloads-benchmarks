@@ -29,6 +29,20 @@ class Client(Enum):
     ETHREX = EthrexConfig()
     NIMBUSEL = NimbusELConfig()
 
+    @classmethod
+    def from_name(cls, name: str) -> "Client":
+        name_lower = name.lower()
+        for client in cls:
+            client_name_lower = client.value.name.lower()
+            if client_name_lower == name_lower:
+                return client
+
+        raise ValueError(f"Invalid client name: {name}.")
+
+    @classmethod
+    def all_client_names(cls) -> list[str]:
+        return [client.value.name for client in cls]
+
 
 __all__ = [
     "Client",

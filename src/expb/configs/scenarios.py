@@ -1,6 +1,14 @@
 from pathlib import Path
 
-from pydantic import BaseModel, Field, FilePath, NewPath, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    FilePath,
+    NewPath,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 
 from expb.clients import Client
 from expb.configs.defaults import (
@@ -37,6 +45,7 @@ class Scenario(BaseModel):
     # General
     name: str | None = Field(
         description="Name of the scenario.",
+        default=None,
     )
     client: Client = Field(
         description="Execution client.",
@@ -116,7 +125,7 @@ class Scenario(BaseModel):
         description="Snapshot backend to use.",
         default=SnapshotBackend.OVERLAY,
     )
-    snapshot_path: NewPath | None = Field(
+    snapshot_path: Path | None = Field(
         description="Path to the snapshot directory for copy backend (overrides work_dir).",
         default=None,
     )
@@ -137,6 +146,34 @@ class Scenario(BaseModel):
         description="Extra commands to run in the execution client docker container during the test execution.",
         default=[],
     )
+
+    @field_validator("client", mode="before")
+    @classmethod
+    def validate_client(cls, v) -> Client:
+        if isinstance(v, str):
+            return Client.from_name(v)
+        elif isinstance(v, Client):
+            return v
+        else:
+            raise ValueError(f"Invalid client: {v}")
+
+    @field_serializer("client")
+    def serialize_client(self, v: Client) -> str:
+        return v.value.name
+
+    @field_validator("network", mode="before")
+    @classmethod
+    def validate_network(cls, v) -> Network:
+        if isinstance(v, str):
+            return Network.from_name(v)
+        elif isinstance(v, Network):
+            return v
+        else:
+            raise ValueError(f"Invalid network: {v}")
+
+    @field_serializer("network")
+    def serialize_network(self, v: Network) -> str:
+        return v.value.name
 
     @model_validator(mode="after")
     def validate_payloads_delays(self):
