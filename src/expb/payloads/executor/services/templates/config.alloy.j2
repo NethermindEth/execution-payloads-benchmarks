@@ -64,8 +64,12 @@ prometheus.scrape "execution" {
 
   forward_to = [prometheus.remote_write.prometheus_backend.receiver]
 
+  {% if execution_metrics.scrape_interval %}
   scrape_interval = "{{ execution_metrics.scrape_interval }}"
+  {% endif %}
+  {% if execution_metrics.scrape_timeout %}
   scrape_timeout = "{{ execution_metrics.scrape_timeout }}"
+  {% endif %}
   metrics_path = "{{ execution_metrics.metrics_path }}"
 }
 {% endif %}

@@ -27,6 +27,14 @@ class PrometheusRW(BaseModel):
         description="Tags to add to the prometheus remote write data.",
         default=[],
     )
+    scrape_interval: str = Field(
+        description="Scrape interval for the execution client metrics.",
+        default="2s",
+    )
+    scrape_timeout: str = Field(
+        description="Scrape timeout for the execution client metrics.",
+        default="1s",
+    )
 
 
 # Pyroscope configuration

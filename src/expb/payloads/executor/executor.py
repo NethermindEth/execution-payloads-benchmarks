@@ -178,14 +178,23 @@ class Executor:
         # Create alloy config file
         self.config.alloy_config_file.touch(mode=0o666, exist_ok=True)
         # Write alloy config content
+        scrape_interval = (
+            self.config.exports.prometheus_rw.scrape_interval
+            if self.config.exports.prometheus_rw is not None
+            else None
+        )
+        scrape_timeout = (
+            self.config.exports.prometheus_rw.scrape_timeout
+            if self.config.exports.prometheus_rw is not None
+            else None
+        )
         self.config.alloy_config_file.write_text(
             get_alloy_config(
                 test_id=self.config.test_id,
                 execution_client=self.config.execution_client,
                 execution_client_address=execution_client_metrics_address,
-                # TODO: Make scrape parameters configurable
-                execution_client_scrape_interval="4s",
-                execution_client_scrape_timeout="3s",  # Has to be lower than the scrape interval
+                scrape_interval=scrape_interval,
+                scrape_timeout=scrape_timeout,
                 prometheus_rw=self.config.exports.prometheus_rw,
                 pyroscope=self.config.exports.pyroscope,
             )
