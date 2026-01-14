@@ -488,6 +488,7 @@ class Executor:
                 driver="bridge",
             )
 
+            alloy_pyroscope: Pyroscope | None = None
             if self.config.exports is not None:
                 self.log.info("Preparing Alloy config")
                 self.prepare_alloy_config(
