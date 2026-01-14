@@ -57,6 +57,7 @@ class Pyroscope(BaseModel):
 class Exports(BaseModel):
     prometheus_rw: PrometheusRW | None = Field(
         description="Prometheus remote write configuration.",
+        alias="prometheus_remote_write",
         default=None,
     )
     pyroscope: Pyroscope | None = Field(
