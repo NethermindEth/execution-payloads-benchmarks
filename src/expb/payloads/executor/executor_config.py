@@ -167,13 +167,13 @@ class ExecutorConfig:
 
     def get_execution_client_ports(self) -> dict[str, str]:
         return {
-            f"{CLIENT_RPC_PORT}/tcp": f"{CLIENT_RPC_PORT}",
-            f"{CLIENT_RPC_WS_PORT}/tcp": f"{CLIENT_RPC_WS_PORT}",
-            f"{CLIENT_ENGINE_PORT}/tcp": f"{CLIENT_ENGINE_PORT}",
-            f"{CLIENT_METRICS_PORT}/tcp": f"{CLIENT_METRICS_PORT}",
+            f"127.0.0.1:{CLIENT_RPC_PORT}/tcp": f"{CLIENT_RPC_PORT}",
+            f"127.0.0.1:{CLIENT_RPC_WS_PORT}/tcp": f"{CLIENT_RPC_WS_PORT}",
+            f"127.0.0.1:{CLIENT_ENGINE_PORT}/tcp": f"{CLIENT_ENGINE_PORT}",
+            f"127.0.0.1:{CLIENT_METRICS_PORT}/tcp": f"{CLIENT_METRICS_PORT}",
             # Disable p2p
-            # f"{CLIENT_P2P_PORT}/tcp": f"{CLIENT_P2P_PORT}",
-            # f"{CLIENT_P2P_PORT}/udp": f"{CLIENT_P2P_PORT}",
+            # f"127.0.0.1:{CLIENT_P2P_PORT}/tcp": f"{CLIENT_P2P_PORT}",
+            # f"127.0.0.1:{CLIENT_P2P_PORT}/udp": f"{CLIENT_P2P_PORT}",
         }
 
     def get_execution_metrics_address(self) -> str:
