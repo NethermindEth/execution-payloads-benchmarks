@@ -27,6 +27,7 @@ export const options = config["options"];
 
 // --- Metrics ---
 const slowestPayloads = new Gauge('expb_slowest_payloads');
+const slowestProcessing = new Gauge('expb_slowest_processing');
 
 // --- Data ---
 // Pre-process payloads: normalize once during load, extract metadata
@@ -195,6 +196,7 @@ function processPayload(idx, base_tags = {}, warmup = false) {
         perPayloadMetricsTags.gas_used = payload.gasUsed;
       }
       slowestPayloads.add(r.timings.duration, perPayloadMetricsTags);
+      slowestProcessing.add(r.timings.waiting, perPayloadMetricsTags);
     }
   });
 
