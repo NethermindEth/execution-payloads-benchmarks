@@ -31,7 +31,7 @@ class ScenarioExtraVolume(BaseModel):
         description="Path to the volume bind inside the execution client docker container.",
         min_length=1,
     )
-    source: NewPath | None = Field(
+    source: Path | None = Field(
         description="Path to the volume source on the host.",
         default=None,
     )
@@ -39,6 +39,15 @@ class ScenarioExtraVolume(BaseModel):
         description="Mode of the volume.",
         default="rw",
     )
+
+    @model_validator(mode="after")
+    def validate_source(self):
+        if self.source is not None:
+            if not self.source.exists():
+                raise ValueError(
+                    f"Extra volume source path does not exist: {self.source}"
+                )
+        return self
 
 
 class Scenario(BaseModel):
