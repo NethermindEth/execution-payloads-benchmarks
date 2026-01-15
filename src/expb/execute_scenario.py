@@ -44,18 +44,20 @@ def execute_scenario(
         raise ValueError(
             f"Scenario {scenario_name} not found in config file {config_file}"
         )
-    executor = Executor.from_scenarios(
-        scenarios,
-        scenario_name=scenario_name,
-        logger=logger,
-    )
+    for iteration in range(scenario.repeat):
+        executor = Executor.from_scenarios(
+            scenarios,
+            scenario_name=scenario_name,
+            logger=logger,
+        )
 
-    logger.info(
-        "Executing scenario",
-        client=scenario.client.value.name.lower(),
-        image=scenario.client_image,
-        snapshot=scenario.snapshot_source,
-    )
-    executor.execute_scenario(
-        collect_per_payload_metrics=per_payload_metrics,
-    )
+        logger.info(
+            "Executing scenario",
+            iteration=iteration + 1,
+            client=scenario.client,
+            image=scenario.client_image,
+            snapshot=scenario.snapshot_source,
+        )
+        executor.execute_scenario(
+            collect_per_payload_metrics=per_payload_metrics,
+        )

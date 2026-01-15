@@ -67,6 +67,11 @@ class Scenario(BaseModel):
         alias="image",
         default=None,
     )
+    repeat: int = Field(
+        description="Number of times to repeat the scenario.",
+        default=1,
+        ge=1,
+    )
     # Payloads configuration
     payloads_skip: int | None = Field(
         description="Number of payloads to skip.",

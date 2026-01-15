@@ -63,6 +63,8 @@ scenarios:
     snapshot_backend: overlay
     # Optional: Snapshot path for copy backend. If defined, this path will be used instead of work_dir/snapshot. Only used when snapshot_backend is copy
     snapshot_path: ./work_dir/snapshot
+    # Optional: Number of times to repeat the scenario. Defaults to 1.
+    repeat: 1
     # Required: Number of payloads to run
     amount: 100
     # Optional: Delay between payloads requests in seconds. Defaults to 0 seconds.
