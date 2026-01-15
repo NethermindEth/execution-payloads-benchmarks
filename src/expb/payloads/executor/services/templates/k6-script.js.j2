@@ -159,6 +159,9 @@ function processPayload(idx, base_tags = {}, warmup = false) {
     return;
   }
 
+  // Track start time to calculate elapsed time
+  const startTime = Date.now();
+
   const correlationId = (!warmup && addCorrelationHeader) ? cid() : '';
 
   // --- engine_newPayload ---
@@ -227,10 +230,14 @@ function processPayload(idx, base_tags = {}, warmup = false) {
     check(r, { 'status_200': (x) => x.status === 200 }, tags);
   });
 
-  // delay between payloads
+  // delay between payloads - wait only the difference between configured delay and elapsed time
   const delay = warmup ? payloadsWarmupDelay : payloadsDelay;
   if (delay > 0) {
-    sleep(delay);
+    const elapsedTime = (Date.now() - startTime) / 1000; // Convert to seconds
+    const remainingDelay = delay - elapsedTime;
+    if (remainingDelay > 0) {
+      sleep(remainingDelay);
+    }
   }
 }
 
