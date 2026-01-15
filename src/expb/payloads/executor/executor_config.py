@@ -165,15 +165,15 @@ class ExecutorConfig:
     def get_execution_client_env(self) -> dict[str, str]:
         return self.execution_client_extra_env.copy()
 
-    def get_execution_client_ports(self) -> dict[str, str]:
+    def get_execution_client_ports(self) -> dict[str, tuple[str, str]]:
         return {
-            f"127.0.0.1:{CLIENT_RPC_PORT}/tcp": f"{CLIENT_RPC_PORT}",
-            f"127.0.0.1:{CLIENT_RPC_WS_PORT}/tcp": f"{CLIENT_RPC_WS_PORT}",
-            f"127.0.0.1:{CLIENT_ENGINE_PORT}/tcp": f"{CLIENT_ENGINE_PORT}",
-            f"127.0.0.1:{CLIENT_METRICS_PORT}/tcp": f"{CLIENT_METRICS_PORT}",
+            f"{CLIENT_RPC_PORT}/tcp": ("127.0.0.1", f"{CLIENT_RPC_PORT}"),
+            f"{CLIENT_RPC_WS_PORT}/tcp": ("127.0.0.1", f"{CLIENT_RPC_WS_PORT}"),
+            f"{CLIENT_ENGINE_PORT}/tcp": ("127.0.0.1", f"{CLIENT_ENGINE_PORT}"),
+            f"{CLIENT_METRICS_PORT}/tcp": ("127.0.0.1", f"{CLIENT_METRICS_PORT}"),
             # Disable p2p
-            # f"127.0.0.1:{CLIENT_P2P_PORT}/tcp": f"{CLIENT_P2P_PORT}",
-            # f"127.0.0.1:{CLIENT_P2P_PORT}/udp": f"{CLIENT_P2P_PORT}",
+            # f"{CLIENT_P2P_PORT}/tcp": ("127.0.0.1", f"{CLIENT_P2P_PORT}"),
+            # f"{CLIENT_P2P_PORT}/udp": ("127.0.0.1", f"{CLIENT_P2P_PORT}"),
         }
 
     def get_execution_metrics_address(self) -> str:
