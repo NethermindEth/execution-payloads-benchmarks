@@ -46,7 +46,6 @@ class RethConfig(ClientConfig):
             command.extend(
                 [
                     "--chain=mainnet",
-                    "--full",
                 ]
             )
         return self.default_command + command + extra_flags
