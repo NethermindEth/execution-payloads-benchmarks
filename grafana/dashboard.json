@@ -29,6 +29,321 @@
       "fieldConfig": {
         "defaults": {
           "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "left",
+            "cellOptions": {
+              "type": "auto",
+              "wrapText": false
+            },
+            "filterable": true,
+            "inspect": false
+          },
+          "fieldMinMax": false,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/avg|p90|p95|p99|med|max|min/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Client"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Method"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 220
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 11,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 10,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "avg"
+          }
+        ]
+      },
+      "pluginVersion": "11.6.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus_ds_1"
+          },
+          "editorMode": "code",
+          "expr": "k6_http_req_duration_p90{testid=~\"$testid\", group!~\"::setup::.*\"}",
+          "format": "table",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus_ds_1"
+          },
+          "editorMode": "code",
+          "expr": "k6_http_req_duration_p95{testid=~\"$testid\", group!~\"::setup::.*\"}",
+          "format": "table",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus_ds_1"
+          },
+          "editorMode": "code",
+          "expr": "k6_http_req_duration_p99{testid=~\"$testid\", group!~\"::setup::.*\"}",
+          "format": "table",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus_ds_1"
+          },
+          "editorMode": "code",
+          "expr": "k6_http_req_duration_med{testid=~\"$testid\", group!~\"::setup::.*\"}",
+          "format": "table",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus_ds_1"
+          },
+          "editorMode": "code",
+          "expr": "k6_http_req_duration_max{testid=~\"$testid\", group!~\"::setup::.*\"}",
+          "format": "table",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "E"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus_ds_1"
+          },
+          "editorMode": "code",
+          "expr": "k6_http_req_duration_min{testid=~\"$testid\", group!~\"::setup::.*\"}",
+          "format": "table",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "F"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus_ds_1"
+          },
+          "editorMode": "code",
+          "expr": "k6_http_req_duration_avg{testid=~\"$testid\", group!~\"::setup::.*\"}",
+          "format": "table",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "G"
+        }
+      ],
+      "title": "Performance Summary",
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "groupBy",
+          "options": {
+            "fields": {
+              "Value #A": {
+                "aggregations": [
+                  "lastNotNull"
+                ],
+                "operation": "aggregate"
+              },
+              "Value #B": {
+                "aggregations": [
+                  "lastNotNull"
+                ],
+                "operation": "aggregate"
+              },
+              "Value #C": {
+                "aggregations": [
+                  "lastNotNull"
+                ],
+                "operation": "aggregate"
+              },
+              "Value #D": {
+                "aggregations": [
+                  "lastNotNull"
+                ],
+                "operation": "aggregate"
+              },
+              "Value #E": {
+                "aggregations": [
+                  "lastNotNull"
+                ],
+                "operation": "aggregate"
+              },
+              "Value #F": {
+                "aggregations": [
+                  "lastNotNull"
+                ],
+                "operation": "aggregate"
+              },
+              "Value #G": {
+                "aggregations": [
+                  "lastNotNull"
+                ],
+                "operation": "aggregate"
+              },
+              "client_type": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "group": {
+                "aggregations": []
+              },
+              "jrpc_method": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "testid": {
+                "aggregations": [],
+                "operation": "groupby"
+              }
+            }
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "includeByName": {},
+            "indexByName": {
+              "Value #A (lastNotNull)": 4,
+              "Value #B (lastNotNull)": 5,
+              "Value #C (lastNotNull)": 6,
+              "Value #D (lastNotNull)": 7,
+              "Value #E (lastNotNull)": 8,
+              "Value #F (lastNotNull)": 9,
+              "Value #G (lastNotNull)": 3,
+              "client_type": 1,
+              "jrpc_method": 2,
+              "testid": 0
+            },
+            "renameByName": {
+              "Value #A (lastNotNull)": "p90",
+              "Value #B (lastNotNull)": "p95",
+              "Value #C (lastNotNull)": "p99",
+              "Value #D (lastNotNull)": "med",
+              "Value #E (lastNotNull)": "max",
+              "Value #F (lastNotNull)": "min",
+              "Value #G (lastNotNull)": "avg",
+              "client_type": "Client",
+              "jrpc_method": "Method",
+              "testid": "TestID"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "desc": true,
+                "field": "Method"
+              }
+            ]
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus_ds_1"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
             "mode": "palette-classic"
           },
           "custom": {
@@ -188,9 +503,9 @@
         "h": 11,
         "w": 24,
         "x": 0,
-        "y": 0
+        "y": 11
       },
-      "id": 10,
+      "id": 29,
       "options": {
         "legend": {
           "calcs": [
@@ -283,7 +598,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 11
+        "y": 22
       },
       "id": 1,
       "panels": [],
@@ -317,7 +632,7 @@
         "h": 5,
         "w": 12,
         "x": 0,
-        "y": 12
+        "y": 23
       },
       "id": 4,
       "options": {
@@ -384,7 +699,7 @@
         "h": 5,
         "w": 12,
         "x": 12,
-        "y": 12
+        "y": 23
       },
       "id": 20,
       "options": {
@@ -453,7 +768,7 @@
         "h": 5,
         "w": 12,
         "x": 0,
-        "y": 17
+        "y": 28
       },
       "id": 22,
       "options": {
@@ -517,7 +832,7 @@
         "h": 5,
         "w": 12,
         "x": 12,
-        "y": 17
+        "y": 28
       },
       "id": 21,
       "options": {
@@ -617,7 +932,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 22
+        "y": 33
       },
       "id": 8,
       "options": {
@@ -738,7 +1053,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 22
+        "y": 33
       },
       "id": 9,
       "options": {
@@ -792,7 +1107,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 30
+        "y": 41
       },
       "id": 16,
       "panels": [],
@@ -876,13 +1191,14 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 31
+        "y": 42
       },
       "id": 14,
       "options": {
         "legend": {
           "calcs": [
-            "last"
+            "last",
+            "max"
           ],
           "displayMode": "table",
           "placement": "right",
@@ -1090,7 +1406,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 40
+        "y": 51
       },
       "id": 15,
       "options": {
@@ -1159,6 +1475,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
+      "description": "Gas Usage calculation for engine_newPayload request waiting time.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1270,9 +1587,334 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 49
+        "y": 60
       },
       "id": 27,
+      "options": {
+        "legend": {
+          "calcs": [
+            "min",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "mapping": "auto",
+        "series": [
+          {}
+        ],
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "11.6.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "k6_expb_slowest_processing{testid=~\"$testid\"}",
+          "format": "table",
+          "instant": false,
+          "legendFormat": "{{testid}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Gas Usage per Payload (Processing)",
+      "transformations": [
+        {
+          "id": "convertFieldType",
+          "options": {
+            "conversions": [
+              {
+                "destinationType": "number",
+                "targetField": "jrpc_id"
+              },
+              {
+                "destinationType": "number",
+                "targetField": "gas_used"
+              }
+            ],
+            "fields": {}
+          }
+        },
+        {
+          "id": "groupBy",
+          "options": {
+            "fields": {
+              "Value": {
+                "aggregations": [
+                  "mean"
+                ],
+                "operation": "aggregate"
+              },
+              "Value #A": {
+                "aggregations": [
+                  "mean"
+                ],
+                "operation": "aggregate"
+              },
+              "Value #B": {
+                "aggregations": [
+                  "mean"
+                ],
+                "operation": "aggregate"
+              },
+              "Value #C": {
+                "aggregations": [
+                  "mean"
+                ],
+                "operation": "aggregate"
+              },
+              "Value #D": {
+                "aggregations": [
+                  "mean"
+                ],
+                "operation": "aggregate"
+              },
+              "client_type": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "gas_used": {
+                "aggregations": [
+                  "last"
+                ],
+                "operation": "aggregate"
+              },
+              "jrpc_id": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "jrpc_method": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "scenario": {
+                "aggregations": []
+              },
+              "testid": {
+                "aggregations": [],
+                "operation": "groupby"
+              }
+            }
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "alias": "gas_used_mgas",
+            "binary": {
+              "left": {
+                "matcher": {
+                  "id": "byName",
+                  "options": "gas_used (last)"
+                }
+              },
+              "operator": "/",
+              "right": {
+                "fixed": "1000000.0"
+              }
+            },
+            "mode": "binary",
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "alias": "client_ggas_s",
+            "binary": {
+              "left": {
+                "matcher": {
+                  "id": "byName",
+                  "options": "gas_used_mgas"
+                }
+              },
+              "operator": "/",
+              "right": {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Value (mean)"
+                }
+              }
+            },
+            "mode": "binary",
+            "reduce": {
+              "reducer": "sum"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "jrpc_id"
+              }
+            ]
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Value (mean)": true,
+              "gas_used (last)": true
+            },
+            "includeByName": {},
+            "indexByName": {},
+            "renameByName": {
+              "Value (mean)": "",
+              "client_ggas_s": "GGas/s",
+              "client_type": "Client Type",
+              "gas_used (last)": "",
+              "gas_used_mgas": "Gas Used",
+              "jrpc_id": "Payload",
+              "jrpc_method": "Method",
+              "testid": "TestID"
+            }
+          }
+        },
+        {
+          "id": "partitionByValues",
+          "options": {
+            "fields": [
+              "TestID"
+            ],
+            "keepFields": false,
+            "naming": {
+              "asLabels": false
+            }
+          }
+        }
+      ],
+      "type": "xychart"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Gas Usage calculation for full engine_newPayload request duration.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "fillOpacity": 50,
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "pointShape": "circle",
+            "pointSize": {
+              "fixed": 5
+            },
+            "pointStrokeWidth": 1,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "show": "points+lines"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "ms"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "gas_used_mgas"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "MGas"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    10,
+                    10
+                  ],
+                  "fill": "dash"
+                }
+              },
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": true,
+                  "tooltip": false,
+                  "viz": false
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "jrpc_id"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "client_ggas_s"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "GGas/s"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "left"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 70
+      },
+      "id": 28,
       "options": {
         "legend": {
           "calcs": [
@@ -1306,7 +1948,7 @@
           "refId": "A"
         }
       ],
-      "title": "Gas Usage per Payload (Improved)",
+      "title": "Gas Usage per Payload (Full)",
       "transformations": [
         {
           "id": "convertFieldType",
@@ -1521,6 +2163,30 @@
                 "value": "ms"
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Processing"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ms"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Gas Used"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "MGas"
+              }
+            ]
           }
         ]
       },
@@ -1528,7 +2194,7 @@
         "h": 14,
         "w": 24,
         "x": 0,
-        "y": 59
+        "y": 80
       },
       "id": 24,
       "options": {
@@ -1563,10 +2229,28 @@
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "k6_expb_slowest_processing{testid=~\"$testid\"}",
+          "format": "table",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "B"
         }
       ],
       "title": "Payloads Durations",
       "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
         {
           "id": "groupBy",
           "options": {
@@ -1574,6 +2258,18 @@
               "Value": {
                 "aggregations": [
                   "max"
+                ],
+                "operation": "aggregate"
+              },
+              "Value #A": {
+                "aggregations": [
+                  "mean"
+                ],
+                "operation": "aggregate"
+              },
+              "Value #B": {
+                "aggregations": [
+                  "mean"
                 ],
                 "operation": "aggregate"
               },
@@ -1638,17 +2334,22 @@
             },
             "includeByName": {},
             "indexByName": {
-              "Value (max)": 4,
+              "Value #A (mean)": 6,
+              "Value #B (mean)": 5,
               "client_type": 1,
+              "gas_used": 4,
+              "gas_used_mgas": 7,
               "jrpc_id": 2,
               "jrpc_method": 3,
               "testid": 0
             },
             "renameByName": {
+              "Value #A (mean)": "Duration",
+              "Value #B (mean)": "Processing",
               "Value (max)": "Duration",
               "client_type": "Client",
               "gas_used": "",
-              "gas_used_mgas": "Gas Used (MGas)",
+              "gas_used_mgas": "Gas Used",
               "jrpc_id": "Payload",
               "jrpc_method": "JRPC Method",
               "testid": "Test ID"
@@ -1808,7 +2509,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 73
+        "y": 94
       },
       "id": 18,
       "options": {
@@ -2006,7 +2707,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 82
+        "y": 103
       },
       "id": 25,
       "options": {
@@ -2225,7 +2926,7 @@
         "h": 12,
         "w": 24,
         "x": 0,
-        "y": 91
+        "y": 112
       },
       "id": 17,
       "options": {
@@ -2444,7 +3145,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 103
+        "y": 124
       },
       "id": 11,
       "panels": [],
@@ -2525,7 +3226,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 104
+        "y": 125
       },
       "id": 12,
       "options": {
@@ -2700,7 +3401,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 104
+        "y": 125
       },
       "id": 13,
       "options": {
@@ -2821,12 +3522,12 @@
     ]
   },
   "time": {
-    "from": "2025-12-15T16:49:47.384Z",
-    "to": "2025-12-15T21:25:56.793Z"
+    "from": "now-3h",
+    "to": "now"
   },
   "timepicker": {},
   "timezone": "",
   "title": "Execution Payloads Benchmarks Dashboard",
   "uid": "ccbb2351-2ae2-462f-ae0e-f2c893ad1028",
-  "version": 22
+  "version": 30
 }

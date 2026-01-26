@@ -28,6 +28,16 @@ from expb.payloads.executor.services.snapshots import setup_snapshot_service
 from expb.payloads.utils.networking import limit_container_bandwidth
 
 
+class ExecutorExecuteOptions:
+    def __init__(
+        self,
+        collect_per_payload_metrics: bool = False,
+        print_logs_to_console: bool = False,
+    ):
+        self.collect_per_payload_metrics: bool = collect_per_payload_metrics
+        self.print_logs_to_console: bool = print_logs_to_console
+
+
 class Executor:
     def __init__(
         self,
@@ -380,7 +390,10 @@ class Executor:
             self.log.error("Failed to delete snapshot", error=e)
             raise e
 
-    def cleanup_scenario(self) -> None:
+    def cleanup_scenario(
+        self,
+        print_logs_to_console: bool = False,
+    ) -> None:
         self.log.info("Cleaning up scenario", scenario=self.config.executor_name)
 
         # Stop all running extra commands first
@@ -403,6 +416,8 @@ class Executor:
             with open(logs_file, "wb") as f:
                 for line in logs_stream:
                     f.write(line)
+                    if print_logs_to_console:
+                        print(line.decode("utf-8"), end="")
             logs_stream.close()
             k6_container.remove()
         except docker.errors.NotFound:
@@ -430,6 +445,8 @@ class Executor:
             with open(logs_file, "wb") as f:
                 for line in logs_stream:
                     f.write(line)
+                    if print_logs_to_console:
+                        print(line.decode("utf-8"), end="")
             logs_stream.close()
             execution_client_container.remove()
             # Clean execution client volumes
@@ -468,7 +485,7 @@ class Executor:
     # Scenario Execution
     def execute_scenario(
         self,
-        collect_per_payload_metrics: bool = False,
+        options: ExecutorExecuteOptions = ExecutorExecuteOptions(),
     ) -> None:
         try:
             self.log.info(
@@ -587,7 +604,7 @@ class Executor:
             _ = self.run_k6(
                 execution_client_engine_url=execution_client_engine_url,
                 container_network=containers_network,
-                collect_per_payload_metrics=collect_per_payload_metrics,
+                collect_per_payload_metrics=options.collect_per_payload_metrics,
             )
 
             self.log.info(
@@ -598,7 +615,7 @@ class Executor:
             self.log.error("Failed to execute scenario", error=e)
             raise e
         finally:
-            self.cleanup_scenario()
+            self.cleanup_scenario(print_logs_to_console=options.print_logs_to_console)
 
     @classmethod
     def from_scenarios(

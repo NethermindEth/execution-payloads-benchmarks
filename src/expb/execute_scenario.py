@@ -6,7 +6,7 @@ from typing_extensions import Annotated
 
 from expb.configs.scenarios import Scenarios
 from expb.logging import setup_logging
-from expb.payloads import Executor
+from expb.payloads import Executor, ExecutorExecuteOptions
 
 app = typer.Typer()
 
@@ -24,6 +24,12 @@ def execute_scenario(
         bool,
         typer.Option(
             help="Collect per-payload metric. This generates a metric for each payload, which can overload the configured outputs.",
+        ),
+    ] = False,
+    print_logs: Annotated[
+        bool,
+        typer.Option(
+            help="Print K6 and Execution Client logs to console.",
         ),
     ] = False,
 ) -> None:
@@ -59,5 +65,8 @@ def execute_scenario(
             snapshot=scenario.snapshot_source,
         )
         executor.execute_scenario(
-            collect_per_payload_metrics=per_payload_metrics,
+            options=ExecutorExecuteOptions(
+                print_logs_to_console=print_logs,
+                collect_per_payload_metrics=per_payload_metrics,
+            ),
         )

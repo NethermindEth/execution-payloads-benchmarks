@@ -7,7 +7,7 @@ from typing_extensions import Annotated
 
 from expb.configs.scenarios import Scenarios
 from expb.logging import setup_logging
-from expb.payloads import Executor
+from expb.payloads import Executor, ExecutorExecuteOptions
 
 app = typer.Typer()
 
@@ -31,6 +31,12 @@ def execute_scenarios(
             help="Filter scenarios by name using a Python regex pattern. Only scenarios matching the pattern will be executed.",
         ),
     ] = None,
+    print_logs: Annotated[
+        bool,
+        typer.Option(
+            help="Print K6 and Execution Client logs to console.",
+        ),
+    ] = False,
 ) -> None:
     """
     Execute payloads for multiple execution clients using Grafana K6.
@@ -88,7 +94,10 @@ def execute_scenarios(
                     logger=logger,
                 )
                 executor.execute_scenario(
-                    collect_per_payload_metrics=per_payload_metrics,
+                    options=ExecutorExecuteOptions(
+                        print_logs_to_console=print_logs,
+                        collect_per_payload_metrics=per_payload_metrics,
+                    ),
                 )
         if not loop:
             break
