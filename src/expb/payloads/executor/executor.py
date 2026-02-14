@@ -386,6 +386,13 @@ class Executor:
             self.executor_pool = None
 
     # Scenario Cleanup
+    @staticmethod
+    def _should_skip_console_k6_log_line(line: str) -> bool:
+        return (
+            "POST engine_newPayload" in line
+            or "POST engine_forkchoiceUpdated" in line
+        )
+
     def remove_directories(self) -> None:
         try:
             self.config.snapshot_service.delete_snapshot(
@@ -423,7 +430,9 @@ class Executor:
                 for line in logs_stream:
                     f.write(line)
                     if print_logs_to_console:
-                        print(line.decode("utf-8"), end="")
+                        decoded_line = line.decode("utf-8", errors="replace")
+                        if not self._should_skip_console_k6_log_line(decoded_line):
+                            print(decoded_line, end="")
             logs_stream.close()
             k6_container.remove()
         except docker.errors.NotFound:
