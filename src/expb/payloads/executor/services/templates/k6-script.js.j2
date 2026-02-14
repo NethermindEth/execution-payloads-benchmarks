@@ -21,6 +21,7 @@ const perPayloadMetrics = (__ENV.EXPB_PER_PAYLOAD_METRICS || '0') === '1';
 const discardResponses = (__ENV.EXPB_DISCARD_RESPONSES || '1') === '1';
 const enableLogging = (__ENV.EXPB_ENABLE_LOGGING || '0') === '1';
 const perPayloadMetricsLogs = (__ENV.EXPB_PER_PAYLOAD_METRICS_LOGS || '0') === '1';
+const verbosePostLogs = (__ENV.EXPB_VERBOSE_POST_LOGS || '0') === '1';
 
 // Load k6 options JSON
 const config = JSON.parse(open(__ENV.EXPB_CONFIG_FILE_PATH));
@@ -138,7 +139,7 @@ function cid() {
 
 
 function logPost(kind, idx, warmup, correlationId = '') {
-  if (!enableLogging) return;
+  if (!enableLogging || !verbosePostLogs) return;
   const ts = new Date().toISOString();
   const warmupTag = warmup ? ' warmup=1' : '';
   const cidTag = correlationId ? ` cid=${correlationId}` : '';
@@ -154,22 +155,28 @@ function formatTableCell(value, width, alignRight = false) {
   return alignRight ? `${pad}${raw}` : `${raw}${pad}`;
 }
 
+function logPerPayloadMetricsHeader() {
+  if (!enableLogging || !perPayloadMetricsLogs || perPayloadMetricsTableHeaderPrinted) {
+    return;
+  }
+  const ts = new Date().toISOString();
+  const separator = '+---------+------------+-----------------+';
+  console.log(`[${ts}] ${separator}`);
+  console.log(
+    `[${ts}] | ${formatTableCell('payload', 7)} | ${formatTableCell('gas_used', 10)} | ${formatTableCell('processing_ms', 15)} |`
+  );
+  console.log(`[${ts}] ${separator}`);
+  perPayloadMetricsTableHeaderPrinted = true;
+}
+
 function logPerPayloadMetricsRow(idx, payload, processingMs) {
   if (!enableLogging || !perPayloadMetricsLogs) return;
 
-  const ts = new Date().toISOString();
-  const separator = '+---------+------------+-----------------+';
-  if (!perPayloadMetricsTableHeaderPrinted) {
-    console.log(`[${ts}] ${separator}`);
-    console.log(
-      `[${ts}] | ${formatTableCell('payload', 7)} | ${formatTableCell('gas_used', 10)} | ${formatTableCell('processing_ms', 15)} |`
-    );
-    console.log(`[${ts}] ${separator}`);
-    perPayloadMetricsTableHeaderPrinted = true;
-  }
+  logPerPayloadMetricsHeader();
 
   const gasUsed = payload.gasUsed !== undefined ? payload.gasUsed : 'n/a';
   const processing = Number.isFinite(processingMs) ? processingMs.toFixed(2) : 'n/a';
+  const ts = new Date().toISOString();
   console.log(
     `[${ts}] | ${formatTableCell(idx, 7, true)} | ${formatTableCell(gasUsed, 10, true)} | ${formatTableCell(processing, 15, true)} |`
   );
@@ -277,6 +284,16 @@ function processPayload(idx, base_tags = {}, warmup = false) {
 }
 
 export function setup() {
+  if (perPayloadMetricsLogs) {
+    logPerPayloadMetricsHeader();
+    if (enableLogging && totalPairs === 0) {
+      const ts = new Date().toISOString();
+      console.log(
+        `[${ts}] No benchmark payload rows to log (total_pairs=0 payloads=${payloadData.length} fcus=${fcuData.length} skip=${payloadsSkip} warmup=${payloadsWarmup})`
+      );
+    }
+  }
+
   // execute warmup payloads
   for (let idx = warmupIdx0; idx < startIdx0; idx++) {
     processPayload(idx, {}, true);

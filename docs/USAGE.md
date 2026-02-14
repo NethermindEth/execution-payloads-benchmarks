@@ -59,7 +59,7 @@ expb execute-scenario [OPTIONS]
 * `--config-file PATH`: Config file  [default: expb.yaml]
 * `--log-level TEXT`: Log level (e.g., DEBUG, INFO, WARNING)  [default: INFO]
 * `--per-payload-metrics / --no-per-payload-metrics`: Collect per-payload metric. This generates a metric for each payload, which can overload the configured outputs.  [default: no-per-payload-metrics]
-* `--per-payload-metrics-logs / --no-per-payload-metrics-logs`: Emit per-payload metric logs as a table (payload, gas used, processing time) alongside verbose K6 logs.  [default: no-per-payload-metrics-logs]
+* `--per-payload-metrics-logs / --no-per-payload-metrics-logs`: Emit per-payload metric logs as a table (payload, gas used, processing time) alongside verbose K6 logs. Also accepts `--per-payloads-metrics-logs`.  [default: no-per-payload-metrics-logs]
 * `--print-logs / --no-print-logs`: Print K6 and Execution Client logs to console.  [default: no-print-logs]
 * `--help`: Show this message and exit.
 
@@ -79,7 +79,7 @@ expb execute-scenarios [OPTIONS]
 * `--config-file PATH`: Config file  [default: expb.yaml]
 * `--log-level TEXT`: Log level (e.g., DEBUG, INFO, WARNING)  [default: INFO]
 * `--per-payload-metrics / --no-per-payload-metrics`: Collect per-payload metric. This generates a metric for each payload, which can overload the configured outputs.  [default: no-per-payload-metrics]
-* `--per-payload-metrics-logs / --no-per-payload-metrics-logs`: Emit per-payload metric logs as a table (payload, gas used, processing time) alongside verbose K6 logs.  [default: no-per-payload-metrics-logs]
+* `--per-payload-metrics-logs / --no-per-payload-metrics-logs`: Emit per-payload metric logs as a table (payload, gas used, processing time) alongside verbose K6 logs. Also accepts `--per-payloads-metrics-logs`.  [default: no-per-payload-metrics-logs]
 * `--filter TEXT`: Filter scenarios by name using a Python regex pattern. Only scenarios matching the pattern will be executed.
 * `--print-logs / --no-print-logs`: Print K6 and Execution Client logs to console.  [default: no-print-logs]
 * `--help`: Show this message and exit.

@@ -28,6 +28,8 @@ def execute_scenarios(
     per_payload_metrics_logs: Annotated[
         bool,
         typer.Option(
+            "--per-payload-metrics-logs/--no-per-payload-metrics-logs",
+            "--per-payloads-metrics-logs/--no-per-payloads-metrics-logs",
             help="Emit per-payload metric logs as a table (payload, gas used, processing time) alongside verbose K6 logs.",
         ),
     ] = False,
