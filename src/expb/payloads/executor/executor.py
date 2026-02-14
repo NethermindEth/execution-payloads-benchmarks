@@ -626,7 +626,11 @@ class Executor:
             self.log.error("Failed to execute scenario", error=e)
             raise e
         finally:
-            self.cleanup_scenario(print_logs_to_console=options.print_logs_to_console)
+            self.cleanup_scenario(
+                print_logs_to_console=(
+                    options.print_logs_to_console or options.per_payload_metrics_logs
+                )
+            )
 
     @classmethod
     def from_scenarios(
