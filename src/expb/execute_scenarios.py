@@ -25,6 +25,12 @@ def execute_scenarios(
             help="Collect per-payload metric. This generates a metric for each payload, which can overload the configured outputs.",
         ),
     ] = False,
+    per_payload_metrics_logs: Annotated[
+        bool,
+        typer.Option(
+            help="Emit per-payload metric logs as a table (payload, gas used, processing time) alongside verbose K6 logs.",
+        ),
+    ] = False,
     filter: Annotated[
         str | None,
         typer.Option(
@@ -97,6 +103,7 @@ def execute_scenarios(
                     options=ExecutorExecuteOptions(
                         print_logs_to_console=print_logs,
                         collect_per_payload_metrics=per_payload_metrics,
+                        per_payload_metrics_logs=per_payload_metrics_logs,
                     ),
                 )
         if not loop:

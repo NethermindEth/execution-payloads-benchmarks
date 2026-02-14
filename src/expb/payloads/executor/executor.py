@@ -33,9 +33,11 @@ class ExecutorExecuteOptions:
         self,
         collect_per_payload_metrics: bool = False,
         print_logs_to_console: bool = False,
+        per_payload_metrics_logs: bool = False,
     ):
         self.collect_per_payload_metrics: bool = collect_per_payload_metrics
         self.print_logs_to_console: bool = print_logs_to_console
+        self.per_payload_metrics_logs: bool = per_payload_metrics_logs
 
 
 class Executor:
@@ -266,6 +268,8 @@ class Executor:
         execution_client_engine_url: str,
         container_network: Network | None = None,
         collect_per_payload_metrics: bool = False,
+        enable_logging: bool = False,
+        per_payload_metrics_logs: bool = False,
     ) -> Container:
         # Prepare k6 container volumes
         k6_container_volumes = self.config.get_k6_volumes()
@@ -274,6 +278,8 @@ class Executor:
         k6_container_command = self.config.get_k6_command(
             execution_client_engine_url=execution_client_engine_url,
             collect_per_payload_metrics=collect_per_payload_metrics,
+            enable_logging=enable_logging,
+            per_payload_metrics_logs=per_payload_metrics_logs,
         )
 
         # Prepare k6 container environment variables
@@ -601,10 +607,15 @@ class Executor:
                 execution_client_container,
                 containers_network,
             )
+            enable_k6_logging = (
+                options.print_logs_to_console or options.per_payload_metrics_logs
+            )
             _ = self.run_k6(
                 execution_client_engine_url=execution_client_engine_url,
                 container_network=containers_network,
                 collect_per_payload_metrics=options.collect_per_payload_metrics,
+                enable_logging=enable_k6_logging,
+                per_payload_metrics_logs=options.per_payload_metrics_logs,
             )
 
             self.log.info(

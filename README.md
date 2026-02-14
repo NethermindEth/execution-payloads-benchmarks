@@ -39,6 +39,12 @@ expb execute-scenarios --config-file expb.yaml --loop
 expb execute-scenario --scenario-name example --config-file expb.yaml --per-payload-metrics
 ```
 
+#### Single Scenario with per-payload metric table logs
+
+```bash
+expb execute-scenario --scenario-name example --config-file expb.yaml --print-logs --per-payload-metrics-logs
+```
+
 For other use cases or more details see [CLI usage docs](docs/USAGE.md).
 
 ## Outputs

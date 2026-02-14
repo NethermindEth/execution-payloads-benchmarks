@@ -20,6 +20,7 @@ const engineEndpoint = __ENV.EXPB_ENGINE_ENDPOINT;
 const perPayloadMetrics = (__ENV.EXPB_PER_PAYLOAD_METRICS || '0') === '1';
 const discardResponses = (__ENV.EXPB_DISCARD_RESPONSES || '1') === '1';
 const enableLogging = (__ENV.EXPB_ENABLE_LOGGING || '0') === '1';
+const perPayloadMetricsLogs = (__ENV.EXPB_PER_PAYLOAD_METRICS_LOGS || '0') === '1';
 
 // Load k6 options JSON
 const config = JSON.parse(open(__ENV.EXPB_CONFIG_FILE_PATH));
@@ -144,6 +145,36 @@ function logPost(kind, idx, warmup, correlationId = '') {
   console.log(`[${ts}] POST ${kind} idx=${idx}${warmupTag}${cidTag}`);
 }
 
+let perPayloadMetricsTableHeaderPrinted = false;
+
+function formatTableCell(value, width, alignRight = false) {
+  const raw = value === undefined || value === null ? 'n/a' : String(value);
+  if (raw.length >= width) return raw.slice(0, width);
+  const pad = ' '.repeat(width - raw.length);
+  return alignRight ? `${pad}${raw}` : `${raw}${pad}`;
+}
+
+function logPerPayloadMetricsRow(idx, payload, processingMs) {
+  if (!enableLogging || !perPayloadMetricsLogs) return;
+
+  const ts = new Date().toISOString();
+  const separator = '+---------+------------+-----------------+';
+  if (!perPayloadMetricsTableHeaderPrinted) {
+    console.log(`[${ts}] ${separator}`);
+    console.log(
+      `[${ts}] | ${formatTableCell('payload', 7)} | ${formatTableCell('gas_used', 10)} | ${formatTableCell('processing_ms', 15)} |`
+    );
+    console.log(`[${ts}] ${separator}`);
+    perPayloadMetricsTableHeaderPrinted = true;
+  }
+
+  const gasUsed = payload.gasUsed !== undefined ? payload.gasUsed : 'n/a';
+  const processing = Number.isFinite(processingMs) ? processingMs.toFixed(2) : 'n/a';
+  console.log(
+    `[${ts}] | ${formatTableCell(idx, 7, true)} | ${formatTableCell(gasUsed, 10, true)} | ${formatTableCell(processing, 15, true)} |`
+  );
+}
+
 function processPayload(idx, base_tags = {}, warmup = false) {
   // Out of data? graceful (default) or abort if explicitly requested
   if (idx >= startIdx0 + totalPairs) {
@@ -189,6 +220,10 @@ function processPayload(idx, base_tags = {}, warmup = false) {
       responseType: discardResponses ? 'none' : 'text',
     });
     check(r, { 'status_200': (x) => x.status === 200 }, tags);
+
+    if (!warmup) {
+      logPerPayloadMetricsRow(idx, payload, r.timings.waiting);
+    }
 
     if (!warmup && perPayloadMetrics) {
       const perPayloadMetricsTags = { ...tags };

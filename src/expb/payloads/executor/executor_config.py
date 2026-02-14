@@ -357,6 +357,8 @@ class ExecutorConfig:
         self,
         execution_client_engine_url: str,
         collect_per_payload_metrics: bool,
+        enable_logging: bool,
+        per_payload_metrics_logs: bool,
     ) -> list[str]:
         command = [
             "run",
@@ -374,6 +376,8 @@ class ExecutorConfig:
             f"--env=EXPB_PAYLOADS_WARMUP={self.k6_payloads_warmup}",
             f"--env=EXPB_ENGINE_ENDPOINT={execution_client_engine_url}",
             f"--env=EXPB_PER_PAYLOAD_METRICS={int(collect_per_payload_metrics)}",
+            f"--env=EXPB_ENABLE_LOGGING={int(enable_logging)}",
+            f"--env=EXPB_PER_PAYLOAD_METRICS_LOGS={int(per_payload_metrics_logs)}",
             f"--env=EXPB_WARMUP_WAIT={self.k6_warmup_wait}",
         ]
         if self.exports is not None and self.exports.prometheus_rw is not None:
