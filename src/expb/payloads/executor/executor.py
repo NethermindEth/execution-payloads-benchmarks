@@ -29,7 +29,7 @@ from expb.payloads.executor.services.snapshots import setup_snapshot_service
 from expb.payloads.utils.networking import limit_container_bandwidth
 
 PER_PAYLOAD_METRIC_LOG_PATTERN = re.compile(
-    r"EXPB_PER_PAYLOAD_METRIC idx=(?P<idx>\d+) gas_used=(?P<gas_used>\S+) processing_ms=(?P<processing_ms>\S+)"
+    r'EXPB_PER_PAYLOAD_METRIC idx=(?P<idx>\d+) gas_used=(?P<gas_used>[^"\s]+) processing_ms=(?P<processing_ms>[^"\s]+)'
 )
 
 
@@ -439,6 +439,7 @@ class Executor:
                 f"{self._format_table_cell(gas_used, 10, True)} | "
                 f"{self._format_table_cell(processing_ms, 15, True)} |"
             )
+        print(separator)
 
     def remove_directories(self) -> None:
         try:
