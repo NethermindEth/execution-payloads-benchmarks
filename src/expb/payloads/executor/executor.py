@@ -1,4 +1,5 @@
 import json
+import re
 import secrets
 import subprocess
 import time
@@ -26,6 +27,10 @@ from expb.payloads.executor.services.k6 import (
 )
 from expb.payloads.executor.services.snapshots import setup_snapshot_service
 from expb.payloads.utils.networking import limit_container_bandwidth
+
+PER_PAYLOAD_METRIC_LOG_PATTERN = re.compile(
+    r"EXPB_PER_PAYLOAD_METRIC idx=(?P<idx>\d+) gas_used=(?P<gas_used>\S+) processing_ms=(?P<processing_ms>\S+)"
+)
 
 
 class ExecutorExecuteOptions:
@@ -391,7 +396,49 @@ class Executor:
         return (
             "POST engine_newPayload" in line
             or "POST engine_forkchoiceUpdated" in line
+            or "EXPB_PER_PAYLOAD_METRIC" in line
         )
+
+    @staticmethod
+    def _parse_per_payload_metric_row(line: str) -> tuple[int, str, str] | None:
+        match = PER_PAYLOAD_METRIC_LOG_PATTERN.search(line)
+        if match is None:
+            return None
+        idx = int(match.group("idx"))
+        gas_used = match.group("gas_used")
+        processing_ms = match.group("processing_ms")
+        return (idx, gas_used, processing_ms)
+
+    @staticmethod
+    def _format_table_cell(value: str | int, width: int, align_right: bool = False) -> str:
+        raw = str(value)
+        if len(raw) >= width:
+            return raw[:width]
+        pad = " " * (width - len(raw))
+        return f"{pad}{raw}" if align_right else f"{raw}{pad}"
+
+    def _print_per_payload_metrics_table(self, rows: list[tuple[int, str, str]]) -> None:
+        if not rows:
+            print("No per-payload metrics rows were collected.")
+            return
+
+        rows_sorted = sorted(rows, key=lambda row: row[0])
+        separator = "+---------+------------+-----------------+"
+        print(separator)
+        print(
+            "| "
+            f"{self._format_table_cell('payload', 7)} | "
+            f"{self._format_table_cell('gas_used', 10)} | "
+            f"{self._format_table_cell('processing_ms', 15)} |"
+        )
+        print(separator)
+        for idx, gas_used, processing_ms in rows_sorted:
+            print(
+                "| "
+                f"{self._format_table_cell(idx, 7, True)} | "
+                f"{self._format_table_cell(gas_used, 10, True)} | "
+                f"{self._format_table_cell(processing_ms, 15, True)} |"
+            )
 
     def remove_directories(self) -> None:
         try:
@@ -406,11 +453,14 @@ class Executor:
     def cleanup_scenario(
         self,
         print_logs_to_console: bool = False,
+        print_per_payload_metrics_table: bool = False,
     ) -> None:
         self.log.info("Cleaning up scenario", scenario=self.config.executor_name)
 
         # Stop all running extra commands first
         self.stop_extra_commands()
+
+        per_payload_metrics_rows: list[tuple[int, str, str]] = []
 
         # Clean k6 container
         try:
@@ -429,8 +479,11 @@ class Executor:
             with open(logs_file, "wb") as f:
                 for line in logs_stream:
                     f.write(line)
+                    decoded_line = line.decode("utf-8", errors="replace")
+                    metric_row = self._parse_per_payload_metric_row(decoded_line)
+                    if metric_row is not None:
+                        per_payload_metrics_rows.append(metric_row)
                     if print_logs_to_console:
-                        decoded_line = line.decode("utf-8", errors="replace")
                         if not self._should_skip_console_k6_log_line(decoded_line):
                             print(decoded_line, end="")
             logs_stream.close()
@@ -473,6 +526,9 @@ class Executor:
                     )
         except docker.errors.NotFound:
             pass
+
+        if print_logs_to_console and print_per_payload_metrics_table:
+            self._print_per_payload_metrics_table(per_payload_metrics_rows)
 
         # Clean alloy container
         try:
@@ -638,7 +694,8 @@ class Executor:
             self.cleanup_scenario(
                 print_logs_to_console=(
                     options.print_logs_to_console or options.per_payload_metrics_logs
-                )
+                ),
+                print_per_payload_metrics_table=options.per_payload_metrics_logs,
             )
 
     @classmethod

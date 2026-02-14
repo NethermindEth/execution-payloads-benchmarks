@@ -146,39 +146,12 @@ function logPost(kind, idx, warmup, correlationId = '') {
   console.log(`[${ts}] POST ${kind} idx=${idx}${warmupTag}${cidTag}`);
 }
 
-let perPayloadMetricsTableHeaderPrinted = false;
-
-function formatTableCell(value, width, alignRight = false) {
-  const raw = value === undefined || value === null ? 'n/a' : String(value);
-  if (raw.length >= width) return raw.slice(0, width);
-  const pad = ' '.repeat(width - raw.length);
-  return alignRight ? `${pad}${raw}` : `${raw}${pad}`;
-}
-
-function logPerPayloadMetricsHeader() {
-  if (!enableLogging || !perPayloadMetricsLogs || perPayloadMetricsTableHeaderPrinted) {
-    return;
-  }
-  const ts = new Date().toISOString();
-  const separator = '+---------+------------+-----------------+';
-  console.log(`[${ts}] ${separator}`);
-  console.log(
-    `[${ts}] | ${formatTableCell('payload', 7)} | ${formatTableCell('gas_used', 10)} | ${formatTableCell('processing_ms', 15)} |`
-  );
-  console.log(`[${ts}] ${separator}`);
-  perPayloadMetricsTableHeaderPrinted = true;
-}
-
-function logPerPayloadMetricsRow(idx, payload, processingMs) {
+function emitPerPayloadMetricsRow(idx, payload, processingMs) {
   if (!enableLogging || !perPayloadMetricsLogs) return;
-
-  logPerPayloadMetricsHeader();
-
   const gasUsed = payload.gasUsed !== undefined ? payload.gasUsed : 'n/a';
   const processing = Number.isFinite(processingMs) ? processingMs.toFixed(2) : 'n/a';
-  const ts = new Date().toISOString();
   console.log(
-    `[${ts}] | ${formatTableCell(idx, 7, true)} | ${formatTableCell(gasUsed, 10, true)} | ${formatTableCell(processing, 15, true)} |`
+    `EXPB_PER_PAYLOAD_METRIC idx=${idx} gas_used=${gasUsed} processing_ms=${processing}`
   );
 }
 
@@ -229,7 +202,7 @@ function processPayload(idx, base_tags = {}, warmup = false) {
     check(r, { 'status_200': (x) => x.status === 200 }, tags);
 
     if (!warmup) {
-      logPerPayloadMetricsRow(idx, payload, r.timings.waiting);
+      emitPerPayloadMetricsRow(idx, payload, r.timings.waiting);
     }
 
     if (!warmup && perPayloadMetrics) {
@@ -284,16 +257,6 @@ function processPayload(idx, base_tags = {}, warmup = false) {
 }
 
 export function setup() {
-  if (perPayloadMetricsLogs) {
-    logPerPayloadMetricsHeader();
-    if (enableLogging && totalPairs === 0) {
-      const ts = new Date().toISOString();
-      console.log(
-        `[${ts}] No benchmark payload rows to log (total_pairs=0 payloads=${payloadData.length} fcus=${fcuData.length} skip=${payloadsSkip} warmup=${payloadsWarmup})`
-      );
-    }
-  }
-
   // execute warmup payloads
   for (let idx = warmupIdx0; idx < startIdx0; idx++) {
     processPayload(idx, {}, true);
