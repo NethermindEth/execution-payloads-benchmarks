@@ -1,4 +1,5 @@
 import json
+import re
 import secrets
 import subprocess
 import time
@@ -13,6 +14,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from expb.configs.exports import Pyroscope
+from expb.configs.scenarios import Scenarios
 from expb.logging import Logger
 from expb.payloads.executor.executor_config import ExecutorConfig
 from expb.payloads.executor.exports_utils import add_pyroscope_config
@@ -23,7 +25,24 @@ from expb.payloads.executor.services.k6 import (
     build_k6_script_config,
     get_k6_script_content,
 )
+from expb.payloads.executor.services.snapshots import setup_snapshot_service
 from expb.payloads.utils.networking import limit_container_bandwidth
+
+PER_PAYLOAD_METRIC_LOG_PATTERN = re.compile(
+    r'EXPB_PER_PAYLOAD_METRIC idx=(?P<idx>\d+) gas_used=(?P<gas_used>[^"\s]+) processing_ms=(?P<processing_ms>[^"\s]+)'
+)
+
+
+class ExecutorExecuteOptions:
+    def __init__(
+        self,
+        collect_per_payload_metrics: bool = False,
+        print_logs_to_console: bool = False,
+        per_payload_metrics_logs: bool = False,
+    ):
+        self.collect_per_payload_metrics: bool = collect_per_payload_metrics
+        self.print_logs_to_console: bool = print_logs_to_console
+        self.per_payload_metrics_logs: bool = per_payload_metrics_logs
 
 
 class Executor:
@@ -32,8 +51,8 @@ class Executor:
         config: ExecutorConfig,
         logger=Logger(),
     ):
-        self.config = config
-        self.log = logger
+        self.config: ExecutorConfig = config
+        self.log: Logger = logger
         self.running_command_futures: list[Future] = []
         self.executor_pool: ThreadPoolExecutor | None = None
 
@@ -110,6 +129,8 @@ class Executor:
             )
 
         # Run execution container
+        cpu_count = self.config.resources.cpu if self.config.resources else None
+        mem_limit = self.config.resources.mem if self.config.resources else None
         container = self.config.docker_client.containers.run(
             image=self.config.execution_client_image,
             name=self.config.get_execution_client_container_name(),
@@ -120,9 +141,9 @@ class Executor:
             network=container_network.name if container_network else None,
             detach=True,
             restart_policy={"Name": "unless-stopped"},
-            cpu_count=self.config.docker_container_cpus,  # Only works for windows
-            nano_cpus=self.config.docker_container_cpus * 10**9,
-            mem_limit=self.config.docker_container_mem_limit,
+            cpu_count=cpu_count,  # Only works for windows
+            nano_cpus=cpu_count * 10**9 if cpu_count else None,
+            mem_limit=mem_limit,
             user=self.config.docker_user,
             group_add=self.config.docker_group_add,
             stop_signal=stop_signal,
@@ -171,21 +192,38 @@ class Executor:
         self,
         execution_client_metrics_address: str,
     ) -> None:
-        if self.config.exports is None:
-            return
         # Create alloy config file
         self.config.alloy_config_file.touch(mode=0o666, exist_ok=True)
         # Write alloy config content
+        prometheus_rw = (
+            self.config.exports.prometheus_rw
+            if self.config.exports is not None
+            else None
+        )
+        scrape_interval = (
+            self.config.exports.prometheus_rw.scrape_interval
+            if self.config.exports is not None
+            and self.config.exports.prometheus_rw is not None
+            else None
+        )
+        scrape_timeout = (
+            self.config.exports.prometheus_rw.scrape_timeout
+            if self.config.exports is not None
+            and self.config.exports.prometheus_rw is not None
+            else None
+        )
+        pyroscope = (
+            self.config.exports.pyroscope if self.config.exports is not None else None
+        )
         self.config.alloy_config_file.write_text(
             get_alloy_config(
                 test_id=self.config.test_id,
                 execution_client=self.config.execution_client,
                 execution_client_address=execution_client_metrics_address,
-                # TODO: Make scrape parameters configurable
-                execution_client_scrape_interval="4s",
-                execution_client_scrape_timeout="3s",  # Has to be lower than the scrape interval
-                prometheus_rw=self.config.exports.prometheus_remote_write,
-                pyroscope=self.config.exports.pyroscope,
+                scrape_interval=scrape_interval,
+                scrape_timeout=scrape_timeout,
+                prometheus_rw=prometheus_rw,
+                pyroscope=pyroscope,
             )
         )
         self.log.info(
@@ -235,6 +273,8 @@ class Executor:
         execution_client_engine_url: str,
         container_network: Network | None = None,
         collect_per_payload_metrics: bool = False,
+        enable_logging: bool = False,
+        per_payload_metrics_logs: bool = False,
     ) -> Container:
         # Prepare k6 container volumes
         k6_container_volumes = self.config.get_k6_volumes()
@@ -243,6 +283,8 @@ class Executor:
         k6_container_command = self.config.get_k6_command(
             execution_client_engine_url=execution_client_engine_url,
             collect_per_payload_metrics=collect_per_payload_metrics,
+            enable_logging=enable_logging,
+            per_payload_metrics_logs=per_payload_metrics_logs,
         )
 
         # Prepare k6 container environment variables
@@ -260,6 +302,7 @@ class Executor:
             restart_policy={"Name": "unless-stopped"},
             user=self.config.docker_user,
             group_add=self.config.docker_group_add,
+            stop_signal="SIGINT",
         )
         return container
 
@@ -348,6 +391,56 @@ class Executor:
             self.executor_pool = None
 
     # Scenario Cleanup
+    @staticmethod
+    def _should_skip_console_k6_log_line(line: str) -> bool:
+        return (
+            "POST engine_newPayload" in line
+            or "POST engine_forkchoiceUpdated" in line
+            or "EXPB_PER_PAYLOAD_METRIC" in line
+        )
+
+    @staticmethod
+    def _parse_per_payload_metric_row(line: str) -> tuple[int, str, str] | None:
+        match = PER_PAYLOAD_METRIC_LOG_PATTERN.search(line)
+        if match is None:
+            return None
+        idx = int(match.group("idx"))
+        gas_used = match.group("gas_used")
+        processing_ms = match.group("processing_ms")
+        return (idx, gas_used, processing_ms)
+
+    @staticmethod
+    def _format_table_cell(value: str | int, width: int, align_right: bool = False) -> str:
+        raw = str(value)
+        if len(raw) >= width:
+            return raw[:width]
+        pad = " " * (width - len(raw))
+        return f"{pad}{raw}" if align_right else f"{raw}{pad}"
+
+    def _print_per_payload_metrics_table(self, rows: list[tuple[int, str, str]]) -> None:
+        if not rows:
+            print("No per-payload metrics rows were collected.")
+            return
+
+        rows_sorted = sorted(rows, key=lambda row: row[0])
+        separator = "+---------+------------+-----------------+"
+        print(separator)
+        print(
+            "| "
+            f"{self._format_table_cell('payload', 7)} | "
+            f"{self._format_table_cell('gas_used', 10)} | "
+            f"{self._format_table_cell('processing_ms', 15)} |"
+        )
+        print(separator)
+        for idx, gas_used, processing_ms in rows_sorted:
+            print(
+                "| "
+                f"{self._format_table_cell(idx, 7, True)} | "
+                f"{self._format_table_cell(gas_used, 10, True)} | "
+                f"{self._format_table_cell(processing_ms, 15, True)} |"
+            )
+        print(separator)
+
     def remove_directories(self) -> None:
         try:
             self.config.snapshot_service.delete_snapshot(
@@ -358,11 +451,17 @@ class Executor:
             self.log.error("Failed to delete snapshot", error=e)
             raise e
 
-    def cleanup_scenario(self) -> None:
+    def cleanup_scenario(
+        self,
+        print_logs_to_console: bool = False,
+        print_per_payload_metrics_table: bool = False,
+    ) -> None:
         self.log.info("Cleaning up scenario", scenario=self.config.executor_name)
 
         # Stop all running extra commands first
         self.stop_extra_commands()
+
+        per_payload_metrics_rows: list[tuple[int, str, str]] = []
 
         # Clean k6 container
         try:
@@ -381,6 +480,13 @@ class Executor:
             with open(logs_file, "wb") as f:
                 for line in logs_stream:
                     f.write(line)
+                    decoded_line = line.decode("utf-8", errors="replace")
+                    metric_row = self._parse_per_payload_metric_row(decoded_line)
+                    if metric_row is not None:
+                        per_payload_metrics_rows.append(metric_row)
+                    if print_logs_to_console:
+                        if not self._should_skip_console_k6_log_line(decoded_line):
+                            print(decoded_line, end="")
             logs_stream.close()
             k6_container.remove()
         except docker.errors.NotFound:
@@ -408,6 +514,8 @@ class Executor:
             with open(logs_file, "wb") as f:
                 for line in logs_stream:
                     f.write(line)
+                    if print_logs_to_console:
+                        print(line.decode("utf-8"), end="")
             logs_stream.close()
             execution_client_container.remove()
             # Clean execution client volumes
@@ -419,6 +527,9 @@ class Executor:
                     )
         except docker.errors.NotFound:
             pass
+
+        if print_logs_to_console and print_per_payload_metrics_table:
+            self._print_per_payload_metrics_table(per_payload_metrics_rows)
 
         # Clean alloy container
         try:
@@ -446,7 +557,7 @@ class Executor:
     # Scenario Execution
     def execute_scenario(
         self,
-        collect_per_payload_metrics: bool = False,
+        options: ExecutorExecuteOptions = ExecutorExecuteOptions(),
     ) -> None:
         try:
             self.log.info(
@@ -466,38 +577,42 @@ class Executor:
                 driver="bridge",
             )
 
-            self.log.info("Preparing Alloy config")
-            self.prepare_alloy_config(
-                self.config.get_execution_metrics_address(),
-            )
+            alloy_pyroscope: Pyroscope | None = None
+            if self.config.exports is not None:
+                self.log.info("Preparing Alloy config")
+                self.prepare_alloy_config(
+                    self.config.get_execution_metrics_address(),
+                )
 
-            self.log.info(
-                "Starting Grafana Alloy",
-                image=self.config.get_alloy_container_image(),
-            )
-            alloy_container = self.start_alloy(
-                container_network=containers_network,
-            )
-            alloy_pyroscope: Pyroscope | None = (
-                Pyroscope(
-                    {
-                        "endpoint": self.config.get_alloy_pyroscope_url(
+                self.log.info(
+                    "Starting Grafana Alloy",
+                    image=self.config.get_alloy_container_image(),
+                )
+                alloy_container = self.start_alloy(
+                    container_network=containers_network,
+                )
+                alloy_pyroscope: Pyroscope | None = (
+                    Pyroscope(
+                        endpoint=self.config.get_alloy_pyroscope_url(
                             container=alloy_container,
                             network=containers_network,
                         ),
-                    }
+                    )
+                    if self.config.exports is not None
+                    and self.config.exports.pyroscope is not None
+                    else None
                 )
-                if self.config.exports is not None
-                and self.config.exports.pyroscope is not None
-                else None
-            )
 
             self.log.info(
                 "Starting execution client",
                 execution_client=self.config.get_execution_client_name(),
                 execution_client_image=self.config.execution_client_image,
-                docker_container_cpus=self.config.docker_container_cpus,
-                docker_container_mem_limit=self.config.docker_container_mem_limit,
+                docker_container_cpus=self.config.resources.cpu
+                if self.config.resources
+                else None,
+                docker_container_mem_limit=self.config.resources.mem
+                if self.config.resources
+                else None,
             )
             stop_signal = (
                 # If there are extra commands to execute, use SIGINT to stop the execution client
@@ -510,18 +625,22 @@ class Executor:
                 stop_signal=stop_signal,
             )
 
-            if self.config.limit_bandwidth:
+            if self.config.resources and self.config.limit_bandwidth:
                 self.log.info(
                     "Limiting container bandwidth",
                     execution_client=self.config.get_execution_client_name(),
-                    download_speed=self.config.docker_container_download_speed,
-                    upload_speed=self.config.docker_container_upload_speed,
+                    download_speed=self.config.resources.download_speed
+                    if self.config.resources
+                    else None,
+                    upload_speed=self.config.resources.upload_speed
+                    if self.config.resources
+                    else None,
                 )
                 try:
                     limit_container_bandwidth(
                         execution_client_container,
-                        self.config.docker_container_download_speed,
-                        self.config.docker_container_upload_speed,
+                        self.config.resources.download_speed,
+                        self.config.resources.upload_speed,
                     )
                 except Exception as e:
                     self.log.error("Failed to limit container bandwidth", error=e)
@@ -554,10 +673,15 @@ class Executor:
                 execution_client_container,
                 containers_network,
             )
+            enable_k6_logging = (
+                options.print_logs_to_console or options.per_payload_metrics_logs
+            )
             _ = self.run_k6(
                 execution_client_engine_url=execution_client_engine_url,
                 container_network=containers_network,
-                collect_per_payload_metrics=collect_per_payload_metrics,
+                collect_per_payload_metrics=options.collect_per_payload_metrics,
+                enable_logging=enable_k6_logging,
+                per_payload_metrics_logs=options.per_payload_metrics_logs,
             )
 
             self.log.info(
@@ -568,4 +692,39 @@ class Executor:
             self.log.error("Failed to execute scenario", error=e)
             raise e
         finally:
-            self.cleanup_scenario()
+            self.cleanup_scenario(
+                print_logs_to_console=(
+                    options.print_logs_to_console or options.per_payload_metrics_logs
+                ),
+                print_per_payload_metrics_table=options.per_payload_metrics_logs,
+            )
+
+    @classmethod
+    def from_scenarios(
+        self,
+        scenarios: Scenarios,
+        scenario_name: str,
+        logger: Logger = Logger(),
+    ) -> "Executor":
+        scenario = scenarios.scenarios_configs.get(scenario_name, None)
+        if scenario is None:
+            raise ValueError(f"Scenario {scenario_name} not found")
+        if scenario.name is None:
+            scenario.name = scenario_name
+        snapshot_service = setup_snapshot_service(
+            scenarios,
+            scenario,
+        )
+        executor = Executor(
+            config=ExecutorConfig(
+                scenario=scenario,
+                snapshot_service=snapshot_service,
+                paths=scenarios.paths,
+                resources=scenarios.resources,
+                pull_images=scenarios.pull_images,
+                docker_images=scenarios.docker_images,
+                exports=scenarios.exports,
+            ),
+            logger=logger,
+        )
+        return executor

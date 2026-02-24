@@ -1,10 +1,14 @@
+import re
 from pathlib import Path
 
 import typer
+import yaml
 from typing_extensions import Annotated
 
 from expb.configs.scenarios import Scenarios
 from expb.logging import setup_logging
+from expb.payloads import Executor, ExecutorExecuteOptions
+from expb.utils import ExecutionLockError, acquire_execution_lock, get_default_lock_file
 
 app = typer.Typer()
 
@@ -22,28 +26,115 @@ def execute_scenarios(
             help="Collect per-payload metric. This generates a metric for each payload, which can overload the configured outputs.",
         ),
     ] = False,
+    per_payload_metrics_logs: Annotated[
+        bool,
+        typer.Option(
+            "--per-payload-metrics-logs/--no-per-payload-metrics-logs",
+            "--per-payloads-metrics-logs/--no-per-payloads-metrics-logs",
+            help="Collect per-payload metric rows and print a table after execution completes (after execution client logs).",
+        ),
+    ] = False,
+    filter: Annotated[
+        str | None,
+        typer.Option(
+            help="Filter scenarios by name using a Python regex pattern. Only scenarios matching the pattern will be executed.",
+        ),
+    ] = None,
+    print_logs: Annotated[
+        bool,
+        typer.Option(
+            help="Print K6 and Execution Client logs to console.",
+        ),
+    ] = False,
+    use_lock: Annotated[
+        bool,
+        typer.Option(
+            help="Use execution lock to prevent concurrent runs. Enabled by default to avoid resource conflicts.",
+        ),
+    ] = True,
+    lock_file: Annotated[
+        Path | None,
+        typer.Option(
+            help="Path to lock file. Defaults to platform-specific temp directory.",
+        ),
+    ] = None,
 ) -> None:
     """
     Execute payloads for multiple execution clients using Grafana K6.
     """
     logger = setup_logging(log_level)
 
-    if not config_file.exists() or not config_file.is_file():
-        raise FileNotFoundError(f"Config file {config_file} not found or not a file")
+    # Use default lock file if not specified
+    lock_file_path = lock_file or get_default_lock_file()
 
-    config = Scenarios(config_file)
+    try:
+        with acquire_execution_lock(
+            lock_file=lock_file_path,
+            enabled=use_lock,
+            timeout=0,
+            logger=logger,
+        ):
+            if not config_file.exists() or not config_file.is_file():
+                raise FileNotFoundError(
+                    f"Config file {config_file} not found or not a file"
+                )
 
-    while True:
-        for scenario in config.scenarios.values():
-            logger.info(
-                "Executing scenario",
-                client=scenario.client,
-                image=scenario.client_image,
-                snapshot=scenario.snapshot_source,
-            )
-            executor = config.get_scenario_executor(scenario, logger=logger)
-            executor.execute_scenario(
-                collect_per_payload_metrics=per_payload_metrics,
-            )
-        if not loop:
-            break
+            with config_file.open() as f:
+                config = yaml.safe_load(f)
+
+            scenarios = Scenarios(**config)
+
+            # Filter scenarios by regex pattern if provided
+            filtered_scenarios = scenarios.scenarios_configs
+            if filter is not None:
+                try:
+                    pattern = re.compile(filter)
+                    filtered_scenarios = {
+                        name: scenario
+                        for name, scenario in scenarios.scenarios_configs.items()
+                        if pattern.search(name) is not None
+                    }
+                    if not filtered_scenarios:
+                        logger.warning(
+                            "No scenarios matched the filter pattern",
+                            filter=filter,
+                        )
+                        return
+                    logger.info(
+                        f"Filtered scenarios: {len(filtered_scenarios)} out of {len(scenarios.scenarios_configs)}",
+                        filter=filter,
+                    )
+                except re.error as e:
+                    raise ValueError(f"Invalid regex pattern: {filter}. Error: {e}")
+
+            while True:
+                for scenario in filtered_scenarios.values():
+                    for iteration in range(scenario.repeat):
+                        logger.info(
+                            "Executing scenario",
+                            iteration=iteration + 1,
+                            client=scenario.client,
+                            image=scenario.client_image,
+                            snapshot=scenario.snapshot_source,
+                        )
+                        if scenario.name is None:
+                            raise ValueError(
+                                "Invalid scenario configuration: scenario has no name"
+                            )
+                        executor = Executor.from_scenarios(
+                            scenarios,
+                            scenario.name,
+                            logger=logger,
+                        )
+                        executor.execute_scenario(
+                            options=ExecutorExecuteOptions(
+                                print_logs_to_console=print_logs,
+                                collect_per_payload_metrics=per_payload_metrics,
+                                per_payload_metrics_logs=per_payload_metrics_logs,
+                            ),
+                        )
+                if not loop:
+                    break
+    except ExecutionLockError as e:
+        logger.error("Failed to acquire execution lock", error=str(e))
+        raise typer.Exit(code=1) from e

@@ -3,6 +3,7 @@ from expb.clients.client_config import (
     CLIENT_METRICS_PORT,
     CLIENT_P2P_PORT,
     CLIENT_RPC_PORT,
+    CLIENT_RPC_WS_PORT,
     CLIENTS_DATA_DIR,
     CLIENTS_JWT_SECRET_FILE,
     ClientConfig,
@@ -32,7 +33,7 @@ class GethConfig(ClientConfig):
                 "--metrics.addr=0.0.0.0",
                 "--ws",
                 "--ws.addr=0.0.0.0",
-                f"--ws.port={CLIENT_RPC_PORT}",
+                f"--ws.port={CLIENT_RPC_WS_PORT}",
                 "--ws.api=eth,web3,net,debug,admin",
                 # Disable peering
                 "--nodiscover",

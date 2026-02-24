@@ -18,7 +18,6 @@ class RethConfig(ClientConfig):
             default_command=[
                 "node",
                 f"--datadir={CLIENTS_DATA_DIR}",
-                f"--log.file.directory={CLIENTS_DATA_DIR}/logs",
                 f"--port={CLIENT_P2P_PORT}",
                 "--http",
                 "--http.addr=0.0.0.0",
@@ -47,7 +46,6 @@ class RethConfig(ClientConfig):
             command.extend(
                 [
                     "--chain=mainnet",
-                    "--full",
                 ]
             )
         return self.default_command + command + extra_flags

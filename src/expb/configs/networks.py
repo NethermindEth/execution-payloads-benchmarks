@@ -35,6 +35,20 @@ class Fork(Enum):
     PRAGUE = ForkConfig("prague", 3)
     OSAKA = ForkConfig("osaka", 4)
 
+    @classmethod
+    def from_name(cls, name: str) -> "Fork":
+        name_lower = name.lower()
+        for fork in cls:
+            fork_name_lower = fork.value.name.lower()
+            if fork_name_lower == name_lower:
+                return fork
+
+        raise ValueError(f"Invalid fork name: {name}.")
+
+    @classmethod
+    def all_fork_names(cls) -> list[str]:
+        return [fork.value.name for fork in cls]
+
 
 class NetworkConfig:
     def __init__(
@@ -73,3 +87,17 @@ class Network(Enum):
             Fork.OSAKA: 1764798551,
         },
     )
+
+    @classmethod
+    def from_name(cls, name: str) -> "Network":
+        name_lower = name.lower()
+        for network in cls:
+            network_name_lower = network.value.name.lower()
+            if network_name_lower == name_lower:
+                return network
+
+        raise ValueError(f"Invalid network name: {name}.")
+
+    @classmethod
+    def all_network_names(cls) -> list[str]:
+        return [network.value.name for network in cls]
