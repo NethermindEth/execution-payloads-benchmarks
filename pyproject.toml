@@ -9,13 +9,16 @@ authors = [
 requires-python = ">=3.13"
 dependencies = [
     "docker>=7.1.0",
+    "fastapi>=0.133.0",
     "filelock>=3.24.3",
     "jinja2>=3.1.6",
     "pydantic>=2.11.7",
     "pyyaml>=6.0.2",
     "rich>=14.0.0",
+    "sqlalchemy>=2.0.46",
     "structlog>=25.4.0",
     "typer>=0.16.0",
+    "uvicorn[standard]>=0.41.0",
     "web3>=7.12.0",
 ]
 
