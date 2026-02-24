@@ -76,6 +76,25 @@ function emitPerPayloadMetricsRow(idx, gasUsed, processingMs) {
 }
 
 // --- Fetch next pair from payload server ---
+const methodRegex = /"method"\s*:\s*"([^"]+)"/;
+const idRegex = /"id"\s*:\s*(\d+)/;
+const gasUsedRegex = /"gasUsed"\s*:\s*"([^"]+)"/;
+
+function extractMethod(raw) {
+  const m = methodRegex.exec(raw.slice(0, 256));
+  return m ? m[1] : undefined;
+}
+
+function extractId(raw) {
+  const m = idRegex.exec(raw.slice(0, 256));
+  return m ? parseInt(m[1], 10) : undefined;
+}
+
+function extractGasUsed(raw) {
+  const m = gasUsedRegex.exec(raw.slice(0, 2048));
+  return m ? parseInt(m[1], 16) : undefined;
+}
+
 function fetchNextPair() {
   const resp = http.get(payloadServerUrl + '/next', {
     tags: { name: 'payload_fetch' },
@@ -96,16 +115,16 @@ function fetchNextPair() {
   const rawPayload = separatorIdx >= 0 ? resp.body.substring(0, separatorIdx) : resp.body;
   const rawFcu = separatorIdx >= 0 ? resp.body.substring(separatorIdx + 1) : '';
 
-  // Metadata from response headers
+  // Extract metadata directly from raw lines (cheap regex on small slices)
   const h = resp.headers;
   return {
     rawPayload: rawPayload,
     rawFcu: rawFcu,
     idx: parseInt(h['X-Expb-Idx'] || '0', 10),
-    method: h['X-Expb-Method'] || 'engine_newPayload',
-    jrpcId: h['X-Expb-Jrpc-Id'] ? parseInt(h['X-Expb-Jrpc-Id'], 10) : undefined,
-    gasUsed: h['X-Expb-Gas-Used'] ? parseInt(h['X-Expb-Gas-Used'], 10) : undefined,
-    fcuMethod: h['X-Expb-Fcu-Method'] || 'engine_forkchoiceUpdated',
+    method: extractMethod(rawPayload) || 'engine_newPayload',
+    jrpcId: extractId(rawPayload),
+    gasUsed: extractGasUsed(rawPayload),
+    fcuMethod: extractMethod(rawFcu) || 'engine_forkchoiceUpdated',
   };
 }
 
