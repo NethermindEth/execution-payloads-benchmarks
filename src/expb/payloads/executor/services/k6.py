@@ -50,7 +50,8 @@ def build_k6_script_config(
         "options": {
             "scenarios": {scenario_name: scenario},
             "thresholds": {
-                "http_req_failed": ["rate < 0.01"],
+                "http_req_failed{kind:newPayload}": ["rate < 0.01"],
+                "http_req_failed{kind:forkchoiceUpdated}": ["rate < 0.01"],
             },
             "systemTags": [
                 "scenario",

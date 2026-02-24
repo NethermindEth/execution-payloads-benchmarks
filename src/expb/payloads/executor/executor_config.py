@@ -25,6 +25,7 @@ from expb.configs.scenarios import (
     ScenariosResources,
 )
 from expb.payloads.executor.services.alloy import ALLOY_PYROSCOPE_PORT
+from expb.payloads.executor.services.payload_server import PAYLOAD_SERVER_PORT
 from expb.payloads.executor.services.snapshots import SnapshotService
 
 
@@ -121,8 +122,6 @@ class ExecutorConfig:
         self.k6_config_file: Path = self.outputs_dir / "k6-config.json"
         ### K6 container directories
         self._k6_container_work_dir: str = "/expb"
-        self._k6_container_payloads_file: str = f"/payloads/{self.payloads_file.name}"
-        self._k6_container_fcus_file: str = f"/payloads/{self.fcus_file.name}"
         self._k6_container_jwt_secret_file: str = f"/{self.jwt_secret_file.name}"
         self._k6_container_script_file: str = (
             f"{self._k6_container_work_dir}/{self.k6_script_file.name}"
@@ -136,6 +135,20 @@ class ExecutorConfig:
 
         ## Alloy config file
         self.alloy_config_file: Path = self.outputs_dir / "config.alloy"
+
+        ## Payload server config
+        self.payload_server_script_file: Path = self.outputs_dir / "payload-server.py"
+        self._payload_server_container_port: int = PAYLOAD_SERVER_PORT
+        self._payload_server_container_work_dir: str = "/expb"
+        self._payload_server_container_script: str = (
+            f"{self._payload_server_container_work_dir}/payload-server.py"
+        )
+        self._payload_server_container_payloads_file: str = (
+            f"/payloads/{self.payloads_file.name}"
+        )
+        self._payload_server_container_fcus_file: str = (
+            f"/payloads/{self.fcus_file.name}"
+        )
 
         # Executor Exports config
         self.exports: Exports | None = exports
@@ -308,6 +321,55 @@ class ExecutorConfig:
     def get_alloy_command(self) -> list[str]:
         return ["run", "/etc/alloy/config.alloy"]
 
+    ### Payload Server
+    def get_payload_server_container_name(self) -> str:
+        return self.get_container_name("payload-server")
+
+    def get_payload_server_container_image(self) -> str:
+        return self.docker_images.payload_server
+
+    def get_payload_server_volumes(self) -> dict[str, dict[str, str]]:
+        return {
+            str(self.payloads_file.resolve()): {
+                "bind": self._payload_server_container_payloads_file,
+                "mode": "ro",
+            },
+            str(self.fcus_file.resolve()): {
+                "bind": self._payload_server_container_fcus_file,
+                "mode": "ro",
+            },
+            str(self.payload_server_script_file.resolve()): {
+                "bind": self._payload_server_container_script,
+                "mode": "ro",
+            },
+        }
+
+    def get_payload_server_command(self) -> list[str]:
+        return ["python3", self._payload_server_container_script]
+
+    def get_payload_server_environment(self) -> dict[str, str]:
+        return {
+            "EXPB_PAYLOADS_FILE": self._payload_server_container_payloads_file,
+            "EXPB_FCUS_FILE": self._payload_server_container_fcus_file,
+            "EXPB_SERVER_PORT": str(self._payload_server_container_port),
+            "EXPB_CACHE_SIZE": "100",
+            "EXPB_SKIP": str(self.k6_payloads_skip or 0),
+        }
+
+    def get_payload_server_url(
+        self,
+        container: Container,
+        network: Network,
+    ) -> str:
+        container.reload()
+        if container.attrs is not None:
+            container_ip = container.attrs["NetworkSettings"]["Networks"][network.name][
+                "IPAddress"
+            ]
+            return f"http://{container_ip}:{self._payload_server_container_port}"
+        else:
+            raise ValueError("Container attributes are not available")
+
     ### Grafana K6
     def get_k6_container_name(self) -> str:
         return self.get_container_name("k6")
@@ -317,14 +379,6 @@ class ExecutorConfig:
 
     def get_k6_volumes(self) -> dict[str, dict[str, str]]:
         return {
-            str(self.payloads_file.resolve()): {
-                "bind": self._k6_container_payloads_file,
-                "mode": "rw",
-            },
-            str(self.fcus_file.resolve()): {
-                "bind": self._k6_container_fcus_file,
-                "mode": "rw",
-            },
             str(self.jwt_secret_file.resolve()): {
                 "bind": self._k6_container_jwt_secret_file,
                 "mode": "rw",
@@ -356,6 +410,7 @@ class ExecutorConfig:
     def get_k6_command(
         self,
         execution_client_engine_url: str,
+        payload_server_url: str,
         collect_per_payload_metrics: bool,
         enable_logging: bool,
         per_payload_metrics_logs: bool,
@@ -367,12 +422,10 @@ class ExecutorConfig:
             f"--summary-export={self._k6_container_summary_file}",
             f"--tag=testid={self.test_id}",
             f"--env=EXPB_CONFIG_FILE_PATH={self._k6_container_config_file}",
-            f"--env=EXPB_PAYLOADS_FILE_PATH={self._k6_container_payloads_file}",
-            f"--env=EXPB_FCUS_FILE_PATH={self._k6_container_fcus_file}",
             f"--env=EXPB_JWTSECRET_FILE_PATH={self._k6_container_jwt_secret_file}",
+            f"--env=EXPB_PAYLOAD_SERVER_URL={payload_server_url}",
             f"--env=EXPB_PAYLOADS_DELAY={self.k6_payloads_delay}",
             f"--env=EXPB_PAYLOADS_WARMUP_DELAY={self.k6_payloads_warmup_delay}",
-            f"--env=EXPB_PAYLOADS_SKIP={self.k6_payloads_skip}",
             f"--env=EXPB_PAYLOADS_WARMUP={self.k6_payloads_warmup}",
             f"--env=EXPB_ENGINE_ENDPOINT={execution_client_engine_url}",
             f"--env=EXPB_PER_PAYLOAD_METRICS={int(collect_per_payload_metrics)}",

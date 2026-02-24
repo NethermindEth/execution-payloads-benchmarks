@@ -5,6 +5,8 @@ from pathlib import Path
 K6_DEFAULT_IMAGE = "grafana/k6:latest"
 ## Grafana Alloy
 ALLOY_DEFAULT_IMAGE = "grafana/alloy:latest"
+## Payload Server
+PAYLOAD_SERVER_DEFAULT_IMAGE = "python:3.12-slim"
 
 # Directories
 ## Payloads
