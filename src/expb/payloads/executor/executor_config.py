@@ -39,7 +39,7 @@ class ExecutorConfig:
         pull_images: bool = False,
         docker_images: ScenariosImages = ScenariosImages(),
         exports: Exports | None = None,
-        json_rpc_wait_max_retries: int = 16,
+        json_rpc_wait_max_retries: int = 1800,
         limit_bandwidth: bool = False,
     ) -> None:
         # Executor Basic config

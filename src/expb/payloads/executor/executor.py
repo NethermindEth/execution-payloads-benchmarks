@@ -10,8 +10,6 @@ import docker.errors
 import requests
 from docker.models.containers import Container
 from docker.models.networks import Network
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 from expb.configs.exports import Pyroscope
 from expb.configs.scenarios import Scenarios
@@ -162,30 +160,36 @@ class Executor:
             "params": [],
             "id": 1,
         }
-        s = requests.Session()
-        retries = Retry(
-            total=self.config.json_rpc_wait_max_retries,
-            backoff_factor=0.5,
-            status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["POST"],
+        max_attempts = self.config.json_rpc_wait_max_retries
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = requests.post(
+                    execution_client_rpc_url,
+                    json=payload,
+                    headers=headers,
+                    timeout=5,
+                )
+                if response.ok:
+                    self.log.info(
+                        "Client json rpc is available",
+                        latest_block=int(response.json()["result"], 16),
+                        attempts=attempt,
+                    )
+                    return
+                self.log.debug(
+                    "Client json rpc not ready",
+                    attempt=attempt,
+                    status_code=response.status_code,
+                )
+            except requests.exceptions.ConnectionError:
+                self.log.debug(
+                    "Client json rpc not reachable",
+                    attempt=attempt,
+                )
+            time.sleep(1)
+        raise Exception(
+            f"Client json rpc is not available after {max_attempts} attempts"
         )
-        s.mount("http://", HTTPAdapter(max_retries=retries))
-        s.mount("https://", HTTPAdapter(max_retries=retries))
-        response: requests.Response = s.post(
-            execution_client_rpc_url,
-            json=payload,
-            headers=headers,
-        )
-        if response.ok:
-            self.log.info(
-                "Client json rpc is available",
-                latest_block=int(response.json()["result"], 16),
-            )
-        else:
-            self.log.error(
-                "Client json rpc is not available", status_code=response.status_code
-            )
-            raise Exception("Client json rpc is not available")
 
     # Grafana Alloy Setup
     def prepare_alloy_config(
