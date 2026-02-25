@@ -127,7 +127,7 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "k6_http_req_duration_p90{testid=~\"$testid\", group!~\"::setup::.*\"}",
+          "expr": "k6_http_req_duration_p90{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"}",
           "format": "table",
           "hide": false,
           "instant": false,
@@ -141,7 +141,7 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "k6_http_req_duration_p95{testid=~\"$testid\", group!~\"::setup::.*\"}",
+          "expr": "k6_http_req_duration_p95{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"}",
           "format": "table",
           "hide": false,
           "instant": false,
@@ -155,7 +155,7 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "k6_http_req_duration_p99{testid=~\"$testid\", group!~\"::setup::.*\"}",
+          "expr": "k6_http_req_duration_p99{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"}",
           "format": "table",
           "hide": false,
           "instant": false,
@@ -169,7 +169,7 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "k6_http_req_duration_med{testid=~\"$testid\", group!~\"::setup::.*\"}",
+          "expr": "k6_http_req_duration_med{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"}",
           "format": "table",
           "hide": false,
           "instant": false,
@@ -183,7 +183,7 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "k6_http_req_duration_max{testid=~\"$testid\", group!~\"::setup::.*\"}",
+          "expr": "k6_http_req_duration_max{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"}",
           "format": "table",
           "hide": false,
           "instant": false,
@@ -197,7 +197,7 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "k6_http_req_duration_min{testid=~\"$testid\", group!~\"::setup::.*\"}",
+          "expr": "k6_http_req_duration_min{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"}",
           "format": "table",
           "hide": false,
           "instant": false,
@@ -211,7 +211,7 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "k6_http_req_duration_avg{testid=~\"$testid\", group!~\"::setup::.*\"}",
+          "expr": "k6_http_req_duration_avg{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"}",
           "format": "table",
           "hide": false,
           "instant": false,
@@ -230,6 +230,12 @@
           "id": "groupBy",
           "options": {
             "fields": {
+              "Time": {
+                "aggregations": [
+                  "lastNotNull"
+                ],
+                "operation": "aggregate"
+              },
               "Value #A": {
                 "aggregations": [
                   "lastNotNull"
@@ -308,6 +314,7 @@
               "testid": 0
             },
             "renameByName": {
+              "Time (lastNotNull)": "Time",
               "Value #A (lastNotNull)": "p90",
               "Value #B (lastNotNull)": "p95",
               "Value #C (lastNotNull)": "p99",
@@ -529,7 +536,7 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "sum by (testid) (k6_vus{testid=~\"$testid\"})",
+          "expr": "sum by (testid) (k6_vus{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"})",
           "hide": true,
           "instant": false,
           "legendFormat": "vus - {{testid}}",
@@ -542,7 +549,7 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "avg by (testid) (k6_iteration_duration_$quantile_stat{testid=~\"$testid\"})",
+          "expr": "avg by (testid) (k6_iteration_duration_$quantile_stat{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"})",
           "hide": false,
           "instant": false,
           "legendFormat": "http_req_duration_$quantile_stat - {{testid}}",
@@ -555,7 +562,7 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "sum by (testid) (irate(k6_http_reqs_total{testid=~\"$testid\"}[$__rate_interval]))",
+          "expr": "sum by (testid) (irate(k6_http_reqs_total{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"}[$__rate_interval]))",
           "hide": false,
           "instant": false,
           "legendFormat": "http_req_s  - {{testid}}",
@@ -568,7 +575,7 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "avg by (testid) (round(k6_http_req_failed_rate{testid=~\"$testid\"}, 0.1)*100)",
+          "expr": "avg by (testid) (round(k6_http_req_failed_rate{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"}, 0.1)*100)",
           "hide": true,
           "instant": false,
           "legendFormat": "http_req_failed  - {{testid}}",
@@ -581,7 +588,7 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "sum by (testid) (irate(k6_http_reqs_total{testid=~\"$testid\", expected_response=\"false\"}[$__rate_interval]))",
+          "expr": "sum by (testid) (irate(k6_http_reqs_total{tool=\"expb\", testid=~\"$testid\", expected_response=\"false\", name!=\"payload_fetch\", group!~\"::setup::.*\"}[$__rate_interval]))",
           "hide": false,
           "instant": false,
           "legendFormat": "http_req_s_errors  - {{testid}}",
@@ -658,8 +665,8 @@
             "uid": "prometheus_ds_1"
           },
           "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "sum by(testid) (k6_iterations_total{testid=~\"$testid\"})",
+          "editorMode": "code",
+          "expr": "sum by(testid) (k6_iterations_total{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"})",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -726,7 +733,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "code",
-          "expr": "sum by(testid) (irate(k6_iterations_total{testid=~\"$testid\"}[$__rate_interval]))",
+          "expr": "sum by(testid) (irate(k6_iterations_total{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"}[$__rate_interval]))",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -794,7 +801,7 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "sum by (testid) (k6_http_reqs_total{testid=~\"$testid\", expected_response=\"false\"})",
+          "expr": "sum by (testid) (k6_http_reqs_total{tool=\"expb\", testid=~\"$testid\", expected_response=\"false\", name!=\"payload_fetch\", group!~\"::setup::.*\"})",
           "instant": false,
           "legendFormat": "{{testid}}",
           "range": true,
@@ -858,8 +865,8 @@
             "uid": "prometheus_ds_1"
           },
           "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "avg by(testid) ({\"k6_http_req_duration_$quantile_stat\", testid=~\"$testid\", jrpc_method=\"engine_newPayloadV3\"})",
+          "editorMode": "code",
+          "expr": "avg by(testid) ({\"k6_http_req_duration_$quantile_stat\", tool=\"expb\", testid=~\"$testid\", jrpc_method=\"engine_newPayloadV3\", name!=\"payload_fetch\", group!~\"::setup::.*\"})",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -956,7 +963,7 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "avg by (testid) (irate(k6_data_sent_total{testid=~\"$testid\"}[$__rate_interval]))",
+          "expr": "avg by (testid) (irate(k6_data_sent_total{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"}[$__rate_interval]))",
           "instant": false,
           "legendFormat": "data_sent - {{testid}}",
           "range": true,
@@ -969,7 +976,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "avg by (testid) (irate(k6_data_received_total{testid=~\"$testid\"}[$__rate_interval]))",
+          "expr": "avg by (testid) (irate(k6_data_received_total{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"}[$__rate_interval]))",
           "hide": false,
           "instant": false,
           "legendFormat": "data_received - {{testid}}",
@@ -1076,8 +1083,8 @@
             "type": "prometheus",
             "uid": "prometheus_ds_1"
           },
-          "editorMode": "builder",
-          "expr": "avg by (testid) (k6_iteration_duration_$quantile_stat{testid=~\"$testid\"})",
+          "editorMode": "code",
+          "expr": "avg by (testid) (k6_iteration_duration_$quantile_stat{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"})",
           "instant": false,
           "legendFormat": "iteration_duration_$quantile_stat - {{testid}}",
           "range": true,
@@ -1090,7 +1097,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "avg by (testid) (k6_dropped_iterations_total{testid=~\"$testid\"})",
+          "expr": "avg by (testid) (k6_dropped_iterations_total{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"})",
           "hide": false,
           "instant": false,
           "legendFormat": "dropped_iterations - {{testid}}",
@@ -1220,7 +1227,7 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "avg by (testid, group) (k6_http_req_blocked_$quantile_stat{testid=~\"$testid\"})",
+          "expr": "avg by (testid, group) (k6_http_req_blocked_$quantile_stat{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"})",
           "hide": false,
           "instant": false,
           "legendFormat": "http_req_blocked_$quantile_stat - {{testid}}{{group}}",
@@ -1233,7 +1240,7 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "avg by (testid, group) (k6_http_req_tls_handshaking_$quantile_stat{testid=~\"$testid\"})",
+          "expr": "avg by (testid, group) (k6_http_req_tls_handshaking_$quantile_stat{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"})",
           "hide": false,
           "instant": false,
           "legendFormat": "http_req_tls_handshaking_$quantile_stat - {{testid}}{{group}}",
@@ -1246,7 +1253,7 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "avg by (testid, group) (k6_http_req_sending_$quantile_stat{testid=~\"$testid\"})",
+          "expr": "avg by (testid, group) (k6_http_req_sending_$quantile_stat{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"})",
           "hide": false,
           "instant": false,
           "legendFormat": "http_req_sending_$quantile_stat - {{testid}}{{group}}",
@@ -1259,7 +1266,7 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "avg by (testid, group) (k6_http_req_waiting_$quantile_stat{testid=~\"$testid\"})",
+          "expr": "avg by (testid, group) (k6_http_req_waiting_$quantile_stat{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"})",
           "hide": false,
           "instant": false,
           "legendFormat": "http_req_waiting_$quantile_stat - {{testid}}{{group}}",
@@ -1272,7 +1279,7 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "avg by (testid, group) (k6_http_req_receiving_$quantile_stat{testid=~\"$testid\"})",
+          "expr": "avg by (testid, group) (k6_http_req_receiving_$quantile_stat{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"})",
           "hide": false,
           "instant": false,
           "legendFormat": "http_req_receiving_$quantile_stat - {{testid}}{{group}}",
@@ -1434,7 +1441,7 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "avg by (testid, group) (k6_http_req_duration_$quantile_stat{testid=~\"$testid\"})",
+          "expr": "avg by (testid, group) (k6_http_req_duration_$quantile_stat{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"})",
           "hide": false,
           "instant": false,
           "legendFormat": "http_req_duration_$quantile_stat - {{testid}}{{group}}",
@@ -1447,7 +1454,7 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "avg by (testid, group) (k6_http_req_duration_$quantile_stat{testid=~\"$testid\", expected_response=\"true\"})",
+          "expr": "avg by (testid, group) (k6_http_req_duration_$quantile_stat{tool=\"expb\", testid=~\"$testid\", expected_response=\"true\", name!=\"payload_fetch\", group!~\"::setup::.*\"})",
           "instant": false,
           "legendFormat": "success_http_req_duration_$quantile_stat - {{testid}}{{group}}",
           "range": true,
@@ -1459,7 +1466,7 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "avg by (testid, group) (k6_http_req_duration_$quantile_stat{testid=~\"$testid\", expected_response=\"false\"})",
+          "expr": "avg by (testid, group) (k6_http_req_duration_$quantile_stat{tool=\"expb\", testid=~\"$testid\", expected_response=\"false\", name!=\"payload_fetch\", group!~\"::setup::.*\"})",
           "hide": false,
           "instant": false,
           "legendFormat": "errors_http_req_duration_$quantile_stat - {{testid}}{{group}}",
@@ -1615,7 +1622,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "k6_expb_slowest_processing{testid=~\"$testid\"}",
+          "expr": "k6_expb_slowest_processing{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"}",
           "format": "table",
           "instant": false,
           "legendFormat": "{{testid}}",
@@ -1940,7 +1947,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "k6_expb_slowest_payloads{testid=~\"$testid\"}",
+          "expr": "k6_expb_slowest_payloads{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"}",
           "format": "table",
           "instant": false,
           "legendFormat": "{{testid}}",
@@ -2224,7 +2231,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "k6_expb_slowest_payloads{testid=~\"$testid\"}",
+          "expr": "k6_expb_slowest_payloads{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"}",
           "format": "table",
           "legendFormat": "__auto",
           "range": true,
@@ -2236,7 +2243,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "k6_expb_slowest_processing{testid=~\"$testid\"}",
+          "expr": "k6_expb_slowest_processing{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"}",
           "format": "table",
           "hide": false,
           "instant": false,
@@ -2533,7 +2540,7 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "sum by (testid) (irate(k6_http_reqs_total{testid=~\"$testid\"}[$__rate_interval]))",
+          "expr": "sum by (testid) (irate(k6_http_reqs_total{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"}[$__rate_interval]))",
           "instant": false,
           "legendFormat": "http_req_s - {{testid}}",
           "range": true,
@@ -2545,7 +2552,7 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "sum by (testid) (irate(k6_http_reqs_total{testid=~\"$testid\", expected_response=\"false\"}[$__rate_interval]))",
+          "expr": "sum by (testid) (irate(k6_http_reqs_total{tool=\"expb\", testid=~\"$testid\", expected_response=\"false\", name!=\"payload_fetch\", group!~\"::setup::.*\"}[$__rate_interval]))",
           "hide": false,
           "instant": false,
           "legendFormat": "http_req_s_errors - {{testid}}",
@@ -2558,7 +2565,7 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "sum by (testid) (irate(k6_http_reqs_total{testid=~\"$testid\", expected_response=\"true\"}[$__rate_interval]))",
+          "expr": "sum by (testid) (irate(k6_http_reqs_total{tool=\"expb\", testid=~\"$testid\", expected_response=\"true\", name!=\"payload_fetch\", group!~\"::setup::.*\"}[$__rate_interval]))",
           "hide": false,
           "instant": false,
           "legendFormat": "http_req_s_success - {{testid}}",
@@ -2731,15 +2738,15 @@
             "uid": "prometheus_ds_1"
           },
           "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "sum by(testid) (irate(k6_iteration_total{testid=~\"$testid\", expected_response=\"true\"}[$__rate_interval]))",
+          "editorMode": "code",
+          "expr": "sum by(testid) (irate(k6_iteration_total{tool=\"expb\", testid=~\"$testid\", expected_response=\"true\", name!=\"payload_fetch\", group!~\"::setup::.*\"}[$__rate_interval]))",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
           "instant": false,
           "legendFormat": "http_req_s_success - {{testid}}",
           "range": true,
-          "refId": "C",
+          "refId": "A",
           "useBackend": false
         }
       ],
@@ -2957,11 +2964,25 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "k6_http_req_duration_min{testid=~\"$testid\"}",
+          "expr": "k6_http_req_duration_min{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"}",
           "format": "table",
           "hide": false,
           "instant": false,
           "legendFormat": "min",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus_ds_1"
+          },
+          "editorMode": "code",
+          "expr": "k6_http_req_duration_max{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"}",
+          "format": "table",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "max",
           "range": true,
           "refId": "B"
         },
@@ -2971,11 +2992,11 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "k6_http_req_duration_max{testid=~\"$testid\"}",
+          "expr": "k6_http_req_duration_p95{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"}",
           "format": "table",
           "hide": false,
           "instant": false,
-          "legendFormat": "max",
+          "legendFormat": "p95",
           "range": true,
           "refId": "C"
         },
@@ -2985,11 +3006,11 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "k6_http_req_duration_p95{testid=~\"$testid\"}",
+          "expr": "k6_http_req_duration_p99{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"}",
           "format": "table",
           "hide": false,
           "instant": false,
-          "legendFormat": "p95",
+          "legendFormat": "__auto",
           "range": true,
           "refId": "D"
         },
@@ -2999,11 +3020,11 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "k6_http_req_duration_p99{testid=~\"$testid\"}",
+          "expr": "k6_http_req_duration_avg{tool=\"expb\",testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"}",
           "format": "table",
           "hide": false,
           "instant": false,
-          "legendFormat": "__auto",
+          "legendFormat": "avg",
           "range": true,
           "refId": "E"
         },
@@ -3013,27 +3034,13 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "k6_http_req_duration_avg{testid=~\"$testid\"}",
-          "format": "table",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "avg",
-          "range": true,
-          "refId": "F"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus_ds_1"
-          },
-          "editorMode": "code",
-          "expr": "k6_http_req_duration_med{testid=~\"$testid\"}",
+          "expr": "k6_http_req_duration_med{tool=\"expb\",testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"}",
           "format": "table",
           "hide": false,
           "instant": false,
           "legendFormat": "med",
           "range": true,
-          "refId": "G"
+          "refId": "F"
         }
       ],
       "title": "Requests by URL",
@@ -3258,7 +3265,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "round(k6_checks_rate{testid=~\"$testid\"}, 0.1)",
+          "expr": "round(k6_checks_rate{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"}, 0.1)",
           "format": "table",
           "instant": false,
           "legendFormat": "__auto",
@@ -3425,7 +3432,7 @@
             "uid": "prometheus_ds_1"
           },
           "editorMode": "code",
-          "expr": "avg by (testid) (round(k6_checks_rate{testid=~\"$testid\"}, 0.1)*100)",
+          "expr": "avg by (testid) (round(k6_checks_rate{tool=\"expb\", testid=~\"$testid\", name!=\"payload_fetch\", group!~\"::setup::.*\"}, 0.1)*100)",
           "instant": false,
           "legendFormat": "k6_checks_rate - {{testid}}",
           "range": true,
@@ -3529,5 +3536,5 @@
   "timezone": "",
   "title": "Execution Payloads Benchmarks Dashboard",
   "uid": "ccbb2351-2ae2-462f-ae0e-f2c893ad1028",
-  "version": 30
+  "version": 34
 }
