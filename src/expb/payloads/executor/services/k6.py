@@ -71,7 +71,7 @@ def build_k6_script_config(
                 "p(95)",
                 "p(99)",
             ],
-            "tags": {"testid": f"{test_id}"},
+            "tags": {"testid": f"{test_id}", "tool": "expb"},
             "setupTimeout": setup_timeout,
         }
     }

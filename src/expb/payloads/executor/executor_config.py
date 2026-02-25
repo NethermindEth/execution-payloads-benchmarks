@@ -5,7 +5,7 @@ from pathlib import Path
 import docker
 from docker.client import DockerClient
 from docker.models.containers import Container
-from docker.models.networks import Network
+from docker.models.networks import Network as DockerNetwork
 
 from expb.clients import (
     CLIENT_ENGINE_PORT,
@@ -17,6 +17,7 @@ from expb.clients import (
     Client,
 )
 from expb.configs.exports import Exports
+from expb.configs.networks import Network
 from expb.configs.scenarios import (
     Scenario,
     ScenarioExtraVolume,
@@ -44,12 +45,12 @@ class ExecutorConfig:
         limit_bandwidth: bool = False,
     ) -> None:
         # Executor Basic config
-        self.scenario_name: str = scenario.name
+        self.scenario_name: str = scenario.name or "default"
         self.executor_name: str = f"expb-executor-{self.scenario_name}"
         self.test_id: str = f"{self.scenario_name}-{time.strftime('%Y%m%d-%H%M%S')}"
         self.startup_wait = scenario.startup_wait
         # Executor Client config
-        self.network: Network = scenario.network
+        self.network: Network = scenario.network or Network.MAINNET
         self.execution_client: Client = scenario.client
         execution_client_image = scenario.client_image
         if execution_client_image is None:
@@ -196,7 +197,7 @@ class ExecutorConfig:
     def get_execution_client_engine_url(
         self,
         container: Container,
-        network: Network,
+        network: DockerNetwork,
     ) -> str:
         container.reload()
         if container.attrs is not None:
@@ -210,7 +211,7 @@ class ExecutorConfig:
     def get_execution_client_rpc_url(
         self,
         container: Container,
-        network: Network,
+        network: DockerNetwork,
     ) -> str:
         container.reload()
         if container.attrs is not None:
@@ -307,7 +308,7 @@ class ExecutorConfig:
     def get_alloy_pyroscope_url(
         self,
         container: Container,
-        network: Network,
+        network: DockerNetwork,
     ) -> str:
         container.reload()
         if container.attrs is not None:
@@ -420,7 +421,6 @@ class ExecutorConfig:
             self._k6_container_script_file,
             "--summary-mode=full",
             f"--summary-export={self._k6_container_summary_file}",
-            f"--tag=testid={self.test_id}",
             f"--env=EXPB_CONFIG_FILE_PATH={self._k6_container_config_file}",
             f"--env=EXPB_JWTSECRET_FILE_PATH={self._k6_container_jwt_secret_file}",
             f"--env=EXPB_PAYLOAD_SERVER_URL={payload_server_url}",
