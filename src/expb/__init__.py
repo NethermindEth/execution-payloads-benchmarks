@@ -5,6 +5,7 @@ from expb.execute_scenario import app as execute_scenario_app
 from expb.execute_scenarios import app as execute_scenarios_app
 from expb.generate_payloads import app as generate_payloads_app
 from expb.send_payloads import app as send_payloads_app
+from expb.version import app as version_app
 
 app = typer.Typer()
 
@@ -14,6 +15,7 @@ typer_apps = [
     execute_scenarios_app,
     compress_payloads_app,
     send_payloads_app,
+    version_app,
 ]
 
 

@@ -26,8 +26,15 @@ expb = "expb:app"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build.hooks.custom]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/expb"]
 
 [tool.hatch.build.targets.wheel.sources]
 "src" = ""
+
+[dependency-groups]
+dev = [
+    "hatchling>=1.29.0",
+]
