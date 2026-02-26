@@ -6,11 +6,10 @@ from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
 class CustomBuildHook(BuildHookInterface):
     def initialize(self, version: str, build_data: dict) -> None:
-        # Hatchling passes a build target name ("editable", "standard", "wheel")
-        # instead of the real version in some install modes.
-        # Fall back to reading the version directly from the metadata.
-        if version in ("editable", "standard", "wheel"):
-            version = self.metadata.version
+        # Always read from metadata — the `version` parameter receives the build
+        # target name ("editable", "standard", "wheel") rather than the actual
+        # version in most install modes.
+        version = self.metadata.version
 
         try:
             commit = subprocess.check_output(
