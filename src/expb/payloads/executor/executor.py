@@ -152,9 +152,7 @@ class Executor:
         # Run execution container
         cpu_count = self.config.resources.cpu if self.config.resources else None
         mem_limit = self.config.resources.mem if self.config.resources else None
-        cpuset_cpus = self.config.resources.cpuset if self.config.resources else None
-        mem_swappiness = self.config.resources.mem_swappiness if self.config.resources else None
-        container = self.config.docker_client.containers.run(
+        run_kwargs = dict(
             image=self.config.execution_client_image,
             name=self.config.get_execution_client_container_name(),
             volumes=execution_container_volumes,
@@ -166,13 +164,16 @@ class Executor:
             restart_policy={"Name": "unless-stopped"},
             cpu_count=cpu_count,  # Only works for windows
             nano_cpus=cpu_count * 10**9 if cpu_count else None,
-            cpuset_cpus=cpuset_cpus,
             mem_limit=mem_limit,
-            mem_swappiness=mem_swappiness,
             user=self.config.docker_user,
             group_add=self.config.docker_group_add,
             stop_signal=stop_signal,
         )
+        if self.config.resources and self.config.resources.cpuset is not None:
+            run_kwargs["cpuset_cpus"] = self.config.resources.cpuset
+        if self.config.resources and self.config.resources.mem_swappiness is not None:
+            run_kwargs["mem_swappiness"] = self.config.resources.mem_swappiness
+        container = self.config.docker_client.containers.run(**run_kwargs)
         return container
 
     def wait_for_client_json_rpc(
@@ -265,8 +266,7 @@ class Executor:
         self,
         container_network: Network | None = None,
     ) -> Container:
-        infra_cpuset = self.config.resources.infra_cpuset if self.config.resources else None
-        alloy_container = self.config.docker_client.containers.run(
+        run_kwargs = dict(
             image=self.config.get_alloy_container_image(),
             name=self.config.get_alloy_container_name(),
             volumes=self.config.get_alloy_volumes(),
@@ -275,8 +275,10 @@ class Executor:
             detach=True,
             restart_policy={"Name": "unless-stopped"},
             network=container_network.name if container_network else None,
-            cpuset_cpus=infra_cpuset,
         )
+        if self.config.resources and self.config.resources.infra_cpuset is not None:
+            run_kwargs["cpuset_cpus"] = self.config.resources.infra_cpuset
+        alloy_container = self.config.docker_client.containers.run(**run_kwargs)
         return alloy_container
 
     # Payload Server Setup
@@ -292,8 +294,7 @@ class Executor:
         self,
         container_network: Network | None = None,
     ) -> Container:
-        infra_cpuset = self.config.resources.infra_cpuset if self.config.resources else None
-        container = self.config.docker_client.containers.run(
+        run_kwargs = dict(
             image=self.config.get_payload_server_container_image(),
             name=self.config.get_payload_server_container_name(),
             volumes=self.config.get_payload_server_volumes(),
@@ -302,8 +303,10 @@ class Executor:
             detach=True,
             restart_policy={"Name": "unless-stopped"},
             network=container_network.name if container_network else None,
-            cpuset_cpus=infra_cpuset,
         )
+        if self.config.resources and self.config.resources.infra_cpuset is not None:
+            run_kwargs["cpuset_cpus"] = self.config.resources.infra_cpuset
+        container = self.config.docker_client.containers.run(**run_kwargs)
         return container
 
     def wait_for_payload_server(
@@ -377,8 +380,7 @@ class Executor:
         k6_container_environment = self.config.get_k6_environment()
 
         # Execute k6 container
-        infra_cpuset = self.config.resources.infra_cpuset if self.config.resources else None
-        container = self.config.docker_client.containers.run(
+        run_kwargs = dict(
             image=self.config.get_k6_container_image(),
             name=self.config.get_k6_container_name(),
             volumes=k6_container_volumes,
@@ -387,11 +389,13 @@ class Executor:
             network=container_network.name if container_network else None,
             detach=False,
             restart_policy={"Name": "unless-stopped"},
-            cpuset_cpus=infra_cpuset,
             user=self.config.docker_user,
             group_add=self.config.docker_group_add,
             stop_signal="SIGINT",
         )
+        if self.config.resources and self.config.resources.infra_cpuset is not None:
+            run_kwargs["cpuset_cpus"] = self.config.resources.infra_cpuset
+        container = self.config.docker_client.containers.run(**run_kwargs)
         return container
 
     # Extra Commands Execution
