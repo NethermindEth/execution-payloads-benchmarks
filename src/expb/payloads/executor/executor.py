@@ -96,9 +96,9 @@ class Executor:
             governor = governor_path.read_text().strip()
             if governor != "performance":
                 self.log.warning(
-                    "CPU frequency governor is not set to 'performance', benchmark results may have higher variance",
+                    "CPU frequency governor is not set to 'performance', benchmark results may have higher variance. "
+                    "Fix: echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor",
                     current_governor=governor,
-                    fix="echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor",
                 )
         except Exception:
             pass
@@ -113,9 +113,10 @@ class Executor:
             # Format is like: "always [madvise] never" — bracketed value is active
             if "[always]" in content:
                 self.log.warning(
-                    "Transparent Huge Pages are enabled, THP compaction can cause unpredictable latency spikes",
+                    "Transparent Huge Pages are enabled, THP compaction can cause unpredictable latency spikes. "
+                    "Fix: echo madvise | sudo tee /sys/kernel/mm/transparent_hugepage/enabled && "
+                    "echo madvise | sudo tee /sys/kernel/mm/transparent_hugepage/defrag",
                     current="always",
-                    fix="echo madvise | sudo tee /sys/kernel/mm/transparent_hugepage/enabled",
                 )
         except Exception:
             pass
@@ -146,9 +147,9 @@ class Executor:
             ]
             if active_noisy:
                 self.log.warning(
-                    "Active systemd timers may cause benchmark variance",
+                    "Active systemd timers may cause benchmark variance. "
+                    f"Fix: systemctl stop {' '.join(active_noisy)}",
                     active_timers=active_noisy,
-                    fix=f"systemctl stop {' '.join(active_noisy)}",
                 )
         except Exception:
             pass
