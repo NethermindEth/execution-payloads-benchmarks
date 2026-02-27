@@ -352,6 +352,9 @@ class Executor:
         k6_container_environment = self.config.get_k6_environment()
 
         # Execute k6 container
+        # K6 runs exactly once — no restart policy, so the container is never
+        # restarted after the benchmark finishes (a restart would overwrite the
+        # k6-summary.json with zeroed-out metrics from a second failed run).
         container = self.config.docker_client.containers.run(
             image=self.config.get_k6_container_image(),
             name=self.config.get_k6_container_name(),
@@ -360,7 +363,7 @@ class Executor:
             command=k6_container_command,
             network=container_network.name if container_network else None,
             detach=False,
-            restart_policy={"Name": "unless-stopped"},
+            restart_policy={"Name": "no"},
             user=self.config.docker_user,
             group_add=self.config.docker_group_add,
             stop_signal="SIGINT",
