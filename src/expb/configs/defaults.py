@@ -2,9 +2,9 @@ from pathlib import Path
 
 # Images
 ## Grafana K6
-K6_DEFAULT_IMAGE = "grafana/k6:latest"
+K6_DEFAULT_IMAGE = "grafana/k6:1.6.1"
 ## Grafana Alloy
-ALLOY_DEFAULT_IMAGE = "grafana/alloy:latest"
+ALLOY_DEFAULT_IMAGE = "grafana/alloy:v1.13.2"
 ## Payload Server
 PAYLOAD_SERVER_DEFAULT_IMAGE = "python:3.12-slim"
 
