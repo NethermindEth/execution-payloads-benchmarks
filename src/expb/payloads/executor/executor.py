@@ -81,7 +81,13 @@ class Executor:
             self.log.error("Failed to clean system cache", error=e)
             raise e
 
-    def check_cpu_governor(self) -> None:
+    def run_preflight_checks(self) -> None:
+        """Run preflight checks and log warnings for suboptimal system configuration."""
+        self._check_cpu_governor()
+        self._check_transparent_huge_pages()
+        self._check_noisy_timers()
+
+    def _check_cpu_governor(self) -> None:
         """Log a warning if any CPU is not using the 'performance' governor."""
         try:
             governor_path = Path("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor")
@@ -93,6 +99,56 @@ class Executor:
                     "CPU frequency governor is not set to 'performance', benchmark results may have higher variance",
                     current_governor=governor,
                     fix="echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor",
+                )
+        except Exception:
+            pass
+
+    def _check_transparent_huge_pages(self) -> None:
+        """Log a warning if Transparent Huge Pages are enabled (causes latency spikes from compaction)."""
+        try:
+            thp_path = Path("/sys/kernel/mm/transparent_hugepage/enabled")
+            if not thp_path.exists():
+                return
+            content = thp_path.read_text().strip()
+            # Format is like: "always [madvise] never" — bracketed value is active
+            if "[always]" in content:
+                self.log.warning(
+                    "Transparent Huge Pages are enabled, THP compaction can cause unpredictable latency spikes",
+                    current="always",
+                    fix="echo madvise | sudo tee /sys/kernel/mm/transparent_hugepage/enabled",
+                )
+        except Exception:
+            pass
+
+    NOISY_TIMERS = [
+        "sysstat-collect.timer",
+        "apt-daily.timer",
+        "apt-daily-upgrade.timer",
+        "fwupd-refresh.timer",
+        "fstrim.timer",
+    ]
+
+    def _check_noisy_timers(self) -> None:
+        """Log a warning if systemd timers known to cause I/O or CPU spikes are active."""
+        try:
+            result = subprocess.run(
+                ["systemctl", "list-timers", "--no-pager", "--no-legend"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode != 0:
+                return
+            active_noisy = [
+                timer
+                for timer in self.NOISY_TIMERS
+                if timer in result.stdout
+            ]
+            if active_noisy:
+                self.log.warning(
+                    "Active systemd timers may cause benchmark variance",
+                    active_timers=active_noisy,
+                    fix=f"systemctl stop {' '.join(active_noisy)}",
                 )
         except Exception:
             pass
@@ -667,7 +723,7 @@ class Executor:
                 scenario=self.config.executor_name,
                 execution_client=self.config.get_execution_client_name(),
             )
-            self.check_cpu_governor()
+            self.run_preflight_checks()
             self.clean_system_cache()
             self.prepare_directories()
             self.prepare_jwt_secret_file()
