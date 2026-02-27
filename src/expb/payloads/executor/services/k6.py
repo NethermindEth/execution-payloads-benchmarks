@@ -51,6 +51,10 @@ def build_k6_script_config(
             "scenarios": {scenario_name: scenario},
             "thresholds": {
                 "http_req_failed": ["rate < 0.01"],
+                # Empty thresholds force K6 to track and export these group-tagged
+                # sub-metrics in the --summary-export JSON file.
+                "http_req_duration{group:::engine_newPayload}": [],
+                "http_req_duration{group:::engine_forkchoiceUpdated}": [],
             },
             "systemTags": [
                 "scenario",

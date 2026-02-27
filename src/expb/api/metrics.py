@@ -45,19 +45,16 @@ def parse_k6_summary(summary_path: Path) -> dict | None:
         if metric_data is None:
             continue
 
-        values = metric_data.get("values", {})
-        if not values:
-            continue
-
         # K6 uses "p(90)" notation; normalise to "p90" for clean storage / API output.
+        # Values are stored directly on the metric object (no "values" sub-key).
         result[group_name] = {
-            "avg": values.get("avg"),
-            "min": values.get("min"),
-            "max": values.get("max"),
-            "med": values.get("med"),
-            "p90": values.get("p(90)"),
-            "p95": values.get("p(95)"),
-            "p99": values.get("p(99)"),
+            "avg": metric_data.get("avg"),
+            "min": metric_data.get("min"),
+            "max": metric_data.get("max"),
+            "med": metric_data.get("med"),
+            "p90": metric_data.get("p(90)"),
+            "p95": metric_data.get("p(95)"),
+            "p99": metric_data.get("p(99)"),
         }
 
     return result if result else None
