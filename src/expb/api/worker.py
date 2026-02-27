@@ -6,9 +6,11 @@ from datetime import datetime, timezone
 from expb.api.db.engine import get_session
 from expb.api.db.models import Run, RunStatus
 from expb.api.metrics import parse_k6_summary
-from expb.configs.scenarios import Scenarios
+from expb.api.schemas.runs import ScenarioOverrides
+from expb.configs.scenarios import Scenario, Scenarios
 from expb.logging import Logger, setup_logging
-from expb.payloads import Executor, ExecutorExecuteOptions
+from expb.payloads import Executor, ExecutorConfig, ExecutorExecuteOptions
+from expb.payloads.executor.services.snapshots import setup_snapshot_service
 
 
 class BenchmarkWorker:
@@ -112,6 +114,11 @@ class BenchmarkWorker:
                 self._logger.error("Run not found in DB", run_id=run_id)
                 return
 
+            # Guard against runs cancelled via the API while still in the queue.
+            if run.status == RunStatus.CANCELLED:
+                self._logger.info("Skipping cancelled run", run_id=run_id)
+                return
+
             # --- Mark as RUNNING ---
             run.status = RunStatus.RUNNING
             run.started_at = datetime.now(timezone.utc)
@@ -123,18 +130,32 @@ class BenchmarkWorker:
                 scenario=run.scenario_name,
             )
 
-            # --- Build executor ---
-            executor = Executor.from_scenarios(
-                self._scenarios,
-                scenario_name=run.scenario_name,
+            # --- Build scenario (with overrides applied) ---
+            base_scenario = self._scenarios.scenarios_configs[run.scenario_name]
+            stored_overrides = run.overrides or {}
+            scenario_overrides_data = stored_overrides.get("overrides") or {}
+            scenario_overrides = ScenarioOverrides.model_validate(scenario_overrides_data)
+            scenario = self._apply_overrides_to_scenario(base_scenario, scenario_overrides)
+
+            # --- Build executor from the (possibly modified) scenario ---
+            # This mirrors Executor.from_scenarios but uses our derived scenario so
+            # ExecutorConfig performs all its own construction logic correctly.
+            snapshot_service = setup_snapshot_service(self._scenarios, scenario)
+            executor = Executor(
+                config=ExecutorConfig(
+                    scenario=scenario,
+                    snapshot_service=snapshot_service,
+                    paths=self._scenarios.paths,
+                    resources=self._scenarios.resources,
+                    pull_images=self._scenarios.pull_images,
+                    docker_images=self._scenarios.docker_images,
+                    exports=self._scenarios.exports,
+                ),
                 logger=self._logger,
             )
 
-            # Apply overrides to executor.config (not to the shared Scenario model)
-            self._apply_overrides(executor, run.overrides or {})
-
             # --- Execute (blocking) ---
-            options = self._build_options(run.overrides or {})
+            options = self._build_options(stored_overrides)
             executor.execute_scenario(options=options)
 
             # --- Capture outputs ---
@@ -177,34 +198,33 @@ class BenchmarkWorker:
             db.close()
 
     @staticmethod
-    def _apply_overrides(executor: Executor, overrides: dict) -> None:
+    def _apply_overrides_to_scenario(base: Scenario, overrides: ScenarioOverrides) -> Scenario:
         """
-        Apply API-provided overrides directly to ``executor.config`` attributes.
+        Return a new ``Scenario`` with the given overrides applied.
 
-        Overrides target the ``ExecutorConfig`` plain-object fields rather than
-        the shared ``Scenario`` Pydantic model, so there is no risk of polluting
-        the loaded scenarios for subsequent runs.
+        Serialises the base scenario to an alias-keyed JSON dict, merges the
+        non-``None`` override values (whose field names intentionally match the
+        Scenario aliases), then reconstructs via ``Scenario.model_validate`` so
+        all validators — including the ``payloads_warmup_delay`` defaulting logic
+        — run on the final result.
+
+        The shared base scenario object is never mutated.
         """
-        if overrides.get("payloads_amount") is not None:
-            executor.config.k6_payloads_amount = overrides["payloads_amount"]
+        # Produce an alias-keyed, JSON-serialisable snapshot of the base scenario.
+        # model_validate accepts this format, and all Scenario aliases are used as keys.
+        data = base.model_dump(by_alias=True, mode="json")
 
-        if overrides.get("payloads_skip") is not None:
-            executor.config.k6_payloads_skip = overrides["payloads_skip"]
+        # ScenarioOverrides fields are named to match the corresponding Scenario aliases,
+        # so a direct dict.update() is sufficient to apply them.
+        data.update(overrides.model_dump(mode="json", exclude_none=True))
 
-        if overrides.get("payloads_delay") is not None:
-            executor.config.k6_payloads_delay = overrides["payloads_delay"]
-            # Mirror the Pydantic model_validator: warmup_delay defaults to delay
-            # unless the scenario already set them independently.
-            executor.config.k6_payloads_warmup_delay = overrides["payloads_delay"]
-
-        if overrides.get("payloads_warmup") is not None:
-            executor.config.k6_payloads_warmup = overrides["payloads_warmup"]
+        return Scenario.model_validate(data)
 
     @staticmethod
-    def _build_options(overrides: dict) -> ExecutorExecuteOptions:
+    def _build_options(stored_overrides: dict) -> ExecutorExecuteOptions:
         return ExecutorExecuteOptions(
-            print_logs_to_console=overrides.get("print_logs", False),
-            collect_per_payload_metrics=overrides.get("per_payload_metrics", False),
+            print_logs_to_console=stored_overrides.get("print_logs", False),
+            collect_per_payload_metrics=stored_overrides.get("per_payload_metrics", False),
             # per_payload_metrics_logs prints a table to stdout — not useful in API context
             per_payload_metrics_logs=False,
         )

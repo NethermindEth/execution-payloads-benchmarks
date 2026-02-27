@@ -1,7 +1,7 @@
 import hashlib
 import secrets
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
 
@@ -13,11 +13,6 @@ app = typer.Typer(name="tokens", help="Manage API tokens for the expb API server
 console = Console()
 
 _DEFAULT_DB = Path("expb-api.db")
-
-
-def _db_file_option() -> Path:
-    # Helper only used as a default factory in the type annotations below.
-    return _DEFAULT_DB
 
 
 def _hash_token(raw: str) -> str:
@@ -58,7 +53,7 @@ def add_token(
             token_id=str(uuid.uuid4()),
             name=name,
             token_hash=_hash_token(raw_token),
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
         )
         db.add(token)
         db.commit()

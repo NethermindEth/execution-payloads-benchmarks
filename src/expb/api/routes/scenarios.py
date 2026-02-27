@@ -2,17 +2,12 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from expb.api.auth import verify_token
+from expb.api.schemas.runs import ScenarioOverrides
 
 router = APIRouter()
 
-_OVERRIDABLE_PARAMS = [
-    "payloads_amount",
-    "payloads_skip",
-    "payloads_delay",
-    "payloads_warmup",
-    "per_payload_metrics",
-    "print_logs",
-]
+# Derived directly from the ScenarioOverrides model so it stays in sync automatically.
+_OVERRIDABLE_PARAMS: list[str] = list(ScenarioOverrides.model_fields.keys())
 
 
 class ScenarioInfo(BaseModel):

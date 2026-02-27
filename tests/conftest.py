@@ -89,8 +89,6 @@ def app(db_path: Path, scenarios_config_file: Path):
     """Create the FastAPI app with a fresh in-process DB (no worker started)."""
     from expb.api.app import create_app
 
-    init_db(db_path)
-
     fastapi_app = create_app(
         config_file=scenarios_config_file,
         db_path=db_path,

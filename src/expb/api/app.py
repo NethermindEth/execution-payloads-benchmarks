@@ -56,7 +56,7 @@ def create_app(
         title="expb Benchmark Queue API",
         description=(
             "Queue and monitor Ethereum execution client benchmark runs. "
-            "All endpoints require Bearer token authentication."
+            "All endpoints except /health require Bearer token authentication."
         ),
         version="0.1.0",
         lifespan=lifespan,

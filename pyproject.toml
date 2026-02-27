@@ -41,4 +41,4 @@ packages = ["src/expb"]
 dev = ["httpx>=0.28.1", "pytest>=9.0.2", "hatchling>=1.29.0"]
 
 [tool.pytest.ini_options]
-filterwarnings = ["ignore::DeprecationWarning:websockets", "hatchling>=1.29.0"]
+filterwarnings = ["ignore::DeprecationWarning:websockets"]

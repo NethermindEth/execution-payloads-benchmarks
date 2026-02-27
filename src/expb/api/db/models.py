@@ -30,7 +30,7 @@ class Run(Base):
         SAEnum(RunStatus), nullable=False, default=RunStatus.QUEUED, index=True
     )
     queued_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.now(timezone.utc)
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -58,6 +58,6 @@ class ApiToken(Base):
     # SHA-256 hex digest of the raw token — the raw value is never stored
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.now(timezone.utc)
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
