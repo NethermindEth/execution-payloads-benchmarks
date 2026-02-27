@@ -51,9 +51,10 @@ resources:
   # Optional: Pin infrastructure containers (K6, Alloy, payload server) to separate CPU cores
   # Prevents infra from stealing cycles from the execution client under test.
   infra_cpuset: "4-5"
-  # Optional: Memory swappiness for the execution client container (0-100). Defaults to 0.
-  # 0 disables swap preference, preventing swap-induced latency spikes.
-  mem_swappiness: 0
+  # Optional: Memory swappiness for the execution client container (0-100). Defaults to host setting.
+  # Low values preserve heap memory but aggressively evict page cache, which can hurt I/O-heavy workloads.
+  # Only set this if you understand your workload's memory profile.
+  # mem_swappiness: 10
 
 # Scenarios to execute
 scenarios:

@@ -234,8 +234,8 @@ class ScenariosResources(BaseModel):
         default=None,
     )
     mem_swappiness: int | None = Field(
-        description="Memory swappiness for the execution client container (0-100). 0 disables swap preference.",
-        default=0,
+        description="Memory swappiness for the execution client container (0-100). None inherits host default. Low values preserve heap but evict page cache, which hurts I/O-heavy workloads.",
+        default=None,
         ge=0,
         le=100,
     )
