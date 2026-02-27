@@ -46,8 +46,14 @@ def get_alloy_config(
             "scrape_interval": scrape_interval,
             "scrape_timeout": scrape_timeout,
             "labels": {
+                **{
+                    k: v
+                    for tag in prometheus_rw.tags
+                    for k, v in [tag.split("=", 1)]
+                },
                 "testid": test_id,
                 "client_type": execution_client.value.name,
+                "tool": "expb",
             },
         }
         if prometheus_rw is not None

@@ -10,8 +10,6 @@ import docker.errors
 import requests
 from docker.models.containers import Container
 from docker.models.networks import Network
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 from expb.configs.exports import Pyroscope
 from expb.configs.scenarios import Scenarios
@@ -24,6 +22,9 @@ from expb.payloads.executor.services.alloy import (
 from expb.payloads.executor.services.k6 import (
     build_k6_script_config,
     get_k6_script_content,
+)
+from expb.payloads.executor.services.payload_server import (
+    get_payload_server_script,
 )
 from expb.payloads.executor.services.snapshots import setup_snapshot_service
 from expb.payloads.utils.networking import limit_container_bandwidth
@@ -84,6 +85,9 @@ class Executor:
         self.config.docker_client.images.pull(self.config.execution_client_image)
         self.config.docker_client.images.pull(self.config.get_k6_container_image())
         self.config.docker_client.images.pull(self.config.get_alloy_container_image())
+        self.config.docker_client.images.pull(
+            self.config.get_payload_server_container_image()
+        )
         self.log.info("docker images updated")
 
     # Execution Client Setup
@@ -162,30 +166,36 @@ class Executor:
             "params": [],
             "id": 1,
         }
-        s = requests.Session()
-        retries = Retry(
-            total=self.config.json_rpc_wait_max_retries,
-            backoff_factor=0.5,
-            status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["POST"],
+        max_attempts = self.config.json_rpc_wait_max_retries
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = requests.post(
+                    execution_client_rpc_url,
+                    json=payload,
+                    headers=headers,
+                    timeout=5,
+                )
+                if response.ok:
+                    self.log.info(
+                        "Client json rpc is available",
+                        latest_block=int(response.json()["result"], 16),
+                        attempts=attempt,
+                    )
+                    return
+                self.log.debug(
+                    "Client json rpc not ready",
+                    attempt=attempt,
+                    status_code=response.status_code,
+                )
+            except requests.exceptions.ConnectionError:
+                self.log.debug(
+                    "Client json rpc not reachable",
+                    attempt=attempt,
+                )
+            time.sleep(1)
+        raise Exception(
+            f"Client json rpc is not available after {max_attempts} attempts"
         )
-        s.mount("http://", HTTPAdapter(max_retries=retries))
-        s.mount("https://", HTTPAdapter(max_retries=retries))
-        response: requests.Response = s.post(
-            execution_client_rpc_url,
-            json=payload,
-            headers=headers,
-        )
-        if response.ok:
-            self.log.info(
-                "Client json rpc is available",
-                latest_block=int(response.json()["result"], 16),
-            )
-        else:
-            self.log.error(
-                "Client json rpc is not available", status_code=response.status_code
-            )
-            raise Exception("Client json rpc is not available")
 
     # Grafana Alloy Setup
     def prepare_alloy_config(
@@ -246,6 +256,55 @@ class Executor:
         )
         return alloy_container
 
+    # Payload Server Setup
+    def prepare_payload_server_script(self) -> None:
+        self.config.payload_server_script_file.touch(mode=0o666, exist_ok=True)
+        self.config.payload_server_script_file.write_text(get_payload_server_script())
+        self.log.info(
+            "Payload server script prepared",
+            script_file=self.config.payload_server_script_file,
+        )
+
+    def start_payload_server(
+        self,
+        container_network: Network | None = None,
+    ) -> Container:
+        container = self.config.docker_client.containers.run(
+            image=self.config.get_payload_server_container_image(),
+            name=self.config.get_payload_server_container_name(),
+            volumes=self.config.get_payload_server_volumes(),
+            environment=self.config.get_payload_server_environment(),
+            command=self.config.get_payload_server_command(),
+            detach=True,
+            restart_policy={"Name": "unless-stopped"},
+            network=container_network.name if container_network else None,
+        )
+        return container
+
+    def wait_for_payload_server(
+        self,
+        payload_server_url: str,
+    ) -> None:
+        max_attempts = 300  # 5 minutes max
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = requests.get(
+                    f"{payload_server_url}/ready",
+                    timeout=5,
+                )
+                if response.ok:
+                    self.log.info(
+                        "Payload server is ready",
+                        attempts=attempt,
+                    )
+                    return
+            except requests.exceptions.ConnectionError:
+                pass
+            time.sleep(1)
+        raise Exception(
+            f"Payload server is not ready after {max_attempts} attempts"
+        )
+
     # Grafana K6 Setup
     def prepare_k6_script(self) -> None:
         # Create k6 script file
@@ -271,6 +330,7 @@ class Executor:
     def run_k6(
         self,
         execution_client_engine_url: str,
+        payload_server_url: str,
         container_network: Network | None = None,
         collect_per_payload_metrics: bool = False,
         enable_logging: bool = False,
@@ -282,6 +342,7 @@ class Executor:
         # Prepare k6 container command
         k6_container_command = self.config.get_k6_command(
             execution_client_engine_url=execution_client_engine_url,
+            payload_server_url=payload_server_url,
             collect_per_payload_metrics=collect_per_payload_metrics,
             enable_logging=enable_logging,
             per_payload_metrics_logs=per_payload_metrics_logs,
@@ -531,6 +592,16 @@ class Executor:
         if print_logs_to_console and print_per_payload_metrics_table:
             self._print_per_payload_metrics_table(per_payload_metrics_rows)
 
+        # Clean payload server container
+        try:
+            payload_server_container = self.config.docker_client.containers.get(
+                self.config.get_payload_server_container_name()
+            )
+            payload_server_container.stop()
+            payload_server_container.remove()
+        except docker.errors.NotFound:
+            pass
+
         # Clean alloy container
         try:
             alloy_container = self.config.docker_client.containers.get(
@@ -662,6 +733,31 @@ class Executor:
             # Start extra commands in parallel
             self.start_extra_commands(execution_client_container)
 
+            # Start payload server
+            self.log.info("Preparing payload server script")
+            self.prepare_payload_server_script()
+
+            self.log.info(
+                "Starting payload server",
+                image=self.config.get_payload_server_container_image(),
+            )
+            payload_server_container = self.start_payload_server(
+                container_network=containers_network,
+            )
+
+            payload_server_url = self.config.get_payload_server_url(
+                payload_server_container,
+                containers_network,
+            )
+            self.log.info("Waiting for payload server to be ready")
+            try:
+                self.wait_for_payload_server(
+                    payload_server_url=payload_server_url,
+                )
+            except Exception as e:
+                self.log.error("Failed to wait for payload server", error=e)
+                raise e
+
             self.log.info("Preparing K6 script")
             self.prepare_k6_script()
 
@@ -678,6 +774,7 @@ class Executor:
             )
             _ = self.run_k6(
                 execution_client_engine_url=execution_client_engine_url,
+                payload_server_url=payload_server_url,
                 container_network=containers_network,
                 collect_per_payload_metrics=options.collect_per_payload_metrics,
                 enable_logging=enable_k6_logging,

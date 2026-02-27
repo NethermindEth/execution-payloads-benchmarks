@@ -29,6 +29,8 @@ expb = "expb:app"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build.hooks.custom]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/expb"]
 
@@ -36,12 +38,7 @@ packages = ["src/expb"]
 "src" = ""
 
 [dependency-groups]
-dev = [
-    "httpx>=0.28.1",
-    "pytest>=9.0.2",
-]
+dev = ["httpx>=0.28.1", "pytest>=9.0.2", "hatchling>=1.29.0"]
 
 [tool.pytest.ini_options]
-filterwarnings = [
-    "ignore::DeprecationWarning:websockets",
-]
+filterwarnings = ["ignore::DeprecationWarning:websockets", "hatchling>=1.29.0"]

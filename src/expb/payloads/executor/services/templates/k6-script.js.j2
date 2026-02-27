@@ -1,15 +1,12 @@
 import http from 'k6/http';
 import { group, check, sleep } from 'k6';
-import { SharedArray } from 'k6/data';
 import exec from 'k6/execution';
 import encoding from 'k6/encoding';
 import crypto from 'k6/crypto';
 import { Gauge } from 'k6/metrics';
 
 // --- Env / config ---
-const payloadsFilePath = __ENV.EXPB_PAYLOADS_FILE_PATH;
-const fcusFilePath = __ENV.EXPB_FCUS_FILE_PATH;
-const payloadsSkip = parseInt(__ENV.EXPB_PAYLOADS_SKIP || '0', 10);
+const payloadServerUrl = __ENV.EXPB_PAYLOAD_SERVER_URL;
 const payloadsWarmup = parseInt(__ENV.EXPB_PAYLOADS_WARMUP || '0', 10);
 const payloadsDelay = parseFloat(__ENV.EXPB_PAYLOADS_DELAY || '0');
 const payloadsWarmupDelay = parseFloat(__ENV.EXPB_PAYLOADS_WARMUP_DELAY || '0');
@@ -31,82 +28,7 @@ export const options = config["options"];
 const slowestPayloads = new Gauge('expb_slowest_payloads');
 const slowestProcessing = new Gauge('expb_slowest_processing');
 
-// --- Data ---
-// Pre-process payloads: normalize once during load, extract metadata
-const payloadData = new SharedArray('expb_payload_data', () => {
-  const lines = open(payloadsFilePath).trim().split(/\r?\n/);
-  const processed = [];
-  // Pre-compile regex for better performance
-  const methodRegex = /"method"\s*:\s*"([^"]+)"/;
-  const idRegex = /"id"\s*:\s*(\d+)/;
-  const gasUsedRegex = /"gasUsed"\s*:\s*"([^"]+)"/;
-
-  for (let i = 0; i < lines.length; i++) {
-    let line = lines[i];
-    // Normalize once: remove BOM and trim
-    if (typeof line === 'string') {
-      line = line.replace(/^\uFEFF/, '').trim();
-    } else {
-      line = '';
-    }
-
-    // Pre-extract metadata to avoid regex on every request
-    const head = line.slice(0, 256);
-    const methodMatch = methodRegex.exec(head);
-    const idMatch = idRegex.exec(head);
-
-    // Extract gasUsed (always extract, use conditionally later)
-    const largerHead = line.slice(0, 2048);
-    const gasMatch = gasUsedRegex.exec(largerHead);
-    const gasUsed = gasMatch ? parseInt(gasMatch[1], 16) : undefined;
-
-    processed.push({
-      raw: line,
-      method: methodMatch ? methodMatch[1] : undefined,
-      jrpcId: idMatch ? parseInt(idMatch[1], 10) : undefined,
-      gasUsed: gasUsed,
-    });
-  }
-  return processed;
-});
-
-const fcuData = new SharedArray('expb_fcu_data', () => {
-  const lines = open(fcusFilePath).trim().split(/\r?\n/);
-  const processed = [];
-  const methodRegex = /"method"\s*:\s*"([^"]+)"/;
-
-  for (let i = 0; i < lines.length; i++) {
-    let line = lines[i];
-    if (typeof line === 'string') {
-      line = line.replace(/^\uFEFF/, '').trim();
-    } else {
-      line = '';
-    }
-
-    const head = line.slice(0, 256);
-    const methodMatch = methodRegex.exec(head);
-
-    processed.push({
-      raw: line,
-      method: methodMatch ? methodMatch[1] : undefined,
-    });
-  }
-  return processed;
-});
-
-const warmupIdx0 = Math.max(0, payloadsSkip);
-const startIdx0 = warmupIdx0 + Math.max(0, payloadsWarmup);
-const totalPairs = Math.max(0, Math.min(payloadData.length, fcuData.length) - startIdx0);
-
-// --- Helpers ---
-function safeGetPayload(idx) {
-  return (idx >= 0 && idx < payloadData.length) ? payloadData[idx] : null;
-}
-
-function safeGetFcu(idx) {
-  return (idx >= 0 && idx < fcuData.length) ? fcuData[idx] : null;
-}
-
+// --- JWT ---
 function hex2ArrayBuffer(hex) {
   const buf = new ArrayBuffer(hex.length / 2);
   const view = new Uint8Array(buf);
@@ -136,8 +58,6 @@ function cid() {
   return `${__ENV.testid || 'expb'}-vu${exec.vu.idInTest}-it${exec.scenario.iterationInTest}`;
 }
 
-
-
 function logPost(kind, idx, warmup, correlationId = '') {
   if (!enableLogging || !verbosePostLogs) return;
   const ts = new Date().toISOString();
@@ -146,29 +66,82 @@ function logPost(kind, idx, warmup, correlationId = '') {
   console.log(`[${ts}] POST ${kind} idx=${idx}${warmupTag}${cidTag}`);
 }
 
-function emitPerPayloadMetricsRow(idx, payload, processingMs) {
+function emitPerPayloadMetricsRow(idx, gasUsed, processingMs) {
   if (!enableLogging || !perPayloadMetricsLogs) return;
-  const gasUsed = payload.gasUsed !== undefined ? payload.gasUsed : 'n/a';
+  const gas = gasUsed !== undefined && gasUsed !== '' ? gasUsed : 'n/a';
   const processing = Number.isFinite(processingMs) ? processingMs.toFixed(2) : 'n/a';
   console.log(
-    `EXPB_PER_PAYLOAD_METRIC idx=${idx} gas_used=${gasUsed} processing_ms=${processing}`
+    `EXPB_PER_PAYLOAD_METRIC idx=${idx} gas_used=${gas} processing_ms=${processing}`
   );
 }
 
-function processPayload(idx, base_tags = {}, warmup = false) {
-  // Out of data? graceful (default) or abort if explicitly requested
-  if (idx >= startIdx0 + totalPairs) {
+// --- Fetch next pair from payload server ---
+const methodRegex = /"method"\s*:\s*"([^"]+)"/;
+const idRegex = /"id"\s*:\s*(\d+)/;
+const gasUsedRegex = /"gasUsed"\s*:\s*"([^"]+)"/;
+
+function extractMethod(raw) {
+  const m = methodRegex.exec(raw.slice(0, 256));
+  return m ? m[1] : undefined;
+}
+
+function extractId(raw) {
+  const m = idRegex.exec(raw.slice(0, 256));
+  return m ? parseInt(m[1], 10) : undefined;
+}
+
+function extractGasUsed(raw) {
+  const m = gasUsedRegex.exec(raw.slice(0, 2048));
+  return m ? parseInt(m[1], 16) : undefined;
+}
+
+function fetchNextPair() {
+  const resp = http.get(payloadServerUrl + '/next', {
+    tags: { name: 'payload_fetch' },
+    responseType: 'text',
+  });
+
+  if (resp.status === 404) {
+    return null;
+  }
+
+  if (resp.status !== 200) {
+    console.error(`[payload-server] unexpected status: ${resp.status}`);
+    return null;
+  }
+
+  // Body format: {raw NP line}\n{raw FCU line}
+  const separatorIdx = resp.body.indexOf('\n');
+  const rawPayload = separatorIdx >= 0 ? resp.body.substring(0, separatorIdx) : resp.body;
+  const rawFcu = separatorIdx >= 0 ? resp.body.substring(separatorIdx + 1) : '';
+
+  // Extract metadata directly from raw lines (cheap regex on small slices)
+  const h = resp.headers;
+  return {
+    rawPayload: rawPayload,
+    rawFcu: rawFcu,
+    idx: parseInt(h['X-Expb-Idx'] || '0', 10),
+    method: extractMethod(rawPayload) || 'engine_newPayload',
+    jrpcId: extractId(rawPayload),
+    gasUsed: extractGasUsed(rawPayload),
+    fcuMethod: extractMethod(rawFcu) || 'engine_forkchoiceUpdated',
+  };
+}
+
+function processNextPayload(base_tags = {}, warmup = false) {
+  const pair = fetchNextPair();
+
+  if (!pair) {
     if (abortOnEOF) exec.test.abort('No more payloads or fcus found');
     return;
   }
 
-  const payload = safeGetPayload(idx);
-  const fcu = safeGetFcu(idx);
-
-  if (!payload || !fcu || !payload.raw || !fcu.raw) {
-    if (abortOnEOF) exec.test.abort('Dataset contains empty lines or ended prematurely');
+  if (!pair.rawPayload || !pair.rawFcu) {
+    if (abortOnEOF) exec.test.abort('Received empty payload or FCU from server');
     return;
   }
+
+  const idx = pair.idx;
 
   // Track start time to calculate elapsed time
   const startTime = Date.now();
@@ -188,13 +161,13 @@ function processPayload(idx, base_tags = {}, warmup = false) {
     }
 
     const tags = {
-      jrpc_method: payload.method || 'engine_newPayload',
+      jrpc_method: pair.method,
       kind: 'newPayload',
       ...base_tags
     };
 
     logPost('engine_newPayload', idx, warmup, correlationId);
-    const r = http.post(engineEndpoint, payload.raw, {
+    const r = http.post(engineEndpoint, pair.rawPayload, {
       headers: headers,
       tags: tags,
       responseType: discardResponses ? 'none' : 'text',
@@ -202,16 +175,16 @@ function processPayload(idx, base_tags = {}, warmup = false) {
     check(r, { 'status_200': (x) => x.status === 200 }, tags);
 
     if (!warmup) {
-      emitPerPayloadMetricsRow(idx, payload, r.timings.waiting);
+      emitPerPayloadMetricsRow(idx, pair.gasUsed, r.timings.waiting);
     }
 
     if (!warmup && perPayloadMetrics) {
       const perPayloadMetricsTags = { ...tags };
-      if (payload.jrpcId !== undefined) {
-        perPayloadMetricsTags.jrpc_id = payload.jrpcId;
+      if (pair.jrpcId !== undefined) {
+        perPayloadMetricsTags.jrpc_id = pair.jrpcId;
       }
-      if (payload.gasUsed !== undefined) {
-        perPayloadMetricsTags.gas_used = payload.gasUsed;
+      if (pair.gasUsed !== undefined) {
+        perPayloadMetricsTags.gas_used = pair.gasUsed;
       }
       slowestPayloads.add(r.timings.duration, perPayloadMetricsTags);
       slowestProcessing.add(r.timings.waiting, perPayloadMetricsTags);
@@ -231,13 +204,13 @@ function processPayload(idx, base_tags = {}, warmup = false) {
     }
 
     const tags = {
-      jrpc_method: fcu.method || 'engine_forkchoiceUpdated',
+      jrpc_method: pair.fcuMethod,
       kind: 'forkchoiceUpdated',
       ...base_tags
     };
 
     logPost('engine_forkchoiceUpdated', idx, warmup, correlationId);
-    const r = http.post(engineEndpoint, fcu.raw, {
+    const r = http.post(engineEndpoint, pair.rawFcu, {
       headers: headers,
       tags: tags,
       responseType: discardResponses ? 'none' : 'text',
@@ -257,17 +230,16 @@ function processPayload(idx, base_tags = {}, warmup = false) {
 }
 
 export function setup() {
-  // execute warmup payloads
-  for (let idx = warmupIdx0; idx < startIdx0; idx++) {
-    processPayload(idx, {}, true);
+  // execute warmup payloads (server counter starts at skip, so first N are warmup)
+  for (let i = 0; i < payloadsWarmup; i++) {
+    processNextPayload({}, true);
   }
 }
 
 export default function () {
-  const idx = startIdx0 + exec.scenario.iterationInTest;
   if (exec.scenario.iterationInTest === 0 && warmupWait > 0) {
     sleep(warmupWait);
   }
 
-  processPayload(idx, {}, false);
+  processNextPayload({}, false);
 }

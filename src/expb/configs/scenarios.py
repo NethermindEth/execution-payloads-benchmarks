@@ -19,6 +19,7 @@ from expb.configs.defaults import (
     DOCKER_CONTAINER_DEFAULT_UPLOAD_SPEED,
     K6_DEFAULT_IMAGE,
     OUTPUTS_DEFAULT_DIR,
+    PAYLOAD_SERVER_DEFAULT_IMAGE,
     WORK_DEFAULT_DIR,
 )
 from expb.configs.exports import Exports
@@ -234,6 +235,10 @@ class ScenariosImages(BaseModel):
     alloy: str = Field(
         description="Image to use for the alloy container.",
         default=ALLOY_DEFAULT_IMAGE,
+    )
+    payload_server: str = Field(
+        description="Image to use for the payload server container.",
+        default=PAYLOAD_SERVER_DEFAULT_IMAGE,
     )
 
 
