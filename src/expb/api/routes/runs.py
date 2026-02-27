@@ -1,10 +1,11 @@
-import io
+import tempfile
 import uuid
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from expb.api.auth import verify_token
@@ -93,7 +94,7 @@ def submit_run(
 def list_runs(
     db: Session = Depends(get_db),
     _: None = Depends(verify_token),
-    status: str | None = Query(default=None, description="Filter by run status."),
+    status: RunStatus | None = Query(default=None, description="Filter by run status."),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
 ) -> RunListResponse:
@@ -198,15 +199,26 @@ def download_run_output(
             detail="Output directory no longer exists on disk.",
         )
 
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+    # Write the ZIP to a temporary file so that large output directories don't
+    # require loading the entire archive into memory before sending.
+    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+
+    with zipfile.ZipFile(tmp_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
         for fpath in output_path.rglob("*"):
             if fpath.is_file():
                 zf.write(fpath, fpath.relative_to(output_path))
-    buf.seek(0)
 
-    return Response(
-        content=buf.read(),
+    def _stream_and_cleanup(path: Path, chunk_size: int = 65536):
+        try:
+            with open(path, "rb") as f:
+                while chunk := f.read(chunk_size):
+                    yield chunk
+        finally:
+            path.unlink(missing_ok=True)
+
+    return StreamingResponse(
+        _stream_and_cleanup(tmp_path),
         media_type="application/zip",
         headers={
             "Content-Disposition": f'attachment; filename="run-{run_id}.zip"',

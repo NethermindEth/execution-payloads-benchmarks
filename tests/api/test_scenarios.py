@@ -30,8 +30,11 @@ def test_scenario_overridable_params_listed(client, auth_headers):
     response = client.get("/scenarios", headers=auth_headers)
     scenario = response.json()["scenarios"][0]
     params = scenario["overridable_params"]
-    assert "payloads_amount" in params
-    assert "payloads_delay" in params
+    # Keys match ScenarioOverrides field names (Scenario alias keys where applicable)
+    assert "amount" in params
+    assert "delay" in params
+    assert "image" in params
+    assert "extra_flags" in params
 
 
 def test_list_scenarios_requires_auth(client):

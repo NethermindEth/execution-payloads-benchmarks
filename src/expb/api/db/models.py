@@ -26,7 +26,7 @@ class Run(Base):
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     scenario_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    status: Mapped[str] = mapped_column(
+    status: Mapped[RunStatus] = mapped_column(
         SAEnum(RunStatus), nullable=False, default=RunStatus.QUEUED, index=True
     )
     queued_at: Mapped[datetime] = mapped_column(

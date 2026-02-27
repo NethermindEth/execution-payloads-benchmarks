@@ -57,15 +57,17 @@ def test_submit_run_with_overrides(client, auth_headers):
         "/runs",
         json={
             "scenario_name": "test-scenario",
-            "payloads_amount": 5,
-            "payloads_delay": 0.5,
+            "overrides": {
+                "amount": 5,
+                "delay": 0.5,
+            },
         },
         headers=auth_headers,
     )
     assert response.status_code == 201
     data = response.json()
-    assert data["overrides"]["payloads_amount"] == 5
-    assert data["overrides"]["payloads_delay"] == 0.5
+    assert data["overrides"]["overrides"]["amount"] == 5
+    assert data["overrides"]["overrides"]["delay"] == 0.5
 
 
 # ---------------------------------------------------------------------------
