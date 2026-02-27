@@ -62,9 +62,11 @@ def create_app(
         lifespan=lifespan,
     )
 
+    from expb.api.routes.health import router as health_router
     from expb.api.routes.runs import router as runs_router
     from expb.api.routes.scenarios import router as scenarios_router
 
+    app.include_router(health_router)
     app.include_router(runs_router, prefix="/runs", tags=["runs"])
     app.include_router(scenarios_router, prefix="/scenarios", tags=["scenarios"])
 

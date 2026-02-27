@@ -92,8 +92,9 @@ def list_tokens(
         table = Table(title="API Tokens")
         table.add_column("Name", style="cyan", no_wrap=True)
         table.add_column("Created At", style="green")
+        table.add_column("Last Used At", style="yellow")
         for t in tokens:
-            table.add_row(t.name, str(t.created_at))
+            table.add_row(t.name, str(t.created_at), str(t.last_used_at) if t.last_used_at else "never")
         console.print(table)
     finally:
         db.close()

@@ -5,11 +5,28 @@ from expb.api.auth import verify_token
 
 router = APIRouter()
 
+_OVERRIDABLE_PARAMS = [
+    "payloads_amount",
+    "payloads_skip",
+    "payloads_delay",
+    "payloads_warmup",
+    "per_payload_metrics",
+    "print_logs",
+]
+
 
 class ScenarioInfo(BaseModel):
     name: str
     client: str
     network: str
+    # Scenario defaults — lets API consumers know what they are overriding
+    default_duration: str
+    default_warmup_duration: str
+    default_delay: float
+    default_warmup: int | None
+    default_amount: int
+    # Informational: which fields can be overridden in POST /runs
+    overridable_params: list[str]
 
 
 class ScenarioListResponse(BaseModel):
@@ -28,6 +45,12 @@ def list_scenarios(
             name=name,
             client=sc.client.value.name,
             network=sc.network.value.name,
+            default_duration=sc.duration,
+            default_warmup_duration=sc.warmup_duration,
+            default_delay=sc.payloads_delay,
+            default_warmup=sc.payloads_warmup,
+            default_amount=sc.payloads_amount,
+            overridable_params=_OVERRIDABLE_PARAMS,
         )
         for name, sc in scenarios.scenarios_configs.items()
     ]

@@ -16,6 +16,7 @@ class RunStatus(str, enum.Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class Run(Base):
@@ -59,3 +60,4 @@ class ApiToken(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.now(timezone.utc)
     )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

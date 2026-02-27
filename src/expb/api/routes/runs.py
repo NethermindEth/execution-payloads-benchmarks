@@ -1,6 +1,7 @@
 import io
 import uuid
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -14,6 +15,7 @@ from expb.api.schemas.runs import (
     K6Metrics,
     RunListResponse,
     RunResponse,
+    RunStatusResponse,
     SubmitRunRequest,
 )
 from expb.api.worker import BenchmarkWorker
@@ -127,6 +129,44 @@ def get_run(
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found.")
     return _run_to_response(run)
+
+
+@router.get("/{run_id}/status", response_model=RunStatusResponse)
+def get_run_status(
+    run_id: str,
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_token),
+) -> RunStatusResponse:
+    """Lightweight status-only check for a run. Useful for polling."""
+    run = db.query(Run).filter(Run.run_id == run_id).first()
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    return RunStatusResponse(run_id=run.run_id, status=run.status)
+
+
+@router.delete("/{run_id}", status_code=204)
+def cancel_run(
+    run_id: str,
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_token),
+) -> None:
+    """
+    Cancel a queued run.
+
+    Only runs in ``queued`` status can be cancelled. A run that is already
+    executing cannot be stopped mid-flight.
+    """
+    run = db.query(Run).filter(Run.run_id == run_id).first()
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    if run.status != RunStatus.QUEUED:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Only queued runs can be cancelled (current status: {run.status}).",
+        )
+    run.status = RunStatus.CANCELLED
+    run.completed_at = datetime.now(timezone.utc)
+    db.commit()
 
 
 @router.get("/{run_id}/download")

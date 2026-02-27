@@ -77,3 +77,8 @@ class RunListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class RunStatusResponse(BaseModel):
+    run_id: str
+    status: str
