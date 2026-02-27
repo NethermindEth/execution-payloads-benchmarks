@@ -1,7 +1,7 @@
 import typer
 from typing_extensions import Annotated
 
-from expb._version import __commit__, __version__
+from expb.cli.version._version import __commit__, __version__
 from expb.logging import setup_logging
 
 app = typer.Typer()

@@ -20,5 +20,7 @@ class CustomBuildHook(BuildHookInterface):
         except Exception:
             commit = "unknown"
 
-        version_file = Path(self.root) / "src" / "expb" / "_version.py"
+        version_file = (
+            Path(self.root) / "src" / "expb" / "cli" / "version" / "_version.py"
+        )
         version_file.write_text(f'__version__ = "{version}"\n__commit__ = "{commit}"\n')

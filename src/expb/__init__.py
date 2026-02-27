@@ -1,23 +1,8 @@
 import typer
 
-from expb.compress_payloads import app as compress_payloads_app
-from expb.execute_scenario import app as execute_scenario_app
-from expb.execute_scenarios import app as execute_scenarios_app
-from expb.generate_payloads import app as generate_payloads_app
-from expb.send_payloads import app as send_payloads_app
-from expb.version import app as version_app
+from expb.cli import app as cli_app
 
 app = typer.Typer()
 
-typer_apps = [
-    generate_payloads_app,
-    execute_scenario_app,
-    execute_scenarios_app,
-    compress_payloads_app,
-    send_payloads_app,
-    version_app,
-]
-
-
-for typer_app in typer_apps:
-    app.add_typer(typer_app)
+# All commands (including the `api` sub-group) are registered via cli/
+app.add_typer(cli_app)
