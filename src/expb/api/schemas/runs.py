@@ -64,7 +64,6 @@ class RunResponse(BaseModel):
     queued_at: datetime
     started_at: datetime | None = None
     completed_at: datetime | None = None
-    output_dir: str | None = None
     error_message: str | None = None
     k6_metrics: K6Metrics | None = None
     overrides: dict[str, Any] | None = None

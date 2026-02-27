@@ -50,7 +50,6 @@ def _run_to_response(run: Run) -> RunResponse:
         queued_at=run.queued_at,
         started_at=run.started_at,
         completed_at=run.completed_at,
-        output_dir=run.output_dir,
         error_message=run.error_message,
         k6_metrics=k6,
         overrides=run.overrides,
