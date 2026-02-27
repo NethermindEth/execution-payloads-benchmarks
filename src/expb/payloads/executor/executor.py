@@ -4,6 +4,7 @@ import secrets
 import subprocess
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
+from pathlib import Path
 
 import docker
 import docker.errors
@@ -80,6 +81,79 @@ class Executor:
             self.log.error("Failed to clean system cache", error=e)
             raise e
 
+    def run_preflight_checks(self) -> None:
+        """Run preflight checks and log warnings for suboptimal system configuration."""
+        self._check_cpu_governor()
+        self._check_transparent_huge_pages()
+        self._check_noisy_timers()
+
+    def _check_cpu_governor(self) -> None:
+        """Log a warning if any CPU is not using the 'performance' governor."""
+        try:
+            governor_path = Path("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor")
+            if not governor_path.exists():
+                return
+            governor = governor_path.read_text().strip()
+            if governor != "performance":
+                self.log.warning(
+                    "CPU frequency governor is not set to 'performance', benchmark results may have higher variance. "
+                    "Fix: echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor",
+                    current_governor=governor,
+                )
+        except Exception:
+            pass
+
+    def _check_transparent_huge_pages(self) -> None:
+        """Log a warning if Transparent Huge Pages are enabled (causes latency spikes from compaction)."""
+        try:
+            thp_path = Path("/sys/kernel/mm/transparent_hugepage/enabled")
+            if not thp_path.exists():
+                return
+            content = thp_path.read_text().strip()
+            # Format is like: "always [madvise] never" — bracketed value is active
+            if "[always]" in content:
+                self.log.warning(
+                    "Transparent Huge Pages are enabled, THP compaction can cause unpredictable latency spikes. "
+                    "Fix: echo madvise | sudo tee /sys/kernel/mm/transparent_hugepage/enabled && "
+                    "echo madvise | sudo tee /sys/kernel/mm/transparent_hugepage/defrag",
+                    current="always",
+                )
+        except Exception:
+            pass
+
+    NOISY_TIMERS = [
+        "sysstat-collect.timer",
+        "apt-daily.timer",
+        "apt-daily-upgrade.timer",
+        "fwupd-refresh.timer",
+        "fstrim.timer",
+    ]
+
+    def _check_noisy_timers(self) -> None:
+        """Log a warning if systemd timers known to cause I/O or CPU spikes are active."""
+        try:
+            result = subprocess.run(
+                ["systemctl", "list-timers", "--no-pager", "--no-legend"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode != 0:
+                return
+            active_noisy = [
+                timer
+                for timer in self.NOISY_TIMERS
+                if timer in result.stdout
+            ]
+            if active_noisy:
+                self.log.warning(
+                    "Active systemd timers may cause benchmark variance. "
+                    f"Fix: systemctl stop {' '.join(active_noisy)}",
+                    active_timers=active_noisy,
+                )
+        except Exception:
+            pass
+
     def pull_docker_images(self) -> None:
         self.log.info("updating docker images")
         self.config.docker_client.images.pull(self.config.execution_client_image)
@@ -135,7 +209,7 @@ class Executor:
         # Run execution container
         cpu_count = self.config.resources.cpu if self.config.resources else None
         mem_limit = self.config.resources.mem if self.config.resources else None
-        container = self.config.docker_client.containers.run(
+        run_kwargs = dict(
             image=self.config.execution_client_image,
             name=self.config.get_execution_client_container_name(),
             volumes=execution_container_volumes,
@@ -152,6 +226,11 @@ class Executor:
             group_add=self.config.docker_group_add,
             stop_signal=stop_signal,
         )
+        if self.config.resources and self.config.resources.cpuset is not None:
+            run_kwargs["cpuset_cpus"] = self.config.resources.cpuset
+        if self.config.resources and self.config.resources.mem_swappiness is not None:
+            run_kwargs["mem_swappiness"] = self.config.resources.mem_swappiness
+        container = self.config.docker_client.containers.run(**run_kwargs)
         return container
 
     def wait_for_client_json_rpc(
@@ -244,7 +323,7 @@ class Executor:
         self,
         container_network: Network | None = None,
     ) -> Container:
-        alloy_container = self.config.docker_client.containers.run(
+        run_kwargs = dict(
             image=self.config.get_alloy_container_image(),
             name=self.config.get_alloy_container_name(),
             volumes=self.config.get_alloy_volumes(),
@@ -254,6 +333,9 @@ class Executor:
             restart_policy={"Name": "unless-stopped"},
             network=container_network.name if container_network else None,
         )
+        if self.config.resources and self.config.resources.infra_cpuset is not None:
+            run_kwargs["cpuset_cpus"] = self.config.resources.infra_cpuset
+        alloy_container = self.config.docker_client.containers.run(**run_kwargs)
         return alloy_container
 
     # Payload Server Setup
@@ -269,7 +351,7 @@ class Executor:
         self,
         container_network: Network | None = None,
     ) -> Container:
-        container = self.config.docker_client.containers.run(
+        run_kwargs = dict(
             image=self.config.get_payload_server_container_image(),
             name=self.config.get_payload_server_container_name(),
             volumes=self.config.get_payload_server_volumes(),
@@ -279,6 +361,9 @@ class Executor:
             restart_policy={"Name": "unless-stopped"},
             network=container_network.name if container_network else None,
         )
+        if self.config.resources and self.config.resources.infra_cpuset is not None:
+            run_kwargs["cpuset_cpus"] = self.config.resources.infra_cpuset
+        container = self.config.docker_client.containers.run(**run_kwargs)
         return container
 
     def wait_for_payload_server(
@@ -352,7 +437,7 @@ class Executor:
         k6_container_environment = self.config.get_k6_environment()
 
         # Execute k6 container
-        container = self.config.docker_client.containers.run(
+        run_kwargs = dict(
             image=self.config.get_k6_container_image(),
             name=self.config.get_k6_container_name(),
             volumes=k6_container_volumes,
@@ -365,6 +450,9 @@ class Executor:
             group_add=self.config.docker_group_add,
             stop_signal="SIGINT",
         )
+        if self.config.resources and self.config.resources.infra_cpuset is not None:
+            run_kwargs["cpuset_cpus"] = self.config.resources.infra_cpuset
+        container = self.config.docker_client.containers.run(**run_kwargs)
         return container
 
     # Extra Commands Execution
@@ -636,6 +724,7 @@ class Executor:
                 scenario=self.config.executor_name,
                 execution_client=self.config.get_execution_client_name(),
             )
+            self.run_preflight_checks()
             self.clean_system_cache()
             self.prepare_directories()
             self.prepare_jwt_secret_file()
@@ -681,7 +770,13 @@ class Executor:
                 docker_container_cpus=self.config.resources.cpu
                 if self.config.resources
                 else None,
+                docker_container_cpuset=self.config.resources.cpuset
+                if self.config.resources
+                else None,
                 docker_container_mem_limit=self.config.resources.mem
+                if self.config.resources
+                else None,
+                docker_container_mem_swappiness=self.config.resources.mem_swappiness
                 if self.config.resources
                 else None,
             )

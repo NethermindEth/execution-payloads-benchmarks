@@ -1,10 +1,10 @@
 ﻿# Pull images before execution
 pull_images: true
 
-# Docker images to use
+# Docker images to use (pin to specific versions for reproducible benchmarks)
 images:
-  k6: grafana/k6:latest
-  alloy: grafana/alloy:latest
+  k6: grafana/k6:1.6.1
+  alloy: grafana/alloy:v1.13.2
   payload_server: python:3.12-slim
 
 # Paths for the payloads jsonl file, work directory, and outputs directory
@@ -45,6 +45,20 @@ resources:
   mem: 32g
   download_speed: 50mbit
   upload_speed: 15mbit
+  # Optional: Pin execution client container to specific CPU cores (Docker --cpuset-cpus)
+  # Eliminates CPU cache thrashing from scheduler migration. Strongly recommended for stable benchmarks.
+  # Use `lscpu -e=CPU,CORE,SOCKET` to verify your topology. Ensure pinned cores don't share
+  # physical cores with infra_cpuset. Avoid cores 0-1 as they typically handle hardware interrupts.
+  # Example for 8-physical/16-logical CPU: cores 2-5 + their HT siblings 10-13 = 8 threads on 4 dedicated physical cores.
+  cpuset: "2-5,10-13"
+  # Optional: Pin infrastructure containers (K6, Alloy, payload server) to separate CPU cores
+  # Prevents infra from stealing cycles from the execution client under test.
+  # Should use different physical cores than cpuset to avoid contention.
+  infra_cpuset: "0-1,8-9"
+  # Optional: Memory swappiness for the execution client container (0-100). Defaults to host setting.
+  # Low values preserve heap memory but aggressively evict page cache, which can hurt I/O-heavy workloads.
+  # Only set this if you understand your workload's memory profile.
+  # mem_swappiness: 10
 
 # Scenarios to execute
 scenarios:

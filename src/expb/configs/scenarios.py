@@ -225,6 +225,20 @@ class ScenariosResources(BaseModel):
         description="Upload speed for the scenario.",
         default=DOCKER_CONTAINER_DEFAULT_UPLOAD_SPEED,
     )
+    cpuset: str | None = Field(
+        description="CPU cores to pin the execution client container to (e.g., '0-3', '0,1,2,3'). Maps to Docker --cpuset-cpus.",
+        default=None,
+    )
+    infra_cpuset: str | None = Field(
+        description="CPU cores to pin infrastructure containers (K6, Alloy, payload server) to (e.g., '4-5'). Maps to Docker --cpuset-cpus.",
+        default=None,
+    )
+    mem_swappiness: int | None = Field(
+        description="Memory swappiness for the execution client container (0-100). None inherits host default. Low values preserve heap but evict page cache, which hurts I/O-heavy workloads.",
+        default=None,
+        ge=0,
+        le=100,
+    )
 
 
 class ScenariosImages(BaseModel):
