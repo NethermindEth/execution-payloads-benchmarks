@@ -137,6 +137,9 @@ class ExecutorConfig:
         ## Alloy config file
         self.alloy_config_file: Path = self.outputs_dir / "config.alloy"
 
+        ## Pre-processed merged payloads file
+        self.merged_payloads_file: Path = self.outputs_dir / "merged-payloads.jsonl"
+
         ## Payload server config
         self.payload_server_script_file: Path = self.outputs_dir / "payload-server.py"
         self._payload_server_container_port: int = PAYLOAD_SERVER_PORT
@@ -144,11 +147,8 @@ class ExecutorConfig:
         self._payload_server_container_script: str = (
             f"{self._payload_server_container_work_dir}/payload-server.py"
         )
-        self._payload_server_container_payloads_file: str = (
-            f"/payloads/{self.payloads_file.name}"
-        )
-        self._payload_server_container_fcus_file: str = (
-            f"/payloads/{self.fcus_file.name}"
+        self._payload_server_container_merged_file: str = (
+            "/payloads/merged-payloads.jsonl"
         )
 
         # Executor Exports config
@@ -331,12 +331,8 @@ class ExecutorConfig:
 
     def get_payload_server_volumes(self) -> dict[str, dict[str, str]]:
         return {
-            str(self.payloads_file.resolve()): {
-                "bind": self._payload_server_container_payloads_file,
-                "mode": "ro",
-            },
-            str(self.fcus_file.resolve()): {
-                "bind": self._payload_server_container_fcus_file,
+            str(self.merged_payloads_file.resolve()): {
+                "bind": self._payload_server_container_merged_file,
                 "mode": "ro",
             },
             str(self.payload_server_script_file.resolve()): {
@@ -350,11 +346,8 @@ class ExecutorConfig:
 
     def get_payload_server_environment(self) -> dict[str, str]:
         return {
-            "EXPB_PAYLOADS_FILE": self._payload_server_container_payloads_file,
-            "EXPB_FCUS_FILE": self._payload_server_container_fcus_file,
+            "EXPB_MERGED_FILE": self._payload_server_container_merged_file,
             "EXPB_SERVER_PORT": str(self._payload_server_container_port),
-            "EXPB_CACHE_SIZE": "100",
-            "EXPB_SKIP": str(self.k6_payloads_skip or 0),
         }
 
     def get_payload_server_url(

@@ -76,24 +76,8 @@ function emitPerPayloadMetricsRow(idx, gasUsed, processingMs) {
 }
 
 // --- Fetch next pair from payload server ---
-const methodRegex = /"method"\s*:\s*"([^"]+)"/;
-const idRegex = /"id"\s*:\s*(\d+)/;
-const gasUsedRegex = /"gasUsed"\s*:\s*"([^"]+)"/;
-
-function extractMethod(raw) {
-  const m = methodRegex.exec(raw.slice(0, 256));
-  return m ? m[1] : undefined;
-}
-
-function extractId(raw) {
-  const m = idRegex.exec(raw.slice(0, 256));
-  return m ? parseInt(m[1], 10) : undefined;
-}
-
-function extractGasUsed(raw) {
-  const m = gasUsedRegex.exec(raw.slice(0, 2048));
-  return m ? parseInt(m[1], 16) : undefined;
-}
+// Line format: {metadata_json}\t{raw_NP}\t{raw_FCU}
+// Metadata is pre-extracted by the executor, no regex needed here.
 
 function fetchNextPair() {
   const resp = http.get(payloadServerUrl + '/next', {
@@ -110,21 +94,31 @@ function fetchNextPair() {
     return null;
   }
 
-  // Body format: {raw NP line}\n{raw FCU line}
-  const separatorIdx = resp.body.indexOf('\n');
-  const rawPayload = separatorIdx >= 0 ? resp.body.substring(0, separatorIdx) : resp.body;
-  const rawFcu = separatorIdx >= 0 ? resp.body.substring(separatorIdx + 1) : '';
+  // Parse merged line: {metadata}\t{NP}\t{FCU}
+  const body = resp.body;
+  const firstTab = body.indexOf('\t');
+  if (firstTab < 0) {
+    console.error('[payload-server] malformed line: no tab separator');
+    return null;
+  }
+  const secondTab = body.indexOf('\t', firstTab + 1);
+  if (secondTab < 0) {
+    console.error('[payload-server] malformed line: missing second tab separator');
+    return null;
+  }
 
-  // Extract metadata directly from raw lines (cheap regex on small slices)
-  const h = resp.headers;
+  const meta = JSON.parse(body.substring(0, firstTab));
+  const rawPayload = body.substring(firstTab + 1, secondTab);
+  const rawFcu = body.substring(secondTab + 1);
+
   return {
     rawPayload: rawPayload,
     rawFcu: rawFcu,
-    idx: parseInt(h['X-Expb-Idx'] || '0', 10),
-    method: extractMethod(rawPayload) || 'engine_newPayload',
-    jrpcId: extractId(rawPayload),
-    gasUsed: extractGasUsed(rawPayload),
-    fcuMethod: extractMethod(rawFcu) || 'engine_forkchoiceUpdated',
+    idx: meta.idx,
+    method: meta.method || 'engine_newPayload',
+    jrpcId: meta.jrpc_id,
+    gasUsed: meta.gas_used,
+    fcuMethod: meta.fcu_method || 'engine_forkchoiceUpdated',
   };
 }
 

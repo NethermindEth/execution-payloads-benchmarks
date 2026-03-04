@@ -338,6 +338,78 @@ class Executor:
         alloy_container = self.config.docker_client.containers.run(**run_kwargs)
         return alloy_container
 
+    # Payload Pre-processing
+    _METHOD_RE = re.compile(r'"method"\s*:\s*"([^"]+)"')
+    _ID_RE = re.compile(r'"id"\s*:\s*(\d+)')
+    _GAS_USED_RE = re.compile(r'"gasUsed"\s*:\s*"([^"]+)"')
+
+    def prepare_payload_files(self) -> None:
+        """Pre-slice, merge, and extract metadata from payloads and FCUs files.
+
+        Creates a single merged file where each line is:
+            {metadata_json}\\t{raw_NP}\\t{raw_FCU}
+
+        This moves all heavy processing (file indexing, regex extraction)
+        out of the benchmark hot path.
+        """
+        skip = self.config.k6_payloads_skip or 0
+        warmup = self.config.k6_payloads_warmup or 0
+        amount = self.config.k6_payloads_amount
+        total_needed = skip + warmup + amount
+
+        self.log.info(
+            "Pre-processing payload files",
+            payloads_file=str(self.config.payloads_file),
+            fcus_file=str(self.config.fcus_file),
+            skip=skip,
+            warmup=warmup,
+            amount=amount,
+            total_lines=total_needed,
+        )
+
+        lines_written = 0
+        with (
+            open(self.config.payloads_file, "r") as pf,
+            open(self.config.fcus_file, "r") as ff,
+            open(self.config.merged_payloads_file, "w") as out,
+        ):
+            for idx, (payload_line, fcu_line) in enumerate(zip(pf, ff)):
+                if idx >= total_needed:
+                    break
+
+                payload_line = payload_line.rstrip("\r\n")
+                fcu_line = fcu_line.rstrip("\r\n")
+
+                # Extract metadata from raw JSON (first ~2048 chars)
+                meta = {"idx": idx}
+                head = payload_line[:2048]
+
+                m = self._METHOD_RE.search(head)
+                if m:
+                    meta["method"] = m.group(1)
+
+                m = self._ID_RE.search(head)
+                if m:
+                    meta["jrpc_id"] = int(m.group(1))
+
+                m = self._GAS_USED_RE.search(head)
+                if m:
+                    meta["gas_used"] = int(m.group(1), 16)
+
+                fcu_head = fcu_line[:256]
+                m = self._METHOD_RE.search(fcu_head)
+                if m:
+                    meta["fcu_method"] = m.group(1)
+
+                out.write(f"{json.dumps(meta)}\t{payload_line}\t{fcu_line}\n")
+                lines_written += 1
+
+        self.log.info(
+            "Payload files pre-processed",
+            output=str(self.config.merged_payloads_file),
+            lines_written=lines_written,
+        )
+
     # Payload Server Setup
     def prepare_payload_server_script(self) -> None:
         self.config.payload_server_script_file.touch(mode=0o666, exist_ok=True)
@@ -827,6 +899,10 @@ class Executor:
 
             # Start extra commands in parallel
             self.start_extra_commands(execution_client_container)
+
+            # Pre-process payload files (slice, merge, extract metadata)
+            self.log.info("Pre-processing payload files")
+            self.prepare_payload_files()
 
             # Start payload server
             self.log.info("Preparing payload server script")
