@@ -81,6 +81,39 @@ class Executor:
             self.log.error("Failed to clean system cache", error=e)
             raise e
 
+    def prewarm_page_cache(self) -> None:
+        """Read all snapshot files into the OS page cache for deterministic I/O.
+
+        After drop_caches + overlay mount, the page cache is empty.
+        This reads every file in the snapshot directory so that all subsequent
+        database reads by the execution client hit RAM instead of disk,
+        eliminating I/O variance between benchmark runs.
+        """
+        snapshot_path = self.config.snapshot_service.get_snapshot(
+            name=self.config.executor_name, source=self.config.snapshot_source
+        )
+        self.log.info(
+            "Pre-warming page cache",
+            snapshot_path=str(snapshot_path),
+        )
+        t0 = time.time()
+        try:
+            subprocess.run(
+                f"find {snapshot_path.resolve()} -type f -exec cat {{}} + > /dev/null",
+                shell=True,
+                check=True,
+            )
+            elapsed = time.time() - t0
+            self.log.info(
+                "Page cache pre-warmed",
+                elapsed_seconds=round(elapsed, 2),
+            )
+        except subprocess.CalledProcessError as e:
+            self.log.warning(
+                "Failed to pre-warm page cache, benchmark may have higher I/O variance",
+                error=e,
+            )
+
     def run_preflight_checks(self) -> None:
         """Run preflight checks and log warnings for suboptimal system configuration."""
         self._check_cpu_governor()
@@ -799,6 +832,7 @@ class Executor:
             self.run_preflight_checks()
             self.clean_system_cache()
             self.prepare_directories()
+            self.prewarm_page_cache()
             self.prepare_jwt_secret_file()
             if self.config.pull_images:
                 self.pull_docker_images()
