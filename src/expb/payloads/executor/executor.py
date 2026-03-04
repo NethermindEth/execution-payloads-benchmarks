@@ -343,6 +343,65 @@ class Executor:
     _ID_RE = re.compile(r'"id"\s*:\s*(\d+)')
     _GAS_USED_RE = re.compile(r'"gasUsed"\s*:\s*"([^"]+)"')
 
+    @staticmethod
+    def _decode_raw_tx(raw_bytes: bytes) -> dict:
+        """Decode a raw RLP-encoded transaction into a TransactionForRpc-style dict.
+
+        Handles both legacy (type 0) and typed (EIP-2930, EIP-1559, EIP-4844)
+        transactions.  Returns a dict with to/input/value/gas fields.
+        Sender recovery is skipped — eth_simulateV1 with validation=False
+        doesn't need it, and it avoids complex ecrecover logic.
+        """
+        import rlp
+
+        call: dict = {}
+
+        if raw_bytes[0] > 0x7F:
+            # Legacy transaction (RLP list starting with 0x80+)
+            decoded = rlp.decode(raw_bytes)
+            # Legacy format: [nonce, gasPrice, gasLimit, to, value, data, v, r, s]
+            if len(decoded) >= 6:
+                gas_limit = decoded[2]
+                to = decoded[3]
+                value = decoded[4]
+                data = decoded[5]
+                if to:
+                    call["to"] = "0x" + to.hex()
+                if data:
+                    call["input"] = "0x" + data.hex()
+                if value and int.from_bytes(value, "big") > 0:
+                    call["value"] = hex(int.from_bytes(value, "big"))
+                if gas_limit:
+                    call["gas"] = hex(int.from_bytes(gas_limit, "big"))
+        else:
+            # Typed transaction (first byte is the type: 1, 2, 3, ...)
+            from hexbytes import HexBytes
+            from eth_account.typed_transactions import TypedTransaction
+
+            tx_obj = TypedTransaction.from_bytes(HexBytes(raw_bytes))
+            tx_dict = tx_obj.as_dict()
+
+            to = tx_dict.get("to")
+            if to and to != b"":
+                if isinstance(to, bytes):
+                    call["to"] = "0x" + to.hex()
+                else:
+                    call["to"] = str(to)
+            data_val = tx_dict.get("data", b"")
+            if data_val:
+                if isinstance(data_val, bytes):
+                    call["input"] = "0x" + data_val.hex()
+                else:
+                    call["input"] = str(data_val)
+            value_val = tx_dict.get("value", 0)
+            if value_val and int(value_val) > 0:
+                call["value"] = hex(int(value_val))
+            gas_val = tx_dict.get("gas", 0)
+            if gas_val:
+                call["gas"] = hex(int(gas_val))
+
+        return call
+
     def _build_simulate_payload(self, payload_line: str) -> str:
         """Build an eth_simulateV1 JSON-RPC request body for a single block.
 
@@ -350,8 +409,6 @@ class Executor:
         single-block simulate call.  Returns the JSON string, or empty
         string if the block has no transactions.
         """
-        from eth_account import Account
-
         payload = json.loads(payload_line)
         params = payload.get("params", [])
         if not params:
@@ -368,22 +425,7 @@ class Executor:
                 raw_bytes = bytes.fromhex(
                     raw_tx_hex[2:] if raw_tx_hex.startswith("0x") else raw_tx_hex
                 )
-                tx = Account.decode_transaction(raw_bytes)
-
-                call = {}
-                if hasattr(tx, "sender"):
-                    call["from"] = tx.sender
-                if hasattr(tx, "to") and tx.to:
-                    call["to"] = tx.to
-                if hasattr(tx, "data") and tx.data:
-                    call["input"] = "0x" + tx.data.hex()
-                elif hasattr(tx, "input") and tx.input:
-                    call["input"] = "0x" + tx.input.hex()
-                if hasattr(tx, "value") and tx.value:
-                    call["value"] = hex(tx.value)
-                if hasattr(tx, "gas"):
-                    call["gas"] = hex(tx.gas)
-
+                call = self._decode_raw_tx(raw_bytes)
                 if call.get("from") or call.get("to"):
                     calls.append(call)
             except Exception:
