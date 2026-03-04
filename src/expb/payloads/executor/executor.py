@@ -81,38 +81,164 @@ class Executor:
             self.log.error("Failed to clean system cache", error=e)
             raise e
 
-    def prewarm_page_cache(self) -> None:
-        """Read all snapshot files into the OS page cache for deterministic I/O.
+    # EVM Warmup via eth_simulateV1
+    _SIMULATE_BATCH_SIZE = 256  # Nethermind max blocks per simulate call
 
-        After drop_caches + overlay mount, the page cache is empty.
-        This reads every file in the snapshot directory so that all subsequent
-        database reads by the execution client hit RAM instead of disk,
-        eliminating I/O variance between benchmark runs.
+    def warmup_evm(self, rpc_url: str) -> None:
+        """Warm the execution client's EVM caches by simulating benchmark transactions.
+
+        Uses eth_simulateV1 to execute the same transactions the benchmark will
+        process, without persisting any state. This warms:
+        - Contract code cache
+        - State trie read cache
+        - EVM JIT/compiled code paths
+        - DB block cache for accessed pages
         """
-        snapshot_path = self.config.snapshot_service.get_snapshot(
-            name=self.config.executor_name, source=self.config.snapshot_source
-        )
+        from eth_account import Account
+
+        skip = self.config.k6_payloads_skip or 0
+        warmup = self.config.k6_payloads_warmup or 0
+        amount = self.config.k6_payloads_amount
+        total_needed = skip + warmup + amount
+
         self.log.info(
-            "Pre-warming page cache",
-            snapshot_path=str(snapshot_path),
+            "Warming up EVM via eth_simulateV1",
+            total_blocks=total_needed,
+            batch_size=self._SIMULATE_BATCH_SIZE,
         )
+
         t0 = time.time()
-        try:
-            subprocess.run(
-                f"find {snapshot_path.resolve()} -type f -exec cat {{}} + > /dev/null",
-                shell=True,
-                check=True,
-            )
-            elapsed = time.time() - t0
-            self.log.info(
-                "Page cache pre-warmed",
-                elapsed_seconds=round(elapsed, 2),
-            )
-        except subprocess.CalledProcessError as e:
-            self.log.warning(
-                "Failed to pre-warm page cache, benchmark may have higher I/O variance",
-                error=e,
-            )
+        blocks_simulated = 0
+
+        # Read payloads and extract transactions
+        block_calls = []
+        with open(self.config.payloads_file, "r") as f:
+            for idx, line in enumerate(f):
+                if idx >= total_needed:
+                    break
+
+                payload = json.loads(line)
+                params = payload.get("params", [])
+                if not params:
+                    continue
+
+                execution_payload = params[0]
+                raw_txs = execution_payload.get("transactions", [])
+                if not raw_txs:
+                    block_calls.append({"calls": []})
+                    continue
+
+                calls = []
+                for raw_tx_hex in raw_txs:
+                    try:
+                        raw_bytes = bytes.fromhex(raw_tx_hex[2:] if raw_tx_hex.startswith("0x") else raw_tx_hex)
+                        # Decode the raw transaction using web3
+                        tx = Account.decode_transaction(raw_bytes)
+
+                        call = {}
+                        # Extract sender from the signed transaction
+                        if hasattr(tx, "sender"):
+                            call["from"] = tx.sender
+                        if hasattr(tx, "to") and tx.to:
+                            call["to"] = tx.to
+                        if hasattr(tx, "data") and tx.data:
+                            call["input"] = "0x" + tx.data.hex()
+                        elif hasattr(tx, "input") and tx.input:
+                            call["input"] = "0x" + tx.input.hex()
+                        if hasattr(tx, "value") and tx.value:
+                            call["value"] = hex(tx.value)
+                        if hasattr(tx, "gas"):
+                            call["gas"] = hex(tx.gas)
+
+                        if call.get("from") or call.get("to"):
+                            calls.append(call)
+                    except Exception:
+                        # Skip transactions that can't be decoded
+                        continue
+
+                block_state_call = {"calls": calls}
+
+                # Add block overrides for correct context
+                block_number = execution_payload.get("blockNumber")
+                timestamp = execution_payload.get("timestamp")
+                gas_limit = execution_payload.get("gasLimit")
+                base_fee = execution_payload.get("baseFeePerGas")
+                fee_recipient = execution_payload.get("feeRecipient")
+                prev_randao = execution_payload.get("prevRandao")
+
+                block_overrides = {}
+                if block_number:
+                    block_overrides["blockNumber"] = block_number
+                if timestamp:
+                    block_overrides["time"] = timestamp
+                if gas_limit:
+                    block_overrides["gasLimit"] = gas_limit
+                if base_fee:
+                    block_overrides["baseFeePerGas"] = base_fee
+                if fee_recipient:
+                    block_overrides["feeRecipient"] = fee_recipient
+                if prev_randao:
+                    block_overrides["prevRandao"] = prev_randao
+
+                if block_overrides:
+                    block_state_call["blockOverrides"] = block_overrides
+
+                block_calls.append(block_state_call)
+
+        # Send in batches of 256 blocks (Nethermind limit)
+        for batch_start in range(0, len(block_calls), self._SIMULATE_BATCH_SIZE):
+            batch = block_calls[batch_start:batch_start + self._SIMULATE_BATCH_SIZE]
+
+            simulate_payload = {
+                "jsonrpc": "2.0",
+                "method": "eth_simulateV1",
+                "params": [
+                    {
+                        "blockStateCalls": batch,
+                        "validation": False,
+                        "traceTransfers": False,
+                    },
+                    "latest",
+                ],
+                "id": 1,
+            }
+
+            try:
+                response = requests.post(
+                    rpc_url,
+                    json=simulate_payload,
+                    headers={"Content-Type": "application/json"},
+                    timeout=300,
+                )
+                if response.ok:
+                    result = response.json()
+                    if "error" in result:
+                        self.log.warning(
+                            "eth_simulateV1 batch returned error",
+                            batch_start=batch_start,
+                            error=result["error"],
+                        )
+                    else:
+                        blocks_simulated += len(batch)
+                else:
+                    self.log.warning(
+                        "eth_simulateV1 batch failed",
+                        batch_start=batch_start,
+                        status_code=response.status_code,
+                    )
+            except Exception as e:
+                self.log.warning(
+                    "eth_simulateV1 batch request failed",
+                    batch_start=batch_start,
+                    error=e,
+                )
+
+        elapsed = time.time() - t0
+        self.log.info(
+            "EVM warmup completed",
+            blocks_simulated=blocks_simulated,
+            elapsed_seconds=round(elapsed, 2),
+        )
 
     def run_preflight_checks(self) -> None:
         """Run preflight checks and log warnings for suboptimal system configuration."""
@@ -832,7 +958,6 @@ class Executor:
             self.run_preflight_checks()
             self.clean_system_cache()
             self.prepare_directories()
-            self.prewarm_page_cache()
             self.prepare_jwt_secret_file()
             if self.config.pull_images:
                 self.pull_docker_images()
@@ -930,6 +1055,9 @@ class Executor:
             except Exception as e:
                 self.log.error("Failed to wait for client json rpc", error=e)
                 raise e
+
+            # EVM warmup via eth_simulateV1 (warm contract code, state trie, DB caches)
+            self.warmup_evm(rpc_url=execution_client_rpc_url)
 
             # Start extra commands in parallel
             self.start_extra_commands(execution_client_container)
