@@ -14,8 +14,10 @@ DB pages) for that specific block.  The simulate call does not persist
 state, so the subsequent real newPayload execution hits only warm caches.
 """
 
+import json
 import os
 import threading
+import time
 import urllib.request
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
@@ -45,10 +47,14 @@ class LineReader:
             return line.rstrip("\r\n")
 
 
-def warmup_block(simulate_json):
-    """Fire eth_simulateV1 to warm EVM caches for the next block."""
+def warmup_block(idx, simulate_json):
+    """Fire eth_simulateV1 to warm EVM caches for the next block.
+
+    Returns (success: bool, elapsed_ms: float, error: str|None).
+    """
     if not simulate_json or not EL_RPC_URL:
-        return
+        return None, 0.0, None
+    t0 = time.monotonic()
     try:
         req = urllib.request.Request(
             EL_RPC_URL,
@@ -57,10 +63,16 @@ def warmup_block(simulate_json):
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=300) as resp:
-            resp.read()
-    except Exception:
-        # Non-fatal — warmup failure should not block the benchmark
-        pass
+            body = resp.read()
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        result = json.loads(body)
+        if "error" in result:
+            err_msg = result["error"].get("message", str(result["error"]))
+            return False, elapsed_ms, err_msg
+        return True, elapsed_ms, None
+    except Exception as e:
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        return False, elapsed_ms, str(e)
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -96,8 +108,27 @@ class RequestHandler(BaseHTTPRequestHandler):
         parts = line.split("\t", 3)
         if len(parts) == 4:
             simulate_json = parts[3]
+            # Parse idx from metadata for logging
+            try:
+                meta = json.loads(parts[0])
+                idx = meta.get("idx", "?")
+            except Exception:
+                idx = "?"
             # Warm EVM caches before returning the payload to K6
-            warmup_block(simulate_json)
+            success, elapsed_ms, error = warmup_block(idx, simulate_json)
+            if success is not None:
+                if success:
+                    print(
+                        f"[payload-server] warmup block={idx} "
+                        f"ok elapsed={elapsed_ms:.1f}ms",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"[payload-server] warmup block={idx} "
+                        f"FAILED elapsed={elapsed_ms:.1f}ms error={error}",
+                        flush=True,
+                    )
             # Return only the first 3 fields to K6
             response_line = "\t".join(parts[:3])
         else:

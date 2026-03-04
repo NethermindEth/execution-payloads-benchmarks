@@ -852,6 +852,20 @@ class Executor:
                 self.config.get_payload_server_container_name()
             )
             payload_server_container.stop()
+            logs_file = self.config.outputs_dir / "payload-server.log"
+            self.log.info("Saving payload server logs", logs_file=logs_file)
+            logs_stream = payload_server_container.logs(
+                stream=True,
+                follow=False,
+                stdout=True,
+                stderr=True,
+            )
+            with open(logs_file, "wb") as f:
+                for line in logs_stream:
+                    f.write(line)
+                    if print_logs_to_console:
+                        print(line.decode("utf-8", errors="replace"), end="")
+            logs_stream.close()
             payload_server_container.remove()
         except docker.errors.NotFound:
             pass
