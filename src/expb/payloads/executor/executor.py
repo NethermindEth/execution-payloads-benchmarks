@@ -159,18 +159,17 @@ class Executor:
                 block_state_call = {"calls": calls}
 
                 # Add block overrides for correct context
-                block_number = execution_payload.get("blockNumber")
-                timestamp = execution_payload.get("timestamp")
+                # Only override fields that affect EVM execution but not
+                # ordering constraints.  blockNumber and timestamp are skipped
+                # because eth_simulateV1 requires them to be strictly
+                # increasing from the chain head, while our payloads are
+                # historical.  Let Nethermind auto-increment those.
                 gas_limit = execution_payload.get("gasLimit")
                 base_fee = execution_payload.get("baseFeePerGas")
                 fee_recipient = execution_payload.get("feeRecipient")
                 prev_randao = execution_payload.get("prevRandao")
 
                 block_overrides = {}
-                if block_number:
-                    block_overrides["blockNumber"] = block_number
-                if timestamp:
-                    block_overrides["time"] = timestamp
                 if gas_limit:
                     block_overrides["gasLimit"] = gas_limit
                 if base_fee:
