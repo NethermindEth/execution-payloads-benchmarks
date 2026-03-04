@@ -344,11 +344,16 @@ class ExecutorConfig:
     def get_payload_server_command(self) -> list[str]:
         return ["python3", self._payload_server_container_script]
 
-    def get_payload_server_environment(self) -> dict[str, str]:
-        return {
+    def get_payload_server_environment(
+        self, el_rpc_url: str = ""
+    ) -> dict[str, str]:
+        env = {
             "EXPB_MERGED_FILE": self._payload_server_container_merged_file,
             "EXPB_SERVER_PORT": str(self._payload_server_container_port),
         }
+        if el_rpc_url:
+            env["EXPB_EL_RPC_URL"] = el_rpc_url
+        return env
 
     def get_payload_server_url(
         self,

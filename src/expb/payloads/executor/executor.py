@@ -81,164 +81,6 @@ class Executor:
             self.log.error("Failed to clean system cache", error=e)
             raise e
 
-    # EVM Warmup via eth_simulateV1
-    _SIMULATE_BATCH_SIZE = 256  # Nethermind max blocks per simulate call
-
-    def warmup_evm(self, rpc_url: str) -> None:
-        """Warm the execution client's EVM caches by simulating benchmark transactions.
-
-        Uses eth_simulateV1 to execute the same transactions the benchmark will
-        process, without persisting any state. This warms:
-        - Contract code cache
-        - State trie read cache
-        - EVM JIT/compiled code paths
-        - DB block cache for accessed pages
-        """
-        from eth_account import Account
-
-        skip = self.config.k6_payloads_skip or 0
-        warmup = self.config.k6_payloads_warmup or 0
-        amount = self.config.k6_payloads_amount
-        total_needed = skip + warmup + amount
-
-        self.log.info(
-            "Warming up EVM via eth_simulateV1",
-            total_blocks=total_needed,
-            batch_size=self._SIMULATE_BATCH_SIZE,
-        )
-
-        t0 = time.time()
-        blocks_simulated = 0
-
-        # Read payloads and extract transactions
-        block_calls = []
-        with open(self.config.payloads_file, "r") as f:
-            for idx, line in enumerate(f):
-                if idx >= total_needed:
-                    break
-
-                payload = json.loads(line)
-                params = payload.get("params", [])
-                if not params:
-                    continue
-
-                execution_payload = params[0]
-                raw_txs = execution_payload.get("transactions", [])
-                if not raw_txs:
-                    block_calls.append({"calls": []})
-                    continue
-
-                calls = []
-                for raw_tx_hex in raw_txs:
-                    try:
-                        raw_bytes = bytes.fromhex(raw_tx_hex[2:] if raw_tx_hex.startswith("0x") else raw_tx_hex)
-                        # Decode the raw transaction using web3
-                        tx = Account.decode_transaction(raw_bytes)
-
-                        call = {}
-                        # Extract sender from the signed transaction
-                        if hasattr(tx, "sender"):
-                            call["from"] = tx.sender
-                        if hasattr(tx, "to") and tx.to:
-                            call["to"] = tx.to
-                        if hasattr(tx, "data") and tx.data:
-                            call["input"] = "0x" + tx.data.hex()
-                        elif hasattr(tx, "input") and tx.input:
-                            call["input"] = "0x" + tx.input.hex()
-                        if hasattr(tx, "value") and tx.value:
-                            call["value"] = hex(tx.value)
-                        if hasattr(tx, "gas"):
-                            call["gas"] = hex(tx.gas)
-
-                        if call.get("from") or call.get("to"):
-                            calls.append(call)
-                    except Exception:
-                        # Skip transactions that can't be decoded
-                        continue
-
-                block_state_call = {"calls": calls}
-
-                # Add block overrides for correct context
-                # Only override fields that affect EVM execution but not
-                # ordering constraints.  blockNumber and timestamp are skipped
-                # because eth_simulateV1 requires them to be strictly
-                # increasing from the chain head, while our payloads are
-                # historical.  Let Nethermind auto-increment those.
-                gas_limit = execution_payload.get("gasLimit")
-                base_fee = execution_payload.get("baseFeePerGas")
-                fee_recipient = execution_payload.get("feeRecipient")
-                prev_randao = execution_payload.get("prevRandao")
-
-                block_overrides = {}
-                if gas_limit:
-                    block_overrides["gasLimit"] = gas_limit
-                if base_fee:
-                    block_overrides["baseFeePerGas"] = base_fee
-                if fee_recipient:
-                    block_overrides["feeRecipient"] = fee_recipient
-                if prev_randao:
-                    block_overrides["prevRandao"] = prev_randao
-
-                if block_overrides:
-                    block_state_call["blockOverrides"] = block_overrides
-
-                block_calls.append(block_state_call)
-
-        # Send in batches of 256 blocks (Nethermind limit)
-        for batch_start in range(0, len(block_calls), self._SIMULATE_BATCH_SIZE):
-            batch = block_calls[batch_start:batch_start + self._SIMULATE_BATCH_SIZE]
-
-            simulate_payload = {
-                "jsonrpc": "2.0",
-                "method": "eth_simulateV1",
-                "params": [
-                    {
-                        "blockStateCalls": batch,
-                        "validation": False,
-                        "traceTransfers": False,
-                    },
-                    "latest",
-                ],
-                "id": 1,
-            }
-
-            try:
-                response = requests.post(
-                    rpc_url,
-                    json=simulate_payload,
-                    headers={"Content-Type": "application/json"},
-                    timeout=300,
-                )
-                if response.ok:
-                    result = response.json()
-                    if "error" in result:
-                        self.log.warning(
-                            "eth_simulateV1 batch returned error",
-                            batch_start=batch_start,
-                            error=result["error"],
-                        )
-                    else:
-                        blocks_simulated += len(batch)
-                else:
-                    self.log.warning(
-                        "eth_simulateV1 batch failed",
-                        batch_start=batch_start,
-                        status_code=response.status_code,
-                    )
-            except Exception as e:
-                self.log.warning(
-                    "eth_simulateV1 batch request failed",
-                    batch_start=batch_start,
-                    error=e,
-                )
-
-        elapsed = time.time() - t0
-        self.log.info(
-            "EVM warmup completed",
-            blocks_simulated=blocks_simulated,
-            elapsed_seconds=round(elapsed, 2),
-        )
-
     def run_preflight_checks(self) -> None:
         """Run preflight checks and log warnings for suboptimal system configuration."""
         self._check_cpu_governor()
@@ -501,14 +343,100 @@ class Executor:
     _ID_RE = re.compile(r'"id"\s*:\s*(\d+)')
     _GAS_USED_RE = re.compile(r'"gasUsed"\s*:\s*"([^"]+)"')
 
+    def _build_simulate_payload(self, payload_line: str) -> str:
+        """Build an eth_simulateV1 JSON-RPC request body for a single block.
+
+        Decodes raw transactions from the newPayload and constructs a
+        single-block simulate call.  Returns the JSON string, or empty
+        string if the block has no transactions.
+        """
+        from eth_account import Account
+
+        payload = json.loads(payload_line)
+        params = payload.get("params", [])
+        if not params:
+            return ""
+
+        execution_payload = params[0]
+        raw_txs = execution_payload.get("transactions", [])
+        if not raw_txs:
+            return ""
+
+        calls = []
+        for raw_tx_hex in raw_txs:
+            try:
+                raw_bytes = bytes.fromhex(
+                    raw_tx_hex[2:] if raw_tx_hex.startswith("0x") else raw_tx_hex
+                )
+                tx = Account.decode_transaction(raw_bytes)
+
+                call = {}
+                if hasattr(tx, "sender"):
+                    call["from"] = tx.sender
+                if hasattr(tx, "to") and tx.to:
+                    call["to"] = tx.to
+                if hasattr(tx, "data") and tx.data:
+                    call["input"] = "0x" + tx.data.hex()
+                elif hasattr(tx, "input") and tx.input:
+                    call["input"] = "0x" + tx.input.hex()
+                if hasattr(tx, "value") and tx.value:
+                    call["value"] = hex(tx.value)
+                if hasattr(tx, "gas"):
+                    call["gas"] = hex(tx.gas)
+
+                if call.get("from") or call.get("to"):
+                    calls.append(call)
+            except Exception:
+                continue
+
+        if not calls:
+            return ""
+
+        block_state_call = {"calls": calls}
+
+        # Only override fields that affect EVM execution, not ordering.
+        gas_limit = execution_payload.get("gasLimit")
+        base_fee = execution_payload.get("baseFeePerGas")
+        fee_recipient = execution_payload.get("feeRecipient")
+        prev_randao = execution_payload.get("prevRandao")
+
+        block_overrides = {}
+        if gas_limit:
+            block_overrides["gasLimit"] = gas_limit
+        if base_fee:
+            block_overrides["baseFeePerGas"] = base_fee
+        if fee_recipient:
+            block_overrides["feeRecipient"] = fee_recipient
+        if prev_randao:
+            block_overrides["prevRandao"] = prev_randao
+        if block_overrides:
+            block_state_call["blockOverrides"] = block_overrides
+
+        simulate_request = {
+            "jsonrpc": "2.0",
+            "method": "eth_simulateV1",
+            "params": [
+                {
+                    "blockStateCalls": [block_state_call],
+                    "validation": False,
+                    "traceTransfers": False,
+                },
+                "latest",
+            ],
+            "id": 1,
+        }
+        return json.dumps(simulate_request, separators=(",", ":"))
+
     def prepare_payload_files(self) -> None:
         """Pre-slice, merge, and extract metadata from payloads and FCUs files.
 
         Creates a single merged file where each line is:
-            {metadata_json}\\t{raw_NP}\\t{raw_FCU}
+            {metadata_json}\\t{raw_NP}\\t{raw_FCU}\\t{simulate_json}
 
-        This moves all heavy processing (file indexing, regex extraction)
-        out of the benchmark hot path.
+        The 4th field is the eth_simulateV1 request body for per-block
+        EVM warmup (empty string if the block has no transactions).
+        This moves all heavy processing (file indexing, regex extraction,
+        transaction decoding) out of the benchmark hot path.
         """
         skip = self.config.k6_payloads_skip or 0
         warmup = self.config.k6_payloads_warmup or 0
@@ -559,7 +487,12 @@ class Executor:
                 if m:
                     meta["fcu_method"] = m.group(1)
 
-                out.write(f"{json.dumps(meta)}\t{payload_line}\t{fcu_line}\n")
+                # Build eth_simulateV1 request for per-block EVM warmup
+                simulate_json = self._build_simulate_payload(payload_line)
+
+                out.write(
+                    f"{json.dumps(meta)}\t{payload_line}\t{fcu_line}\t{simulate_json}\n"
+                )
                 lines_written += 1
 
         self.log.info(
@@ -580,12 +513,15 @@ class Executor:
     def start_payload_server(
         self,
         container_network: Network | None = None,
+        el_rpc_url: str = "",
     ) -> Container:
         run_kwargs = dict(
             image=self.config.get_payload_server_container_image(),
             name=self.config.get_payload_server_container_name(),
             volumes=self.config.get_payload_server_volumes(),
-            environment=self.config.get_payload_server_environment(),
+            environment=self.config.get_payload_server_environment(
+                el_rpc_url=el_rpc_url,
+            ),
             command=self.config.get_payload_server_command(),
             detach=True,
             restart_policy={"Name": "unless-stopped"},
@@ -1055,9 +991,6 @@ class Executor:
                 self.log.error("Failed to wait for client json rpc", error=e)
                 raise e
 
-            # EVM warmup via eth_simulateV1 (warm contract code, state trie, DB caches)
-            self.warmup_evm(rpc_url=execution_client_rpc_url)
-
             # Start extra commands in parallel
             self.start_extra_commands(execution_client_container)
 
@@ -1075,6 +1008,7 @@ class Executor:
             )
             payload_server_container = self.start_payload_server(
                 container_network=containers_network,
+                el_rpc_url=execution_client_rpc_url,
             )
 
             payload_server_url = self.config.get_payload_server_url(
