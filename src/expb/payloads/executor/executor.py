@@ -73,7 +73,7 @@ class Executor:
     def clean_system_cache(self) -> None:
         self.log.info("Cleaning system cache")
         try:
-            subprocess.run("command -v sync", check=True, shell=True)
+            subprocess.run("sync", check=True, shell=True)
             with open("/proc/sys/vm/drop_caches", "w") as f:
                 f.write("3")
             self.log.info("System cache cleaned")
