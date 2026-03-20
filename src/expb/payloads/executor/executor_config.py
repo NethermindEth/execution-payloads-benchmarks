@@ -62,6 +62,7 @@ class ExecutorConfig:
             scenario.extra_volumes
         )
         self.execution_client_extra_commands = scenario.extra_commands
+        self.security_opt = scenario.security_opt
 
         # Executor Additional Tooling config
         ## Docker client

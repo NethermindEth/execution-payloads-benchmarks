@@ -161,6 +161,10 @@ class Scenario(BaseModel):
         description="Extra commands to run in the execution client docker container during the test execution.",
         default=[],
     )
+    security_opt: list[str] = Field(
+        description="Docker security options for the execution client container (e.g., seccomp=unconfined).",
+        default=[],
+    )
 
     @field_validator("client", mode="before")
     @classmethod
