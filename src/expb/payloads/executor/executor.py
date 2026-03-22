@@ -643,10 +643,6 @@ class Executor:
         except docker.errors.NotFound:
             pass
 
-        # Allow execution client time to flush data (e.g. PGO profiles)
-        # before sending SIGTERM
-        time.sleep(30)
-
         # Clean execution client container
         try:
             execution_client_container = self.config.docker_client.containers.get(
@@ -654,7 +650,9 @@ class Executor:
             )
             execution_client_container.reload()
             execution_client_volumes = execution_client_container.attrs["Mounts"]
-            execution_client_container.stop()
+            # Give execution client 60s after SIGTERM to flush data (e.g. PGO
+            # profiles via WritePGOData) before Docker sends SIGKILL (default 10s)
+            execution_client_container.stop(timeout=60)
             logs_file = (
                 self.config.outputs_dir
                 / f"{self.config.get_execution_client_name()}.log"
