@@ -230,8 +230,8 @@ class Executor:
             run_kwargs["cpuset_cpus"] = self.config.resources.cpuset
         if self.config.resources and self.config.resources.mem_swappiness is not None:
             run_kwargs["mem_swappiness"] = self.config.resources.mem_swappiness
-        if self.config.security_opt:
-            run_kwargs["security_opt"] = self.config.security_opt
+        if self.config.execution_client_security_opt:
+            run_kwargs["security_opt"] = self.config.execution_client_security_opt
         container = self.config.docker_client.containers.run(**run_kwargs)
         return container
 
