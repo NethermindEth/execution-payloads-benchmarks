@@ -645,7 +645,6 @@ class Executor:
 
         # Allow execution client time to flush data (e.g. PGO profiles)
         # before sending SIGTERM
-        import time
         time.sleep(30)
 
         # Clean execution client container
