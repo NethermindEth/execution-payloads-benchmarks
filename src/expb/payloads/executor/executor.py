@@ -643,6 +643,11 @@ class Executor:
         except docker.errors.NotFound:
             pass
 
+        # Allow execution client time to flush data (e.g. PGO profiles)
+        # before sending SIGTERM
+        import time
+        time.sleep(30)
+
         # Clean execution client container
         try:
             execution_client_container = self.config.docker_client.containers.get(
