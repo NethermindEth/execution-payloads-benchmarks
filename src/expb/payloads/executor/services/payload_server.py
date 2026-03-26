@@ -9,7 +9,10 @@ Reads directly from raw payloads and FCUs files (one JSON-RPC request per line),
 extracts lightweight metadata on the fly, and returns tab-separated lines:
     {metadata_json}\t{raw_NP}\t{raw_FCU}
 
-Supports two per-block modes controlled by environment variables:
+Supports per-block modes controlled by environment variables:
+- GC drain (EXPB_EL_RPC_URL): sends eth_blockNumber before each measured block
+  to absorb any pending .NET GC from the previous block's processing, preventing
+  GC pauses from inflating K6 TTFB measurements.
 - EVM warmup (EXPB_EL_RPC_URL + EXPB_SIMULATE_FILE): fires eth_simulateV1
   before each block to warm contract code, state trie, and DB block cache.
 - Drop caches (EXPB_DROP_CACHES): writes to /proc/sys/vm/drop_caches
@@ -34,6 +37,11 @@ EL_RPC_URL = os.environ.get("EXPB_EL_RPC_URL", "")
 SIMULATE_FILE = os.environ.get("EXPB_SIMULATE_FILE", "")
 DROP_CACHES = os.environ.get("EXPB_DROP_CACHES", "") == "1"
 DROP_CACHES_SKIP = int(os.environ.get("EXPB_DROP_CACHES_SKIP", "0"))
+GC_DRAIN_SKIP = int(os.environ.get("EXPB_GC_DRAIN_SKIP", "0"))
+
+_ETH_BLOCK_NUMBER_BODY = json.dumps(
+    {"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}
+).encode("utf-8")
 
 # Regex for lightweight metadata extraction (avoid full JSON parse)
 _METHOD_RE = re.compile(r'"method"\s*:\s*"([^"]+)"')
@@ -133,6 +141,38 @@ def drop_caches_block(idx):
         return False, elapsed_ms, str(e)
 
 
+def drain_gc(idx):
+    """Send eth_blockNumber to absorb pending GC before measurement.
+
+    After block processing, .NET schedules a GC that may fire during the
+    next JSON-RPC deserialization (outside the noGC region).  A cheap
+    eth_blockNumber call lets that GC complete on an unrelated RPC so it
+    does not inflate the measured newPayload TTFB.
+
+    Skips warmup blocks (same pattern as drop_caches).
+    Returns (success: bool, elapsed_ms: float, error: str|None).
+    """
+    if not EL_RPC_URL:
+        return None, 0.0, None
+    if isinstance(idx, int) and idx < GC_DRAIN_SKIP:
+        return None, 0.0, None
+    t0 = time.monotonic()
+    try:
+        req = urllib.request.Request(
+            EL_RPC_URL,
+            data=_ETH_BLOCK_NUMBER_BODY,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            resp.read()
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        return True, elapsed_ms, None
+    except Exception as e:
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        return False, elapsed_ms, str(e)
+
+
 def warmup_block(idx, simulate_json):
     """Fire eth_simulateV1 to warm EVM caches for the next block.
 
@@ -194,6 +234,22 @@ class RequestHandler(BaseHTTPRequestHandler):
         # Extract metadata from first ~2048 chars (avoid full JSON parse)
         meta = extract_metadata(idx, payload_line[:2048], fcu_line[:256])
 
+        # Drain pending GC from previous block before measurement
+        gc_ok, gc_ms, gc_err = drain_gc(idx)
+        if gc_ok is not None:
+            if gc_ok:
+                print(
+                    f"[payload-server] gc_drain block={idx} "
+                    f"ok elapsed={gc_ms:.1f}ms",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"[payload-server] gc_drain block={idx} "
+                    f"FAILED elapsed={gc_ms:.1f}ms error={gc_err}",
+                    flush=True,
+                )
+
         # Drop OS page cache before the block (cold storage mode)
         dc_ok, dc_ms, dc_err = drop_caches_block(idx)
         if dc_ok is not None:
@@ -244,6 +300,8 @@ def main():
     print(f"[payload-server] Skip: {SKIP}, Total: {TOTAL}", flush=True)
     print(f"[payload-server] EL RPC URL: {EL_RPC_URL or '(disabled)'}", flush=True)
     print(f"[payload-server] Simulate file: {SIMULATE_FILE or '(none)'}", flush=True)
+    print(f"[payload-server] GC drain: {'enabled' if EL_RPC_URL else 'disabled'}"
+          f"{f' (skip first {GC_DRAIN_SKIP} blocks)' if EL_RPC_URL and GC_DRAIN_SKIP else ''}", flush=True)
     print(f"[payload-server] Drop caches: {'enabled' if DROP_CACHES else 'disabled'}"
           f"{f' (skip first {DROP_CACHES_SKIP} blocks)' if DROP_CACHES and DROP_CACHES_SKIP else ''}", flush=True)
 

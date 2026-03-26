@@ -1015,7 +1015,7 @@ class Executor:
             )
             payload_server_container = self.start_payload_server(
                 container_network=containers_network,
-                el_rpc_url=execution_client_rpc_url if options.evm_warmup else "",
+                el_rpc_url=execution_client_rpc_url,
                 drop_caches=options.drop_caches,
                 evm_warmup=options.evm_warmup,
             )

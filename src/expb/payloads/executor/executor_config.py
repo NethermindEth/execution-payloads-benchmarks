@@ -379,8 +379,10 @@ class ExecutorConfig:
             "EXPB_TOTAL": str(warmup + amount),
             "EXPB_SERVER_PORT": str(self._payload_server_container_port),
         }
-        if evm_warmup and el_rpc_url:
+        if el_rpc_url:
             env["EXPB_EL_RPC_URL"] = el_rpc_url
+            env["EXPB_GC_DRAIN_SKIP"] = str(skip + warmup)
+        if evm_warmup and el_rpc_url:
             env["EXPB_SIMULATE_FILE"] = self._payload_server_container_simulate_file
         if drop_caches:
             env["EXPB_DROP_CACHES"] = "1"
