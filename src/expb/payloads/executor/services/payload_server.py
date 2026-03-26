@@ -27,6 +27,7 @@ MERGED_FILE = os.environ["EXPB_MERGED_FILE"]
 PORT = int(os.environ.get("EXPB_SERVER_PORT", "8080"))
 EL_RPC_URL = os.environ.get("EXPB_EL_RPC_URL", "")
 DROP_CACHES = os.environ.get("EXPB_DROP_CACHES", "") == "1"
+DROP_CACHES_SKIP = int(os.environ.get("EXPB_DROP_CACHES_SKIP", "0"))
 
 # Global state
 reader = None
@@ -52,9 +53,14 @@ class LineReader:
 def drop_caches_block(idx):
     """Drop OS page cache before the next block to force cold storage reads.
 
+    Skips the first DROP_CACHES_SKIP blocks (warmup payloads that just
+    advance chain state and don't need cold cache treatment).
+
     Returns (success: bool, elapsed_ms: float, error: str|None).
     """
     if not DROP_CACHES:
+        return None, 0.0, None
+    if isinstance(idx, int) and idx < DROP_CACHES_SKIP:
         return None, 0.0, None
     t0 = time.monotonic()
     try:
@@ -183,7 +189,8 @@ def main():
     print(f"[payload-server] Starting on port {PORT}", flush=True)
     print(f"[payload-server] Merged file: {MERGED_FILE}", flush=True)
     print(f"[payload-server] EL RPC URL: {EL_RPC_URL or '(disabled)'}", flush=True)
-    print(f"[payload-server] Drop caches: {'enabled' if DROP_CACHES else 'disabled'}", flush=True)
+    print(f"[payload-server] Drop caches: {'enabled' if DROP_CACHES else 'disabled'}"
+          f"{f' (skip first {DROP_CACHES_SKIP} blocks)' if DROP_CACHES and DROP_CACHES_SKIP else ''}", flush=True)
 
     reader = LineReader(MERGED_FILE)
 

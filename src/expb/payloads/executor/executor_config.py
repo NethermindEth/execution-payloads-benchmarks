@@ -363,6 +363,9 @@ class ExecutorConfig:
             env["EXPB_EL_RPC_URL"] = el_rpc_url
         if drop_caches:
             env["EXPB_DROP_CACHES"] = "1"
+            skip = self.k6_payloads_skip or 0
+            warmup = self.k6_payloads_warmup or 0
+            env["EXPB_DROP_CACHES_SKIP"] = str(skip + warmup)
         return env
 
     def get_payload_server_url(
