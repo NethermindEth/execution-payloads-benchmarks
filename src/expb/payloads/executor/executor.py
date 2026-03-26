@@ -477,16 +477,12 @@ class Executor:
         }
         return json.dumps(simulate_request, separators=(",", ":"))
 
-    def prepare_payload_files(self, build_simulate: bool = True) -> None:
-        """Pre-slice, merge, and extract metadata from payloads and FCUs files.
+    def prepare_simulate_file(self) -> None:
+        """Pre-build eth_simulateV1 request bodies for per-block EVM warmup.
 
-        Creates a single merged file where each line is:
-            {metadata_json}\\t{raw_NP}\\t{raw_FCU}\\t{simulate_json}
-
-        The 4th field is the eth_simulateV1 request body for per-block
-        EVM warmup (empty string if the block has no transactions).
-        This moves all heavy processing (file indexing, regex extraction,
-        transaction decoding) out of the benchmark hot path.
+        Creates a file where each line is the JSON-RPC request body for
+        eth_simulateV1, aligned 1:1 with the payloads file. Empty lines
+        for blocks with no transactions.
         """
         skip = self.config.k6_payloads_skip or 0
         warmup = self.config.k6_payloads_warmup or 0
@@ -494,60 +490,27 @@ class Executor:
         total_needed = skip + warmup + amount
 
         self.log.info(
-            "Pre-processing payload files",
+            "Building simulate payloads file",
             payloads_file=str(self.config.payloads_file),
-            fcus_file=str(self.config.fcus_file),
-            skip=skip,
-            warmup=warmup,
-            amount=amount,
             total_lines=total_needed,
         )
 
         lines_written = 0
         with (
             open(self.config.payloads_file, "r") as pf,
-            open(self.config.fcus_file, "r") as ff,
-            open(self.config.merged_payloads_file, "w") as out,
+            open(self.config.simulate_payloads_file, "w") as out,
         ):
-            for idx, (payload_line, fcu_line) in enumerate(zip(pf, ff)):
+            for idx, payload_line in enumerate(pf):
                 if idx >= total_needed:
                     break
-
                 payload_line = payload_line.rstrip("\r\n")
-                fcu_line = fcu_line.rstrip("\r\n")
-
-                # Extract metadata from raw JSON (first ~2048 chars)
-                meta = {"idx": idx}
-                head = payload_line[:2048]
-
-                m = self._METHOD_RE.search(head)
-                if m:
-                    meta["method"] = m.group(1)
-
-                m = self._ID_RE.search(head)
-                if m:
-                    meta["jrpc_id"] = int(m.group(1))
-
-                m = self._GAS_USED_RE.search(head)
-                if m:
-                    meta["gas_used"] = int(m.group(1), 16)
-
-                fcu_head = fcu_line[:256]
-                m = self._METHOD_RE.search(fcu_head)
-                if m:
-                    meta["fcu_method"] = m.group(1)
-
-                # Build eth_simulateV1 request for per-block EVM warmup
-                simulate_json = self._build_simulate_payload(payload_line) if build_simulate else ""
-
-                out.write(
-                    f"{json.dumps(meta)}\t{payload_line}\t{fcu_line}\t{simulate_json}\n"
-                )
+                simulate_json = self._build_simulate_payload(payload_line)
+                out.write(f"{simulate_json}\n")
                 lines_written += 1
 
         self.log.info(
-            "Payload files pre-processed",
-            output=str(self.config.merged_payloads_file),
+            "Simulate payloads file ready",
+            output=str(self.config.simulate_payloads_file),
             lines_written=lines_written,
         )
 
@@ -565,16 +528,19 @@ class Executor:
         container_network: Network | None = None,
         el_rpc_url: str = "",
         drop_caches: bool = False,
+        evm_warmup: bool = False,
     ) -> Container:
         run_kwargs = dict(
             image=self.config.get_payload_server_container_image(),
             name=self.config.get_payload_server_container_name(),
             volumes=self.config.get_payload_server_volumes(
                 drop_caches=drop_caches,
+                evm_warmup=evm_warmup,
             ),
             environment=self.config.get_payload_server_environment(
                 el_rpc_url=el_rpc_url,
                 drop_caches=drop_caches,
+                evm_warmup=evm_warmup,
             ),
             command=self.config.get_payload_server_command(),
             detach=True,
@@ -590,7 +556,7 @@ class Executor:
         self,
         payload_server_url: str,
     ) -> None:
-        max_attempts = 300  # 5 minutes max
+        max_attempts = 3000  # 5 minutes max at 0.1s intervals
         for attempt in range(1, max_attempts + 1):
             try:
                 response = requests.get(
@@ -605,7 +571,7 @@ class Executor:
                     return
             except requests.exceptions.ConnectionError:
                 pass
-            time.sleep(1)
+            time.sleep(0.1)
         raise Exception(
             f"Payload server is not ready after {max_attempts} attempts"
         )
@@ -1025,6 +991,35 @@ class Executor:
                 stop_signal=stop_signal,
             )
 
+            # Get execution client RPC URL immediately (container IP is
+            # assigned on network attach, no need to wait for RPC readiness).
+            execution_client_rpc_url = self.config.get_execution_client_rpc_url(
+                execution_client_container,
+                containers_network,
+            )
+
+            # Build simulate payloads file if EVM warmup is enabled
+            if options.evm_warmup:
+                self.prepare_simulate_file()
+
+            # Start payload server ASAP — it reads raw files directly and
+            # will be ready by the time the execution client finishes starting.
+            self.log.info("Preparing payload server script")
+            self.prepare_payload_server_script()
+
+            self.log.info(
+                "Starting payload server",
+                image=self.config.get_payload_server_container_image(),
+                evm_warmup=options.evm_warmup,
+                drop_caches=options.drop_caches,
+            )
+            payload_server_container = self.start_payload_server(
+                container_network=containers_network,
+                el_rpc_url=execution_client_rpc_url if options.evm_warmup else "",
+                drop_caches=options.drop_caches,
+                evm_warmup=options.evm_warmup,
+            )
+
             if self.config.resources and self.config.limit_bandwidth:
                 self.log.info(
                     "Limiting container bandwidth",
@@ -1048,10 +1043,6 @@ class Executor:
 
             self.log.info("Waiting for client json rpc to be available")
             try:
-                execution_client_rpc_url = self.config.get_execution_client_rpc_url(
-                    execution_client_container,
-                    containers_network,
-                )
                 self.wait_for_client_json_rpc(
                     execution_client_rpc_url=execution_client_rpc_url,
                 )
@@ -1061,26 +1052,6 @@ class Executor:
 
             # Start extra commands in parallel
             self.start_extra_commands(execution_client_container)
-
-            # Pre-process payload files (slice, merge, extract metadata)
-            self.log.info("Pre-processing payload files")
-            self.prepare_payload_files(build_simulate=options.evm_warmup)
-
-            # Start payload server
-            self.log.info("Preparing payload server script")
-            self.prepare_payload_server_script()
-
-            self.log.info(
-                "Starting payload server",
-                image=self.config.get_payload_server_container_image(),
-                evm_warmup=options.evm_warmup,
-                drop_caches=options.drop_caches,
-            )
-            payload_server_container = self.start_payload_server(
-                container_network=containers_network,
-                el_rpc_url=execution_client_rpc_url if options.evm_warmup else "",
-                drop_caches=options.drop_caches,
-            )
 
             payload_server_url = self.config.get_payload_server_url(
                 payload_server_container,

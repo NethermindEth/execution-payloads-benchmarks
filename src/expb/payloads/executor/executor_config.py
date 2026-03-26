@@ -137,8 +137,8 @@ class ExecutorConfig:
         ## Alloy config file
         self.alloy_config_file: Path = self.outputs_dir / "config.alloy"
 
-        ## Pre-processed merged payloads file
-        self.merged_payloads_file: Path = self.outputs_dir / "merged-payloads.jsonl"
+        ## Pre-built simulate payloads file (only used when evm_warmup is on)
+        self.simulate_payloads_file: Path = self.outputs_dir / "simulate-payloads.jsonl"
 
         ## Payload server config
         self.payload_server_script_file: Path = self.outputs_dir / "payload-server.py"
@@ -147,8 +147,10 @@ class ExecutorConfig:
         self._payload_server_container_script: str = (
             f"{self._payload_server_container_work_dir}/payload-server.py"
         )
-        self._payload_server_container_merged_file: str = (
-            "/payloads/merged-payloads.jsonl"
+        self._payload_server_container_payloads_file: str = "/payloads/payloads.jsonl"
+        self._payload_server_container_fcus_file: str = "/payloads/fcus.jsonl"
+        self._payload_server_container_simulate_file: str = (
+            "/payloads/simulate-payloads.jsonl"
         )
 
         # Executor Exports config
@@ -330,11 +332,15 @@ class ExecutorConfig:
         return self.docker_images.payload_server
 
     def get_payload_server_volumes(
-        self, drop_caches: bool = False
+        self, drop_caches: bool = False, evm_warmup: bool = False
     ) -> dict[str, dict[str, str]]:
         volumes = {
-            str(self.merged_payloads_file.resolve()): {
-                "bind": self._payload_server_container_merged_file,
+            str(self.payloads_file.resolve()): {
+                "bind": self._payload_server_container_payloads_file,
+                "mode": "ro",
+            },
+            str(self.fcus_file.resolve()): {
+                "bind": self._payload_server_container_fcus_file,
                 "mode": "ro",
             },
             str(self.payload_server_script_file.resolve()): {
@@ -342,6 +348,11 @@ class ExecutorConfig:
                 "mode": "ro",
             },
         }
+        if evm_warmup:
+            volumes[str(self.simulate_payloads_file.resolve())] = {
+                "bind": self._payload_server_container_simulate_file,
+                "mode": "ro",
+            }
         if drop_caches:
             volumes["/proc/sys/vm"] = {
                 "bind": "/host_proc_sys_vm",
@@ -353,18 +364,26 @@ class ExecutorConfig:
         return ["python3", self._payload_server_container_script]
 
     def get_payload_server_environment(
-        self, el_rpc_url: str = "", drop_caches: bool = False
+        self,
+        el_rpc_url: str = "",
+        drop_caches: bool = False,
+        evm_warmup: bool = False,
     ) -> dict[str, str]:
+        skip = self.k6_payloads_skip or 0
+        warmup = self.k6_payloads_warmup or 0
+        amount = self.k6_payloads_amount
         env = {
-            "EXPB_MERGED_FILE": self._payload_server_container_merged_file,
+            "EXPB_PAYLOADS_FILE": self._payload_server_container_payloads_file,
+            "EXPB_FCUS_FILE": self._payload_server_container_fcus_file,
+            "EXPB_SKIP": str(skip),
+            "EXPB_TOTAL": str(warmup + amount),
             "EXPB_SERVER_PORT": str(self._payload_server_container_port),
         }
-        if el_rpc_url:
+        if evm_warmup and el_rpc_url:
             env["EXPB_EL_RPC_URL"] = el_rpc_url
+            env["EXPB_SIMULATE_FILE"] = self._payload_server_container_simulate_file
         if drop_caches:
             env["EXPB_DROP_CACHES"] = "1"
-            skip = self.k6_payloads_skip or 0
-            warmup = self.k6_payloads_warmup or 0
             env["EXPB_DROP_CACHES_SKIP"] = str(skip + warmup)
         return env
 

@@ -3,51 +3,109 @@ PAYLOAD_SERVER_PORT = 8080
 
 def get_payload_server_script() -> str:
     return r'''#!/usr/bin/env python3
-"""EXPB Payload Server — serves pre-processed NP+FCU pairs sequentially.
+"""EXPB Payload Server — serves NP+FCU pairs sequentially to K6.
 
-Reads from a merged file where each line is:
-    {metadata_json}\t{raw_NP}\t{raw_FCU}\t{simulate_json}
+Reads directly from raw payloads and FCUs files (one JSON-RPC request per line),
+extracts lightweight metadata on the fly, and returns tab-separated lines:
+    {metadata_json}\t{raw_NP}\t{raw_FCU}
 
 Supports two per-block modes controlled by environment variables:
-- EVM warmup (EXPB_EL_RPC_URL): fires eth_simulateV1 before each block
-  to warm contract code, state trie, and DB block cache.
+- EVM warmup (EXPB_EL_RPC_URL + EXPB_SIMULATE_FILE): fires eth_simulateV1
+  before each block to warm contract code, state trie, and DB block cache.
 - Drop caches (EXPB_DROP_CACHES): writes to /proc/sys/vm/drop_caches
   before each block to force cold OS page cache reads.
 """
 
 import json
 import os
+import re
 import threading
 import time
 import urllib.request
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 # --- Configuration from environment ---
-MERGED_FILE = os.environ["EXPB_MERGED_FILE"]
+PAYLOADS_FILE = os.environ["EXPB_PAYLOADS_FILE"]
+FCUS_FILE = os.environ["EXPB_FCUS_FILE"]
+SKIP = int(os.environ.get("EXPB_SKIP", "0"))
+TOTAL = int(os.environ["EXPB_TOTAL"])
 PORT = int(os.environ.get("EXPB_SERVER_PORT", "8080"))
 EL_RPC_URL = os.environ.get("EXPB_EL_RPC_URL", "")
+SIMULATE_FILE = os.environ.get("EXPB_SIMULATE_FILE", "")
 DROP_CACHES = os.environ.get("EXPB_DROP_CACHES", "") == "1"
 DROP_CACHES_SKIP = int(os.environ.get("EXPB_DROP_CACHES_SKIP", "0"))
+
+# Regex for lightweight metadata extraction (avoid full JSON parse)
+_METHOD_RE = re.compile(r'"method"\s*:\s*"([^"]+)"')
+_ID_RE = re.compile(r'"id"\s*:\s*(\d+)')
+_GAS_USED_RE = re.compile(r'"gasUsed"\s*:\s*"([^"]+)"')
 
 # Global state
 reader = None
 
 
-class LineReader:
-    """Thread-safe sequential line reader for a pre-processed merged file."""
+class PairReader:
+    """Thread-safe sequential reader for payloads + FCUs + optional simulate files."""
 
-    def __init__(self, filepath):
-        self.filepath = filepath
+    def __init__(self, payloads_path, fcus_path, simulate_path, skip, total):
         self.lock = threading.Lock()
-        self._file = open(filepath, "r")
+        self._pf = open(payloads_path, "r")
+        self._ff = open(fcus_path, "r")
+        self._sf = open(simulate_path, "r") if simulate_path else None
+        self._idx = 0
+        self._skip = skip
+        self._limit = skip + total
+        self._skipped = False
 
-    def next_line(self):
-        """Returns the next line (stripped) or None if EOF."""
+    def _do_skip(self):
+        """Skip initial lines (called once, under lock)."""
+        if self._skipped:
+            return
+        for _ in range(self._skip):
+            self._pf.readline()
+            self._ff.readline()
+            if self._sf:
+                self._sf.readline()
+            self._idx += 1
+        self._skipped = True
+
+    def next_pair(self):
+        """Returns (idx, payload_line, fcu_line, simulate_line) or None if done."""
         with self.lock:
-            line = self._file.readline()
-            if not line:
+            self._do_skip()
+            if self._idx >= self._limit:
                 return None
-            return line.rstrip("\r\n")
+            pl = self._pf.readline()
+            fl = self._ff.readline()
+            sl = self._sf.readline() if self._sf else ""
+            if not pl or not fl:
+                return None
+            idx = self._idx
+            self._idx += 1
+            return (
+                idx,
+                pl.rstrip("\r\n"),
+                fl.rstrip("\r\n"),
+                sl.rstrip("\r\n") if sl else "",
+            )
+
+
+def extract_metadata(idx, payload_head, fcu_head):
+    """Extract lightweight metadata from raw JSON-RPC lines."""
+    meta = {"idx": idx}
+    m = _METHOD_RE.search(payload_head)
+    if m:
+        meta["method"] = m.group(1)
+    m = _ID_RE.search(payload_head)
+    if m:
+        meta["jrpc_id"] = int(m.group(1))
+    m = _GAS_USED_RE.search(payload_head)
+    if m:
+        meta["gas_used"] = int(m.group(1), 16)
+    m = _METHOD_RE.search(fcu_head)
+    if m:
+        meta["fcu_method"] = m.group(1)
+    return meta
 
 
 def drop_caches_block(idx):
@@ -122,60 +180,54 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _handle_next(self):
         global reader
-        line = reader.next_line()
+        result = reader.next_pair()
 
-        if line is None:
+        if result is None:
             self.send_response(404)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
             self.wfile.write(b"exhausted")
             return
 
-        # Line format: {metadata}\t{NP}\t{FCU}\t{simulate_json}
-        # Split off the simulate payload (4th field)
-        parts = line.split("\t", 3)
-        if len(parts) == 4:
-            simulate_json = parts[3]
-            # Parse idx from metadata for logging
-            try:
-                meta = json.loads(parts[0])
-                idx = meta.get("idx", "?")
-            except Exception:
-                idx = "?"
-            # Drop OS page cache before the block (cold storage mode)
-            dc_ok, dc_ms, dc_err = drop_caches_block(idx)
-            if dc_ok is not None:
-                if dc_ok:
-                    print(
-                        f"[payload-server] drop_caches block={idx} "
-                        f"ok elapsed={dc_ms:.1f}ms",
-                        flush=True,
-                    )
-                else:
-                    print(
-                        f"[payload-server] drop_caches block={idx} "
-                        f"FAILED elapsed={dc_ms:.1f}ms error={dc_err}",
-                        flush=True,
-                    )
-            # Warm EVM caches before returning the payload to K6
-            success, elapsed_ms, error = warmup_block(idx, simulate_json)
-            if success is not None:
-                if success:
-                    print(
-                        f"[payload-server] warmup block={idx} "
-                        f"ok elapsed={elapsed_ms:.1f}ms",
-                        flush=True,
-                    )
-                else:
-                    print(
-                        f"[payload-server] warmup block={idx} "
-                        f"FAILED elapsed={elapsed_ms:.1f}ms error={error}",
-                        flush=True,
-                    )
-            # Return only the first 3 fields to K6
-            response_line = "\t".join(parts[:3])
-        else:
-            response_line = line
+        idx, payload_line, fcu_line, simulate_json = result
+
+        # Extract metadata from first ~2048 chars (avoid full JSON parse)
+        meta = extract_metadata(idx, payload_line[:2048], fcu_line[:256])
+
+        # Drop OS page cache before the block (cold storage mode)
+        dc_ok, dc_ms, dc_err = drop_caches_block(idx)
+        if dc_ok is not None:
+            if dc_ok:
+                print(
+                    f"[payload-server] drop_caches block={idx} "
+                    f"ok elapsed={dc_ms:.1f}ms",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"[payload-server] drop_caches block={idx} "
+                    f"FAILED elapsed={dc_ms:.1f}ms error={dc_err}",
+                    flush=True,
+                )
+
+        # Warm EVM caches before returning the payload to K6
+        success, elapsed_ms, error = warmup_block(idx, simulate_json)
+        if success is not None:
+            if success:
+                print(
+                    f"[payload-server] warmup block={idx} "
+                    f"ok elapsed={elapsed_ms:.1f}ms",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"[payload-server] warmup block={idx} "
+                    f"FAILED elapsed={elapsed_ms:.1f}ms error={error}",
+                    flush=True,
+                )
+
+        # Return: {metadata}\t{NP}\t{FCU}
+        response_line = f"{json.dumps(meta)}\t{payload_line}\t{fcu_line}"
 
         self.send_response(200)
         self.send_header("Content-Type", "text/plain")
@@ -187,12 +239,15 @@ def main():
     global reader
 
     print(f"[payload-server] Starting on port {PORT}", flush=True)
-    print(f"[payload-server] Merged file: {MERGED_FILE}", flush=True)
+    print(f"[payload-server] Payloads file: {PAYLOADS_FILE}", flush=True)
+    print(f"[payload-server] FCUs file: {FCUS_FILE}", flush=True)
+    print(f"[payload-server] Skip: {SKIP}, Total: {TOTAL}", flush=True)
     print(f"[payload-server] EL RPC URL: {EL_RPC_URL or '(disabled)'}", flush=True)
+    print(f"[payload-server] Simulate file: {SIMULATE_FILE or '(none)'}", flush=True)
     print(f"[payload-server] Drop caches: {'enabled' if DROP_CACHES else 'disabled'}"
           f"{f' (skip first {DROP_CACHES_SKIP} blocks)' if DROP_CACHES and DROP_CACHES_SKIP else ''}", flush=True)
 
-    reader = LineReader(MERGED_FILE)
+    reader = PairReader(PAYLOADS_FILE, FCUS_FILE, SIMULATE_FILE, SKIP, TOTAL)
 
     httpd = ThreadingHTTPServer(("0.0.0.0", PORT), RequestHandler)
     print(f"[payload-server] Ready, serving on port {PORT}", flush=True)
