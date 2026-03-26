@@ -477,7 +477,7 @@ class Executor:
         }
         return json.dumps(simulate_request, separators=(",", ":"))
 
-    def prepare_payload_files(self) -> None:
+    def prepare_payload_files(self, build_simulate: bool = True) -> None:
         """Pre-slice, merge, and extract metadata from payloads and FCUs files.
 
         Creates a single merged file where each line is:
@@ -538,7 +538,7 @@ class Executor:
                     meta["fcu_method"] = m.group(1)
 
                 # Build eth_simulateV1 request for per-block EVM warmup
-                simulate_json = self._build_simulate_payload(payload_line)
+                simulate_json = self._build_simulate_payload(payload_line) if build_simulate else ""
 
                 out.write(
                     f"{json.dumps(meta)}\t{payload_line}\t{fcu_line}\t{simulate_json}\n"
@@ -1064,7 +1064,7 @@ class Executor:
 
             # Pre-process payload files (slice, merge, extract metadata)
             self.log.info("Pre-processing payload files")
-            self.prepare_payload_files()
+            self.prepare_payload_files(build_simulate=options.evm_warmup)
 
             # Start payload server
             self.log.info("Preparing payload server script")

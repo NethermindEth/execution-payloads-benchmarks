@@ -60,7 +60,7 @@ def drop_caches_block(idx):
     try:
         import subprocess
         subprocess.run("sync", shell=True, check=True)
-        with open("/proc/sys/vm/drop_caches", "w") as f:
+        with open("/host_proc_sys_vm/drop_caches", "w") as f:
             f.write("3")
         elapsed_ms = (time.monotonic() - t0) * 1000
         return True, elapsed_ms, None

@@ -343,8 +343,8 @@ class ExecutorConfig:
             },
         }
         if drop_caches:
-            volumes["/proc/sys/vm/drop_caches"] = {
-                "bind": "/proc/sys/vm/drop_caches",
+            volumes["/proc/sys/vm"] = {
+                "bind": "/host_proc_sys_vm",
                 "mode": "rw",
             }
         return volumes
