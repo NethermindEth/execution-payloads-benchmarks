@@ -41,10 +41,14 @@ class ExecutorExecuteOptions:
         collect_per_payload_metrics: bool = False,
         print_logs_to_console: bool = False,
         per_payload_metrics_logs: bool = False,
+        evm_warmup: bool = False,
+        drop_caches: bool = True,
     ):
         self.collect_per_payload_metrics: bool = collect_per_payload_metrics
         self.print_logs_to_console: bool = print_logs_to_console
         self.per_payload_metrics_logs: bool = per_payload_metrics_logs
+        self.evm_warmup: bool = evm_warmup
+        self.drop_caches: bool = drop_caches
 
 
 class Executor:
@@ -427,6 +431,10 @@ class Executor:
                 )
                 call = self._decode_raw_tx(raw_bytes)
                 if call.get("from") or call.get("to"):
+                    # Force high gas to avoid "gas limit below intrinsic gas"
+                    # errors — for warmup we only need EVM state access, not
+                    # accurate gas accounting.
+                    call["gas"] = "0x1000000"
                     calls.append(call)
             except Exception:
                 continue
@@ -437,14 +445,14 @@ class Executor:
         block_state_call = {"calls": calls}
 
         # Only override fields that affect EVM execution, not ordering.
-        gas_limit = execution_payload.get("gasLimit")
         base_fee = execution_payload.get("baseFeePerGas")
         fee_recipient = execution_payload.get("feeRecipient")
         prev_randao = execution_payload.get("prevRandao")
 
         block_overrides = {}
-        if gas_limit:
-            block_overrides["gasLimit"] = gas_limit
+        # Use a very high block gas limit so all calls execute even with
+        # inflated per-call gas values (warmup doesn't need gas accuracy).
+        block_overrides["gasLimit"] = "0xFFFFFFFFFFFF"
         if base_fee:
             block_overrides["baseFeePerGas"] = base_fee
         if fee_recipient:
@@ -556,13 +564,17 @@ class Executor:
         self,
         container_network: Network | None = None,
         el_rpc_url: str = "",
+        drop_caches: bool = False,
     ) -> Container:
         run_kwargs = dict(
             image=self.config.get_payload_server_container_image(),
             name=self.config.get_payload_server_container_name(),
-            volumes=self.config.get_payload_server_volumes(),
+            volumes=self.config.get_payload_server_volumes(
+                drop_caches=drop_caches,
+            ),
             environment=self.config.get_payload_server_environment(
                 el_rpc_url=el_rpc_url,
+                drop_caches=drop_caches,
             ),
             command=self.config.get_payload_server_command(),
             detach=True,
@@ -1061,10 +1073,13 @@ class Executor:
             self.log.info(
                 "Starting payload server",
                 image=self.config.get_payload_server_container_image(),
+                evm_warmup=options.evm_warmup,
+                drop_caches=options.drop_caches,
             )
             payload_server_container = self.start_payload_server(
                 container_network=containers_network,
-                el_rpc_url=execution_client_rpc_url,
+                el_rpc_url=execution_client_rpc_url if options.evm_warmup else "",
+                drop_caches=options.drop_caches,
             )
 
             payload_server_url = self.config.get_payload_server_url(

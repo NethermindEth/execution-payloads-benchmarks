@@ -8,10 +8,11 @@ def get_payload_server_script() -> str:
 Reads from a merged file where each line is:
     {metadata_json}\t{raw_NP}\t{raw_FCU}\t{simulate_json}
 
-Before returning each payload to K6, fires an eth_simulateV1 request
-to the execution client to warm EVM caches (contract code, state trie,
-DB pages) for that specific block.  The simulate call does not persist
-state, so the subsequent real newPayload execution hits only warm caches.
+Supports two per-block modes controlled by environment variables:
+- EVM warmup (EXPB_EL_RPC_URL): fires eth_simulateV1 before each block
+  to warm contract code, state trie, and DB block cache.
+- Drop caches (EXPB_DROP_CACHES): writes to /proc/sys/vm/drop_caches
+  before each block to force cold OS page cache reads.
 """
 
 import json
@@ -25,6 +26,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 MERGED_FILE = os.environ["EXPB_MERGED_FILE"]
 PORT = int(os.environ.get("EXPB_SERVER_PORT", "8080"))
 EL_RPC_URL = os.environ.get("EXPB_EL_RPC_URL", "")
+DROP_CACHES = os.environ.get("EXPB_DROP_CACHES", "") == "1"
 
 # Global state
 reader = None
@@ -45,6 +47,26 @@ class LineReader:
             if not line:
                 return None
             return line.rstrip("\r\n")
+
+
+def drop_caches_block(idx):
+    """Drop OS page cache before the next block to force cold storage reads.
+
+    Returns (success: bool, elapsed_ms: float, error: str|None).
+    """
+    if not DROP_CACHES:
+        return None, 0.0, None
+    t0 = time.monotonic()
+    try:
+        import subprocess
+        subprocess.run("sync", shell=True, check=True)
+        with open("/proc/sys/vm/drop_caches", "w") as f:
+            f.write("3")
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        return True, elapsed_ms, None
+    except Exception as e:
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        return False, elapsed_ms, str(e)
 
 
 def warmup_block(idx, simulate_json):
@@ -114,6 +136,21 @@ class RequestHandler(BaseHTTPRequestHandler):
                 idx = meta.get("idx", "?")
             except Exception:
                 idx = "?"
+            # Drop OS page cache before the block (cold storage mode)
+            dc_ok, dc_ms, dc_err = drop_caches_block(idx)
+            if dc_ok is not None:
+                if dc_ok:
+                    print(
+                        f"[payload-server] drop_caches block={idx} "
+                        f"ok elapsed={dc_ms:.1f}ms",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"[payload-server] drop_caches block={idx} "
+                        f"FAILED elapsed={dc_ms:.1f}ms error={dc_err}",
+                        flush=True,
+                    )
             # Warm EVM caches before returning the payload to K6
             success, elapsed_ms, error = warmup_block(idx, simulate_json)
             if success is not None:
@@ -146,6 +183,7 @@ def main():
     print(f"[payload-server] Starting on port {PORT}", flush=True)
     print(f"[payload-server] Merged file: {MERGED_FILE}", flush=True)
     print(f"[payload-server] EL RPC URL: {EL_RPC_URL or '(disabled)'}", flush=True)
+    print(f"[payload-server] Drop caches: {'enabled' if DROP_CACHES else 'disabled'}", flush=True)
 
     reader = LineReader(MERGED_FILE)
 

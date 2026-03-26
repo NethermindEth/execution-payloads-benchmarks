@@ -329,8 +329,10 @@ class ExecutorConfig:
     def get_payload_server_container_image(self) -> str:
         return self.docker_images.payload_server
 
-    def get_payload_server_volumes(self) -> dict[str, dict[str, str]]:
-        return {
+    def get_payload_server_volumes(
+        self, drop_caches: bool = False
+    ) -> dict[str, dict[str, str]]:
+        volumes = {
             str(self.merged_payloads_file.resolve()): {
                 "bind": self._payload_server_container_merged_file,
                 "mode": "ro",
@@ -340,12 +342,18 @@ class ExecutorConfig:
                 "mode": "ro",
             },
         }
+        if drop_caches:
+            volumes["/proc/sys/vm/drop_caches"] = {
+                "bind": "/proc/sys/vm/drop_caches",
+                "mode": "rw",
+            }
+        return volumes
 
     def get_payload_server_command(self) -> list[str]:
         return ["python3", self._payload_server_container_script]
 
     def get_payload_server_environment(
-        self, el_rpc_url: str = ""
+        self, el_rpc_url: str = "", drop_caches: bool = False
     ) -> dict[str, str]:
         env = {
             "EXPB_MERGED_FILE": self._payload_server_container_merged_file,
@@ -353,6 +361,8 @@ class ExecutorConfig:
         }
         if el_rpc_url:
             env["EXPB_EL_RPC_URL"] = el_rpc_url
+        if drop_caches:
+            env["EXPB_DROP_CACHES"] = "1"
         return env
 
     def get_payload_server_url(

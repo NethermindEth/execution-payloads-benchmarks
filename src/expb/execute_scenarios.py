@@ -46,6 +46,20 @@ def execute_scenarios(
             help="Print K6 and Execution Client logs to console.",
         ),
     ] = False,
+    evm_warmup: Annotated[
+        bool,
+        typer.Option(
+            "--evm-warmup/--no-evm-warmup",
+            help="Per-block EVM warmup via eth_simulateV1 before each measured payload. Warms contract code, state trie, and DB block cache.",
+        ),
+    ] = False,
+    drop_caches: Annotated[
+        bool,
+        typer.Option(
+            "--drop-caches/--no-drop-caches",
+            help="Drop OS page cache before each measured payload for cold storage reads.",
+        ),
+    ] = True,
     use_lock: Annotated[
         bool,
         typer.Option(
@@ -131,6 +145,8 @@ def execute_scenarios(
                                 print_logs_to_console=print_logs,
                                 collect_per_payload_metrics=per_payload_metrics,
                                 per_payload_metrics_logs=per_payload_metrics_logs,
+                                evm_warmup=evm_warmup,
+                                drop_caches=drop_caches,
                             ),
                         )
                 if not loop:
