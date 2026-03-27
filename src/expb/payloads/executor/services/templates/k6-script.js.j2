@@ -221,12 +221,11 @@ function processNextPayload(base_tags = {}, warmup = false) {
   // Emit client-side processing metric for the PREVIOUS block.
   // The metric for block N-1 arrives in block N's metadata from the payload server.
   // Skip 0 values — the gauge may not have been updated yet when scraped.
+  // Always tag with jrpc_id/gas_used so Grafana can align by block, not timestamp.
   if (!warmup && pair.prevClientProcessingMs > 0 && prevPair) {
     const cpTags = { kind: 'newPayload', jrpc_method: prevPair.method, ...base_tags };
-    if (perPayloadMetrics) {
-      if (prevPair.jrpcId !== undefined) cpTags.jrpc_id = prevPair.jrpcId;
-      if (prevPair.gasUsed !== undefined) cpTags.gas_used = prevPair.gasUsed;
-    }
+    if (prevPair.jrpcId !== undefined) cpTags.jrpc_id = prevPair.jrpcId;
+    if (prevPair.gasUsed !== undefined) cpTags.gas_used = prevPair.gasUsed;
     clientProcessing.add(pair.prevClientProcessingMs, cpTags);
   }
   prevPair = warmup ? null : pair;
