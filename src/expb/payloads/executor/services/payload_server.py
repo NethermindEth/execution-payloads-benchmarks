@@ -195,7 +195,9 @@ def scrape_client_metric(prev_idx):
         return None, 0.0, None
     t0 = time.monotonic()
     try:
-        req = urllib.request.Request(CLIENT_METRICS_URL, method="GET")
+        # Cache-bust to avoid stale responses from Kestrel/prometheus-net
+        url = f"{CLIENT_METRICS_URL}?t={time.monotonic_ns()}"
+        req = urllib.request.Request(url, method="GET")
         with urllib.request.urlopen(req, timeout=10) as resp:
             body = resp.read().decode("utf-8", errors="replace")
         elapsed_ms = (time.monotonic() - t0) * 1000
