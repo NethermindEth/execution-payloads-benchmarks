@@ -66,7 +66,7 @@ def execute_scenarios(
             "--drop-caches-sync/--no-drop-caches-sync",
             help="Run sync before dropping caches to flush dirty pages. More deterministic but slower.",
         ),
-    ] = False,
+    ] = True,
     client_metrics: Annotated[
         bool,
         typer.Option(

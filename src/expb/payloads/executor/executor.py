@@ -44,7 +44,7 @@ class ExecutorExecuteOptions:
         per_payload_metrics_logs: bool = False,
         evm_warmup: bool = False,
         drop_caches: bool = True,
-        drop_caches_sync: bool = False,
+        drop_caches_sync: bool = True,
         client_metrics: bool = True,
         stable_cpu: bool = True,
     ):
@@ -535,7 +535,7 @@ class Executor:
         container_network: Network | None = None,
         el_rpc_url: str = "",
         drop_caches: bool = True,
-        drop_caches_sync: bool = False,
+        drop_caches_sync: bool = True,
         evm_warmup: bool = False,
         client_sse_url: str = "",
     ) -> Container:
