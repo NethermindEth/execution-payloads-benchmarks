@@ -137,11 +137,6 @@ class SSEClient:
             if block_to is not None and processing_ms is not None:
                 with self.lock:
                     self._data[int(block_to)] = float(processing_ms)
-                print(
-                    f"[payload-server] SSE processed block={block_to} "
-                    f"processingMs={processing_ms:.1f}",
-                    flush=True,
-                )
         except Exception as e:
             print(
                 f"[payload-server] SSE parse error: {e}",
