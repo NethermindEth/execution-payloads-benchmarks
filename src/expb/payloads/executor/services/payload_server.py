@@ -298,10 +298,12 @@ class RequestHandler(BaseHTTPRequestHandler):
                 )
 
         # Scrape client-side processing time for the previous block
-        # (the one K6 just finished, before we return the next payload)
+        # (the one K6 just finished, before we return the next payload).
+        # Include in metadata so K6 can emit it as a gauge.
         prev_idx = idx - 1
         cm_val, cm_ms, cm_err = scrape_client_metric(prev_idx)
         if cm_val is not None:
+            meta["prev_client_processing_ms"] = cm_val
             print(
                 f"[payload-server] client_metric block={prev_idx} "
                 f"processing_ms={cm_val:.1f} scrape_elapsed={cm_ms:.1f}ms",

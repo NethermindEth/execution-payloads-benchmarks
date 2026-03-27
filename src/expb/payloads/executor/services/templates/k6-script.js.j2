@@ -27,6 +27,7 @@ export const options = config["options"];
 // --- Metrics ---
 const slowestPayloads = new Gauge('expb_slowest_payloads');
 const slowestProcessing = new Gauge('expb_slowest_processing');
+const clientProcessing = new Gauge('expb_client_processing');
 
 // --- JWT ---
 function hex2ArrayBuffer(hex) {
@@ -119,8 +120,13 @@ function fetchNextPair() {
     jrpcId: meta.jrpc_id,
     gasUsed: meta.gas_used,
     fcuMethod: meta.fcu_method || 'engine_forkchoiceUpdated',
+    prevClientProcessingMs: meta.prev_client_processing_ms,
   };
 }
+
+// Track previous pair so we can tag client_processing metrics correctly
+// (the metric for block N arrives in block N+1's metadata)
+let prevPair = null;
 
 function processNextPayload(base_tags = {}, warmup = false) {
   const pair = fetchNextPair();
@@ -211,6 +217,18 @@ function processNextPayload(base_tags = {}, warmup = false) {
     });
     check(r, { 'status_200': (x) => x.status === 200 }, tags);
   });
+
+  // Emit client-side processing metric for the PREVIOUS block.
+  // The metric for block N-1 arrives in block N's metadata from the payload server.
+  if (!warmup && pair.prevClientProcessingMs !== undefined && prevPair) {
+    const cpTags = { kind: 'newPayload', jrpc_method: prevPair.method, ...base_tags };
+    if (perPayloadMetrics) {
+      if (prevPair.jrpcId !== undefined) cpTags.jrpc_id = prevPair.jrpcId;
+      if (prevPair.gasUsed !== undefined) cpTags.gas_used = prevPair.gasUsed;
+    }
+    clientProcessing.add(pair.prevClientProcessingMs, cpTags);
+  }
+  prevPair = warmup ? null : pair;
 
   // delay between payloads - wait only the difference between configured delay and elapsed time
   const delay = warmup ? payloadsWarmupDelay : payloadsDelay;
