@@ -82,13 +82,21 @@ class SSEClient:
     def wait_connected(self, timeout=30):
         return self._connected.wait(timeout)
 
-    def get_processing_ms(self, block_number):
+    def get_processing_ms(self, block_number, timeout=2.0, poll_interval=0.005):
         """Look up and consume processingMs for a block number.
 
-        Returns the value or None if not yet available.
+        Polls with a short interval to handle buffered SSE delivery.
+        Returns the value or None if not available within timeout.
         """
-        with self.lock:
-            return self._data.pop(block_number, None)
+        deadline = time.monotonic() + timeout
+        while True:
+            with self.lock:
+                val = self._data.pop(block_number, None)
+            if val is not None:
+                return val
+            if time.monotonic() >= deadline:
+                return None
+            time.sleep(poll_interval)
 
     def _run(self):
         """Connect to SSE stream and parse events in a loop with reconnect."""
