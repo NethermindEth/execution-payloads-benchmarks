@@ -199,9 +199,20 @@ def scrape_client_metric(prev_idx):
         with urllib.request.urlopen(req, timeout=10) as resp:
             body = resp.read().decode("utf-8", errors="replace")
         elapsed_ms = (time.monotonic() - t0) * 1000
+        prefix = CLIENT_PROCESSING_METRIC
+        prefix_len = len(prefix)
         for line in body.splitlines():
-            if line.startswith(CLIENT_PROCESSING_METRIC + " "):
-                value_str = line[len(CLIENT_PROCESSING_METRIC) + 1:].strip()
+            if not line.startswith(prefix):
+                continue
+            # Match "metric_name value" or "metric_name{labels} value"
+            ch = line[prefix_len] if len(line) > prefix_len else ""
+            if ch == " ":
+                value_str = line[prefix_len + 1:].strip()
+                return float(value_str), elapsed_ms, None
+            elif ch == "{":
+                # Skip labels: find closing brace then parse value
+                brace_end = line.index("}", prefix_len)
+                value_str = line[brace_end + 1:].strip()
                 return float(value_str), elapsed_ms, None
         return None, elapsed_ms, f"metric {CLIENT_PROCESSING_METRIC} not found"
     except Exception as e:
