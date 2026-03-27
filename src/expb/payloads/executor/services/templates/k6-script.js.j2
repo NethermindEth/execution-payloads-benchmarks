@@ -220,7 +220,8 @@ function processNextPayload(base_tags = {}, warmup = false) {
 
   // Emit client-side processing metric for the PREVIOUS block.
   // The metric for block N-1 arrives in block N's metadata from the payload server.
-  if (!warmup && pair.prevClientProcessingMs !== undefined && prevPair) {
+  // Skip 0 values — the gauge may not have been updated yet when scraped.
+  if (!warmup && pair.prevClientProcessingMs > 0 && prevPair) {
     const cpTags = { kind: 'newPayload', jrpc_method: prevPair.method, ...base_tags };
     if (perPayloadMetrics) {
       if (prevPair.jrpcId !== undefined) cpTags.jrpc_id = prevPair.jrpcId;
