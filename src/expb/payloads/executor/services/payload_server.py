@@ -135,12 +135,22 @@ class SSEClient:
                     # Empty line = end of event
                     if event_type == "processed" and data_buf:
                         self._handle_processed(data_buf)
+                    elif event_type and event_type != "processed":
+                        print(
+                            f"[payload-server] SSE ignored event_type={event_type} "
+                            f"data={data_buf[:200]}",
+                            flush=True,
+                        )
                     event_type = ""
                     data_buf = ""
 
     def _handle_processed(self, data_str):
         try:
             evt = json.loads(data_str)
+            print(
+                f"[payload-server] SSE event: {data_str[:200]}",
+                flush=True,
+            )
             block_to = evt.get("blockTo")
             processing_ms = evt.get("processingMs")
             if block_to is not None and processing_ms is not None:
