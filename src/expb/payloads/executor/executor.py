@@ -43,7 +43,7 @@ class ExecutorExecuteOptions:
         print_logs_to_console: bool = False,
         per_payload_metrics_logs: bool = False,
         evm_warmup: bool = False,
-        drop_caches: bool = True,
+        drop_caches: bool = False,
         client_metrics: bool = True,
         stable_cpu: bool = True,
     ):
