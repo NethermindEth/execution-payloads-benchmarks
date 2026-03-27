@@ -59,14 +59,14 @@ def execute_scenarios(
             "--drop-caches/--no-drop-caches",
             help="Drop OS page cache before each measured payload for cold storage reads.",
         ),
-    ] = False,
+    ] = True,
     drop_caches_sync: Annotated[
         bool,
         typer.Option(
             "--drop-caches-sync/--no-drop-caches-sync",
             help="Run sync before dropping caches to flush dirty pages. More deterministic but slower.",
         ),
-    ] = True,
+    ] = False,
     client_metrics: Annotated[
         bool,
         typer.Option(
