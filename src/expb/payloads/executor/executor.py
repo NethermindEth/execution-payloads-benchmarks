@@ -531,8 +531,7 @@ class Executor:
         el_rpc_url: str = "",
         drop_caches: bool = False,
         evm_warmup: bool = False,
-        client_metrics_url: str = "",
-        client_processing_metric: str = "",
+        client_sse_url: str = "",
     ) -> Container:
         run_kwargs = dict(
             image=self.config.get_payload_server_container_image(),
@@ -545,8 +544,7 @@ class Executor:
                 el_rpc_url=el_rpc_url,
                 drop_caches=drop_caches,
                 evm_warmup=evm_warmup,
-                client_metrics_url=client_metrics_url,
-                client_processing_metric=client_processing_metric,
+                client_sse_url=client_sse_url,
             ),
             command=self.config.get_payload_server_command(),
             detach=True,
@@ -1008,26 +1006,24 @@ class Executor:
             if options.evm_warmup:
                 self.prepare_simulate_file()
 
-            # Resolve client metrics URL if the client exposes a processing
-            # time metric and the feature is enabled.
-            client_metrics_url = ""
-            client_processing_metric = ""
+            # Resolve SSE data feed URL if the client supports it and client
+            # metrics are enabled.  The SSE stream provides real-time
+            # per-block processing times (no polling interval staleness).
+            client_sse_url = ""
             if options.client_metrics:
-                metric_name = self.config.execution_client.value.processing_time_metric
-                if metric_name:
-                    client_metrics_url = self.config.get_execution_client_metrics_url(
+                sse_path = self.config.execution_client.value.sse_data_feed_path
+                if sse_path:
+                    client_sse_url = self.config.get_execution_client_sse_url(
                         execution_client_container,
                         containers_network,
                     )
-                    client_processing_metric = metric_name
                     self.log.info(
-                        "Client metrics enabled",
-                        metric=metric_name,
-                        url=client_metrics_url,
+                        "Client metrics enabled (SSE data feed)",
+                        url=client_sse_url,
                     )
                 else:
                     self.log.warning(
-                        "Client metrics requested but client has no processing_time_metric configured",
+                        "Client metrics requested but client has no sse_data_feed_path configured",
                         client=self.config.get_execution_client_name(),
                     )
 
@@ -1041,15 +1037,14 @@ class Executor:
                 image=self.config.get_payload_server_container_image(),
                 evm_warmup=options.evm_warmup,
                 drop_caches=options.drop_caches,
-                client_metrics=bool(client_metrics_url),
+                client_metrics=bool(client_sse_url),
             )
             payload_server_container = self.start_payload_server(
                 container_network=containers_network,
                 el_rpc_url=execution_client_rpc_url,
                 drop_caches=options.drop_caches,
                 evm_warmup=options.evm_warmup,
-                client_metrics_url=client_metrics_url,
-                client_processing_metric=client_processing_metric,
+                client_sse_url=client_sse_url,
             )
 
             if self.config.resources and self.config.limit_bandwidth:

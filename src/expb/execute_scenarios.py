@@ -64,7 +64,7 @@ def execute_scenarios(
         bool,
         typer.Option(
             "--client-metrics/--no-client-metrics",
-            help="Scrape the client's Prometheus endpoint between blocks to capture server-side processing time (e.g. nethermind_last_block_processing_time_in_ms).",
+            help="Capture server-side processing time between blocks via the client's SSE data feed (e.g. Nethermind /data/events).",
         ),
     ] = True,
     use_lock: Annotated[

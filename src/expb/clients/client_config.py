@@ -19,14 +19,14 @@ class ClientConfig:
         default_command: list[str] = [],
         default_env: dict[str, str] = {},
         prometheus_metrics_path: str = "/metrics",
-        processing_time_metric: str | None = None,
+        sse_data_feed_path: str | None = None,
     ):
         self.name = name
         self.default_image = default_image
         self.default_command = default_command
         self.default_env = default_env
         self.prometheus_metrics_path = prometheus_metrics_path
-        self.processing_time_metric = processing_time_metric
+        self.sse_data_feed_path = sse_data_feed_path
 
     def get_command(
         self,

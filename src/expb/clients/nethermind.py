@@ -32,12 +32,14 @@ class NethermindConfig(ClientConfig):
                 "--Metrics.Enabled=true",
                 f"--Metrics.ExposePort={CLIENT_METRICS_PORT}",
                 "--Metrics.ExposeHost=0.0.0.0",
+                # Required for SSE data feed (/data/events)
+                "--HealthChecks.Enabled=true",
                 # Disable peering
                 "--Init.DiscoveryEnabled=false",
                 "--Network.MaxActivePeers=0",
             ],
             prometheus_metrics_path="/metrics",
-            processing_time_metric="nethermind_last_block_processing_time_in_ms",
+            sse_data_feed_path="/data/events",
             default_env={},
         )
 

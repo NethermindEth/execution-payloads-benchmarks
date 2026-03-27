@@ -224,18 +224,19 @@ class ExecutorConfig:
         else:
             raise ValueError("Container attributes are not available")
 
-    def get_execution_client_metrics_url(
+    def get_execution_client_sse_url(
         self,
         container: Container,
         network: DockerNetwork,
     ) -> str:
+        """Build the SSE data feed URL (served on the JSON-RPC HTTP port)."""
         container.reload()
         if container.attrs is not None:
             container_ip = container.attrs["NetworkSettings"]["Networks"][network.name][
                 "IPAddress"
             ]
-            metrics_path = self.execution_client.value.prometheus_metrics_path
-            return f"http://{container_ip}:{CLIENT_METRICS_PORT}{metrics_path}"
+            sse_path = self.execution_client.value.sse_data_feed_path
+            return f"http://{container_ip}:{CLIENT_RPC_PORT}{sse_path}"
         else:
             raise ValueError("Container attributes are not available")
 
@@ -383,8 +384,7 @@ class ExecutorConfig:
         el_rpc_url: str = "",
         drop_caches: bool = False,
         evm_warmup: bool = False,
-        client_metrics_url: str = "",
-        client_processing_metric: str = "",
+        client_sse_url: str = "",
     ) -> dict[str, str]:
         skip = self.k6_payloads_skip or 0
         warmup = self.k6_payloads_warmup or 0
@@ -404,10 +404,8 @@ class ExecutorConfig:
         if drop_caches:
             env["EXPB_DROP_CACHES"] = "1"
             env["EXPB_DROP_CACHES_SKIP"] = str(skip + warmup)
-        if client_metrics_url and client_processing_metric:
-            env["EXPB_CLIENT_METRICS_URL"] = client_metrics_url
-            env["EXPB_CLIENT_PROCESSING_METRIC"] = client_processing_metric
-            env["EXPB_CLIENT_METRICS_SKIP"] = str(skip + warmup)
+        if client_sse_url:
+            env["EXPB_CLIENT_SSE_URL"] = client_sse_url
         return env
 
     def get_payload_server_url(

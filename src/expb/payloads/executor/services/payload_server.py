@@ -13,9 +13,9 @@ Supports per-block modes controlled by environment variables:
 - GC drain (EXPB_EL_RPC_URL): sends eth_blockNumber before each measured block
   to absorb any pending .NET GC from the previous block's processing, preventing
   GC pauses from inflating K6 TTFB measurements.
-- Client metrics (EXPB_CLIENT_METRICS_URL + EXPB_CLIENT_PROCESSING_METRIC):
-  scrapes the client's Prometheus endpoint after each block to capture the
-  server-side processing time, immune to GC/deserialization jitter.
+- Client metrics via SSE (EXPB_CLIENT_SSE_URL): connects to the client's
+  Server-Sent Events data feed (e.g. Nethermind /data/events) to receive
+  real-time per-block processing times, immune to Prometheus snapshot staleness.
 - EVM warmup (EXPB_EL_RPC_URL + EXPB_SIMULATE_FILE): fires eth_simulateV1
   before each block to warm contract code, state trie, and DB block cache.
 - Drop caches (EXPB_DROP_CACHES): writes to /proc/sys/vm/drop_caches
@@ -41,9 +41,7 @@ SIMULATE_FILE = os.environ.get("EXPB_SIMULATE_FILE", "")
 DROP_CACHES = os.environ.get("EXPB_DROP_CACHES", "") == "1"
 DROP_CACHES_SKIP = int(os.environ.get("EXPB_DROP_CACHES_SKIP", "0"))
 GC_DRAIN_SKIP = int(os.environ.get("EXPB_GC_DRAIN_SKIP", "0"))
-CLIENT_METRICS_URL = os.environ.get("EXPB_CLIENT_METRICS_URL", "")
-CLIENT_PROCESSING_METRIC = os.environ.get("EXPB_CLIENT_PROCESSING_METRIC", "")
-CLIENT_METRICS_SKIP = int(os.environ.get("EXPB_CLIENT_METRICS_SKIP", "0"))
+CLIENT_SSE_URL = os.environ.get("EXPB_CLIENT_SSE_URL", "")
 
 _ETH_BLOCK_NUMBER_BODY = json.dumps(
     {"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}
@@ -53,9 +51,101 @@ _ETH_BLOCK_NUMBER_BODY = json.dumps(
 _METHOD_RE = re.compile(r'"method"\s*:\s*"([^"]+)"')
 _ID_RE = re.compile(r'"id"\s*:\s*(\d+)')
 _GAS_USED_RE = re.compile(r'"gasUsed"\s*:\s*"([^"]+)"')
+_BLOCK_NUMBER_RE = re.compile(r'"blockNumber"\s*:\s*"(0x[0-9a-fA-F]+)"')
 
 # Global state
 reader = None
+sse_client = None
+
+
+class SSEClient:
+    """Background SSE client that receives real-time block processing events.
+
+    Connects to the client's /data/events SSE endpoint and stores
+    processingMs keyed by block number for lookup by the request handler.
+    Must connect before the first block is processed (Nethermind's
+    HaveSubscribers check silently drops events with no listeners).
+    """
+
+    def __init__(self, url):
+        self.url = url
+        self.lock = threading.Lock()
+        self._data = {}  # block_number -> processingMs
+        self._connected = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def wait_connected(self, timeout=30):
+        return self._connected.wait(timeout)
+
+    def get_processing_ms(self, block_number):
+        """Look up and consume processingMs for a block number.
+
+        Returns the value or None if not yet available.
+        """
+        with self.lock:
+            return self._data.pop(block_number, None)
+
+    def _run(self):
+        """Connect to SSE stream and parse events in a loop with reconnect."""
+        while True:
+            try:
+                self._connect_and_read()
+            except Exception as e:
+                print(
+                    f"[payload-server] SSE connection error: {e}, "
+                    f"reconnecting in 1s",
+                    flush=True,
+                )
+                time.sleep(1)
+
+    def _connect_and_read(self):
+        req = urllib.request.Request(
+            self.url,
+            headers={"Accept": "text/event-stream"},
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=600) as resp:
+            self._connected.set()
+            print(
+                f"[payload-server] SSE connected to {self.url}",
+                flush=True,
+            )
+            event_type = ""
+            data_buf = ""
+            for raw_line in resp:
+                line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
+                if line.startswith("event:"):
+                    event_type = line[6:].strip()
+                elif line.startswith("data:"):
+                    data_buf = line[5:].strip()
+                elif line == "":
+                    # Empty line = end of event
+                    if event_type == "processed" and data_buf:
+                        self._handle_processed(data_buf)
+                    event_type = ""
+                    data_buf = ""
+
+    def _handle_processed(self, data_str):
+        try:
+            evt = json.loads(data_str)
+            block_to = evt.get("blockTo")
+            processing_ms = evt.get("processingMs")
+            if block_to is not None and processing_ms is not None:
+                with self.lock:
+                    self._data[int(block_to)] = float(processing_ms)
+                print(
+                    f"[payload-server] SSE processed block={block_to} "
+                    f"processingMs={processing_ms:.1f}",
+                    flush=True,
+                )
+        except Exception as e:
+            print(
+                f"[payload-server] SSE parse error: {e}",
+                flush=True,
+            )
 
 
 class PairReader:
@@ -116,6 +206,9 @@ def extract_metadata(idx, payload_head, fcu_head):
     m = _GAS_USED_RE.search(payload_head)
     if m:
         meta["gas_used"] = int(m.group(1), 16)
+    m = _BLOCK_NUMBER_RE.search(payload_head)
+    if m:
+        meta["block_number"] = int(m.group(1), 16)
     m = _METHOD_RE.search(fcu_head)
     if m:
         meta["fcu_method"] = m.group(1)
@@ -179,49 +272,6 @@ def drain_gc(idx):
         return False, elapsed_ms, str(e)
 
 
-def scrape_client_metric(prev_idx):
-    """Scrape the client's Prometheus endpoint to get server-side processing time.
-
-    The metric value reflects the PREVIOUS block (the one K6 just finished
-    processing).  Called after gc_drain so any pending GC has been absorbed
-    and the metrics endpoint responds cleanly.
-
-    Skips warmup blocks (prev_idx < CLIENT_METRICS_SKIP).
-    Returns (value_ms: float|None, elapsed_ms: float, error: str|None).
-    """
-    if not CLIENT_METRICS_URL or not CLIENT_PROCESSING_METRIC:
-        return None, 0.0, None
-    if isinstance(prev_idx, int) and prev_idx < CLIENT_METRICS_SKIP:
-        return None, 0.0, None
-    t0 = time.monotonic()
-    try:
-        # Cache-bust to avoid stale responses from Kestrel/prometheus-net
-        url = f"{CLIENT_METRICS_URL}?t={time.monotonic_ns()}"
-        req = urllib.request.Request(url, method="GET")
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            body = resp.read().decode("utf-8", errors="replace")
-        elapsed_ms = (time.monotonic() - t0) * 1000
-        prefix = CLIENT_PROCESSING_METRIC
-        prefix_len = len(prefix)
-        for line in body.splitlines():
-            if not line.startswith(prefix):
-                continue
-            # Match "metric_name value" or "metric_name{labels} value"
-            ch = line[prefix_len] if len(line) > prefix_len else ""
-            if ch == " ":
-                value_str = line[prefix_len + 1:].strip()
-                return float(value_str), elapsed_ms, None
-            elif ch == "{":
-                # Skip labels: find closing brace then parse value
-                brace_end = line.index("}", prefix_len)
-                value_str = line[brace_end + 1:].strip()
-                return float(value_str), elapsed_ms, None
-        return None, elapsed_ms, f"metric {CLIENT_PROCESSING_METRIC} not found"
-    except Exception as e:
-        elapsed_ms = (time.monotonic() - t0) * 1000
-        return None, elapsed_ms, str(e)
-
-
 def warmup_block(idx, simulate_json):
     """Fire eth_simulateV1 to warm EVM caches for the next block.
 
@@ -250,6 +300,11 @@ def warmup_block(idx, simulate_json):
         return False, elapsed_ms, str(e)
 
 
+# Track the previous block number so we can look up its SSE processing time
+# when the next /next request arrives.
+_prev_block_number = None
+
+
 class RequestHandler(BaseHTTPRequestHandler):
     """HTTP request handler for payload serving."""
 
@@ -268,7 +323,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_error(404, "Not Found")
 
     def _handle_next(self):
-        global reader
+        global reader, sse_client, _prev_block_number
         result = reader.next_pair()
 
         if result is None:
@@ -299,24 +354,28 @@ class RequestHandler(BaseHTTPRequestHandler):
                     flush=True,
                 )
 
-        # Scrape client-side processing time for the previous block
-        # (the one K6 just finished, before we return the next payload).
-        # Include in metadata so K6 can emit it as a gauge.
-        prev_idx = idx - 1
-        cm_val, cm_ms, cm_err = scrape_client_metric(prev_idx)
-        if cm_val is not None:
-            meta["prev_client_processing_ms"] = cm_val
-            print(
-                f"[payload-server] client_metric block={prev_idx} "
-                f"processing_ms={cm_val:.1f} scrape_elapsed={cm_ms:.1f}ms",
-                flush=True,
-            )
-        elif cm_err is not None and CLIENT_METRICS_URL and prev_idx >= CLIENT_METRICS_SKIP:
-            print(
-                f"[payload-server] client_metric block={prev_idx} "
-                f"FAILED scrape_elapsed={cm_ms:.1f}ms error={cm_err}",
-                flush=True,
-            )
+        # Look up SSE processing time for the previous block.
+        # The SSE "processed" event fires synchronously after Nethermind
+        # finishes processing, so by the time K6 calls /next again the
+        # event should have arrived.
+        if sse_client and _prev_block_number is not None:
+            processing_ms = sse_client.get_processing_ms(_prev_block_number)
+            if processing_ms is not None:
+                meta["prev_client_processing_ms"] = processing_ms
+                print(
+                    f"[payload-server] client_metric block_number={_prev_block_number} "
+                    f"processing_ms={processing_ms:.1f}",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"[payload-server] client_metric block_number={_prev_block_number} "
+                    f"not yet available",
+                    flush=True,
+                )
+
+        # Remember current block number for next iteration
+        _prev_block_number = meta.get("block_number")
 
         # Drop OS page cache before the block (cold storage mode)
         dc_ok, dc_ms, dc_err = drop_caches_block(idx)
@@ -360,7 +419,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 
 def main():
-    global reader
+    global reader, sse_client
 
     print(f"[payload-server] Starting on port {PORT}", flush=True)
     print(f"[payload-server] Payloads file: {PAYLOADS_FILE}", flush=True)
@@ -370,13 +429,26 @@ def main():
     print(f"[payload-server] Simulate file: {SIMULATE_FILE or '(none)'}", flush=True)
     print(f"[payload-server] GC drain: {'enabled' if EL_RPC_URL else 'disabled'}"
           f"{f' (skip first {GC_DRAIN_SKIP} blocks)' if EL_RPC_URL and GC_DRAIN_SKIP else ''}", flush=True)
-    print(f"[payload-server] Client metrics: {'enabled' if CLIENT_METRICS_URL else 'disabled'}"
-          f"{f' metric={CLIENT_PROCESSING_METRIC}' if CLIENT_METRICS_URL else ''}"
-          f"{f' (skip first {CLIENT_METRICS_SKIP} blocks)' if CLIENT_METRICS_URL and CLIENT_METRICS_SKIP else ''}", flush=True)
+    print(f"[payload-server] Client metrics (SSE): {'enabled' if CLIENT_SSE_URL else 'disabled'}"
+          f"{f' url={CLIENT_SSE_URL}' if CLIENT_SSE_URL else ''}", flush=True)
     print(f"[payload-server] Drop caches: {'enabled' if DROP_CACHES else 'disabled'}"
           f"{f' (skip first {DROP_CACHES_SKIP} blocks)' if DROP_CACHES and DROP_CACHES_SKIP else ''}", flush=True)
 
     reader = PairReader(PAYLOADS_FILE, FCUS_FILE, SIMULATE_FILE, SKIP, TOTAL)
+
+    # Connect SSE client BEFORE serving — Nethermind drops events if no
+    # subscribers are connected (HaveSubscribers check in DataFeed.cs).
+    if CLIENT_SSE_URL:
+        sse_client = SSEClient(CLIENT_SSE_URL)
+        sse_client.start()
+        if sse_client.wait_connected(timeout=30):
+            print("[payload-server] SSE client connected", flush=True)
+        else:
+            print(
+                "[payload-server] WARNING: SSE client not connected after 30s, "
+                "continuing without client metrics",
+                flush=True,
+            )
 
     httpd = ThreadingHTTPServer(("0.0.0.0", PORT), RequestHandler)
     print(f"[payload-server] Ready, serving on port {PORT}", flush=True)
