@@ -54,7 +54,7 @@ def execute_scenario(
             "--drop-caches/--no-drop-caches",
             help="Drop OS page cache before each measured payload for cold storage reads.",
         ),
-    ] = True,
+    ] = False,
     drop_caches_sync: Annotated[
         bool,
         typer.Option(
