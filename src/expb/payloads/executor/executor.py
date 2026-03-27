@@ -28,6 +28,7 @@ from expb.payloads.executor.services.payload_server import (
     get_payload_server_script,
 )
 from expb.payloads.executor.services.snapshots import setup_snapshot_service
+from expb.payloads.utils.cpu import CpuStabilizer
 from expb.payloads.utils.networking import limit_container_bandwidth
 
 PER_PAYLOAD_METRIC_LOG_PATTERN = re.compile(
@@ -44,6 +45,7 @@ class ExecutorExecuteOptions:
         evm_warmup: bool = False,
         drop_caches: bool = True,
         client_metrics: bool = True,
+        stable_cpu: bool = True,
     ):
         self.collect_per_payload_metrics: bool = collect_per_payload_metrics
         self.print_logs_to_console: bool = print_logs_to_console
@@ -51,6 +53,7 @@ class ExecutorExecuteOptions:
         self.evm_warmup: bool = evm_warmup
         self.drop_caches: bool = drop_caches
         self.client_metrics: bool = client_metrics
+        self.stable_cpu: bool = stable_cpu
 
 
 class Executor:
@@ -922,6 +925,7 @@ class Executor:
         self,
         options: ExecutorExecuteOptions = ExecutorExecuteOptions(),
     ) -> None:
+        cpu_stabilizer: CpuStabilizer | None = None
         try:
             self.log.info(
                 "Preparing scenario",
@@ -929,6 +933,11 @@ class Executor:
                 execution_client=self.config.get_execution_client_name(),
             )
             self.run_preflight_checks()
+
+            if options.stable_cpu:
+                cpu_stabilizer = CpuStabilizer(logger=self.log)
+                cpu_stabilizer.apply()
+
             self.clean_system_cache()
             self.prepare_directories()
             self.prepare_jwt_secret_file()
@@ -1130,6 +1139,8 @@ class Executor:
                 ),
                 print_per_payload_metrics_table=options.per_payload_metrics_logs,
             )
+            if cpu_stabilizer is not None:
+                cpu_stabilizer.restore()
 
     @classmethod
     def from_scenarios(

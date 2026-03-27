@@ -67,6 +67,13 @@ def execute_scenarios(
             help="Capture server-side processing time between blocks via the client's SSE data feed (e.g. Nethermind /data/events).",
         ),
     ] = True,
+    stable_cpu: Annotated[
+        bool,
+        typer.Option(
+            "--stable-cpu/--no-stable-cpu",
+            help="Disable turbo boost and set CPU governor to 'performance' for consistent benchmark results across runs.",
+        ),
+    ] = True,
     use_lock: Annotated[
         bool,
         typer.Option(
@@ -155,6 +162,7 @@ def execute_scenarios(
                                 evm_warmup=evm_warmup,
                                 drop_caches=drop_caches,
                                 client_metrics=client_metrics,
+                                stable_cpu=stable_cpu,
                             ),
                         )
                 if not loop:
