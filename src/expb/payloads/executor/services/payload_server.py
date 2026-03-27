@@ -135,27 +135,30 @@ class SSEClient:
                     # Empty line = end of event
                     if event_type == "processed" and data_buf:
                         self._handle_processed(data_buf)
-                    elif event_type and event_type != "processed":
-                        print(
-                            f"[payload-server] SSE ignored event_type={event_type} "
-                            f"data={data_buf[:200]}",
-                            flush=True,
-                        )
                     event_type = ""
                     data_buf = ""
 
     def _handle_processed(self, data_str):
         try:
             evt = json.loads(data_str)
-            print(
-                f"[payload-server] SSE event: {data_str[:200]}",
-                flush=True,
-            )
+            block_from = evt.get("blockFrom")
             block_to = evt.get("blockTo")
             processing_ms = evt.get("processingMs")
             if block_to is not None and processing_ms is not None:
+                block_from = int(block_from) if block_from is not None else int(block_to)
+                block_to = int(block_to)
+                block_count = block_to - block_from + 1
+                per_block_ms = float(processing_ms) / block_count
                 with self.lock:
-                    self._data[int(block_to)] = float(processing_ms)
+                    for b in range(block_from, block_to + 1):
+                        self._data[b] = per_block_ms
+                if block_count > 1:
+                    print(
+                        f"[payload-server] SSE batch blocks={block_from}..{block_to} "
+                        f"count={block_count} total_ms={processing_ms:.1f} "
+                        f"per_block_ms={per_block_ms:.1f}",
+                        flush=True,
+                    )
         except Exception as e:
             print(
                 f"[payload-server] SSE parse error: {e}",
