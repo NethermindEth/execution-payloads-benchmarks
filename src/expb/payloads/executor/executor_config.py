@@ -406,6 +406,7 @@ class ExecutorConfig:
             env["EXPB_DROP_CACHES_SKIP"] = str(skip + warmup)
         if client_sse_url:
             env["EXPB_CLIENT_SSE_URL"] = client_sse_url
+            env["EXPB_CLIENT_SSE_SKIP"] = str(skip + warmup)
         return env
 
     def get_payload_server_url(

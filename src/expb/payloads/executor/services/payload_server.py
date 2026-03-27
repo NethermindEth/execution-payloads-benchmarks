@@ -42,6 +42,7 @@ DROP_CACHES = os.environ.get("EXPB_DROP_CACHES", "") == "1"
 DROP_CACHES_SKIP = int(os.environ.get("EXPB_DROP_CACHES_SKIP", "0"))
 GC_DRAIN_SKIP = int(os.environ.get("EXPB_GC_DRAIN_SKIP", "0"))
 CLIENT_SSE_URL = os.environ.get("EXPB_CLIENT_SSE_URL", "")
+CLIENT_SSE_SKIP = int(os.environ.get("EXPB_CLIENT_SSE_SKIP", "0"))
 
 _ETH_BLOCK_NUMBER_BODY = json.dumps(
     {"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}
@@ -300,9 +301,10 @@ def warmup_block(idx, simulate_json):
         return False, elapsed_ms, str(e)
 
 
-# Track the previous block number so we can look up its SSE processing time
-# when the next /next request arrives.
+# Track the previous block's index and number so we can look up its SSE
+# processing time when the next /next request arrives.
 _prev_block_number = None
+_prev_idx = None
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -323,7 +325,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_error(404, "Not Found")
 
     def _handle_next(self):
-        global reader, sse_client, _prev_block_number
+        global reader, sse_client, _prev_block_number, _prev_idx
         result = reader.next_pair()
 
         if result is None:
@@ -358,7 +360,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         # The SSE "processed" event fires synchronously after Nethermind
         # finishes processing, so by the time K6 calls /next again the
         # event should have arrived.
-        if sse_client and _prev_block_number is not None:
+        # Skip warmup blocks (prev_idx < CLIENT_SSE_SKIP).
+        if (sse_client and _prev_block_number is not None
+                and _prev_idx is not None and _prev_idx >= CLIENT_SSE_SKIP):
             processing_ms = sse_client.get_processing_ms(_prev_block_number)
             if processing_ms is not None:
                 meta["prev_client_processing_ms"] = processing_ms
@@ -374,8 +378,9 @@ class RequestHandler(BaseHTTPRequestHandler):
                     flush=True,
                 )
 
-        # Remember current block number for next iteration
+        # Remember current block number and index for next iteration
         _prev_block_number = meta.get("block_number")
+        _prev_idx = idx
 
         # Drop OS page cache before the block (cold storage mode)
         dc_ok, dc_ms, dc_err = drop_caches_block(idx)
@@ -430,7 +435,8 @@ def main():
     print(f"[payload-server] GC drain: {'enabled' if EL_RPC_URL else 'disabled'}"
           f"{f' (skip first {GC_DRAIN_SKIP} blocks)' if EL_RPC_URL and GC_DRAIN_SKIP else ''}", flush=True)
     print(f"[payload-server] Client metrics (SSE): {'enabled' if CLIENT_SSE_URL else 'disabled'}"
-          f"{f' url={CLIENT_SSE_URL}' if CLIENT_SSE_URL else ''}", flush=True)
+          f"{f' url={CLIENT_SSE_URL}' if CLIENT_SSE_URL else ''}"
+          f"{f' (skip first {CLIENT_SSE_SKIP} blocks)' if CLIENT_SSE_URL and CLIENT_SSE_SKIP else ''}", flush=True)
     print(f"[payload-server] Drop caches: {'enabled' if DROP_CACHES else 'disabled'}"
           f"{f' (skip first {DROP_CACHES_SKIP} blocks)' if DROP_CACHES and DROP_CACHES_SKIP else ''}", flush=True)
 
