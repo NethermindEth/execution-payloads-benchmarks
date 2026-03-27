@@ -44,6 +44,7 @@ class ExecutorExecuteOptions:
         per_payload_metrics_logs: bool = False,
         evm_warmup: bool = False,
         drop_caches: bool = False,
+        drop_caches_sync: bool = True,
         client_metrics: bool = True,
         stable_cpu: bool = True,
     ):
@@ -52,6 +53,7 @@ class ExecutorExecuteOptions:
         self.per_payload_metrics_logs: bool = per_payload_metrics_logs
         self.evm_warmup: bool = evm_warmup
         self.drop_caches: bool = drop_caches
+        self.drop_caches_sync: bool = drop_caches_sync
         self.client_metrics: bool = client_metrics
         self.stable_cpu: bool = stable_cpu
 
@@ -533,6 +535,7 @@ class Executor:
         container_network: Network | None = None,
         el_rpc_url: str = "",
         drop_caches: bool = False,
+        drop_caches_sync: bool = True,
         evm_warmup: bool = False,
         client_sse_url: str = "",
     ) -> Container:
@@ -546,6 +549,7 @@ class Executor:
             environment=self.config.get_payload_server_environment(
                 el_rpc_url=el_rpc_url,
                 drop_caches=drop_caches,
+                drop_caches_sync=drop_caches_sync,
                 evm_warmup=evm_warmup,
                 client_sse_url=client_sse_url,
             ),
@@ -1052,6 +1056,7 @@ class Executor:
                 container_network=containers_network,
                 el_rpc_url=execution_client_rpc_url,
                 drop_caches=options.drop_caches,
+                drop_caches_sync=options.drop_caches_sync,
                 evm_warmup=options.evm_warmup,
                 client_sse_url=client_sse_url,
             )

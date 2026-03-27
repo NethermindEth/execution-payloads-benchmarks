@@ -383,6 +383,7 @@ class ExecutorConfig:
         self,
         el_rpc_url: str = "",
         drop_caches: bool = False,
+        drop_caches_sync: bool = True,
         evm_warmup: bool = False,
         client_sse_url: str = "",
     ) -> dict[str, str]:
@@ -403,6 +404,7 @@ class ExecutorConfig:
             env["EXPB_SIMULATE_FILE"] = self._payload_server_container_simulate_file
         if drop_caches:
             env["EXPB_DROP_CACHES"] = "1"
+            env["EXPB_DROP_CACHES_SYNC"] = "1" if drop_caches_sync else "0"
             env["EXPB_DROP_CACHES_SKIP"] = str(skip + warmup)
         if client_sse_url:
             env["EXPB_CLIENT_SSE_URL"] = client_sse_url

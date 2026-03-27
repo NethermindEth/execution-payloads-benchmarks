@@ -39,6 +39,7 @@ PORT = int(os.environ.get("EXPB_SERVER_PORT", "8080"))
 EL_RPC_URL = os.environ.get("EXPB_EL_RPC_URL", "")
 SIMULATE_FILE = os.environ.get("EXPB_SIMULATE_FILE", "")
 DROP_CACHES = os.environ.get("EXPB_DROP_CACHES", "") == "1"
+DROP_CACHES_SYNC = os.environ.get("EXPB_DROP_CACHES_SYNC", "1") == "1"
 DROP_CACHES_SKIP = int(os.environ.get("EXPB_DROP_CACHES_SKIP", "0"))
 GC_DRAIN_SKIP = int(os.environ.get("EXPB_GC_DRAIN_SKIP", "0"))
 CLIENT_SSE_URL = os.environ.get("EXPB_CLIENT_SSE_URL", "")
@@ -225,8 +226,9 @@ def drop_caches_block(idx):
         return None, 0.0, None
     t0 = time.monotonic()
     try:
-        import subprocess
-        subprocess.run("sync", shell=True, check=True)
+        if DROP_CACHES_SYNC:
+            import subprocess
+            subprocess.run("sync", shell=True, check=True)
         with open("/host_proc_sys_vm/drop_caches", "w") as f:
             f.write("3")
         elapsed_ms = (time.monotonic() - t0) * 1000
@@ -433,6 +435,7 @@ def main():
           f"{f' url={CLIENT_SSE_URL}' if CLIENT_SSE_URL else ''}"
           f"{f' (skip first {CLIENT_SSE_SKIP} blocks)' if CLIENT_SSE_URL and CLIENT_SSE_SKIP else ''}", flush=True)
     print(f"[payload-server] Drop caches: {'enabled' if DROP_CACHES else 'disabled'}"
+          f"{f' sync={DROP_CACHES_SYNC}' if DROP_CACHES else ''}"
           f"{f' (skip first {DROP_CACHES_SKIP} blocks)' if DROP_CACHES and DROP_CACHES_SKIP else ''}", flush=True)
 
     reader = PairReader(PAYLOADS_FILE, FCUS_FILE, SIMULATE_FILE, SKIP, TOTAL)

@@ -60,6 +60,13 @@ def execute_scenarios(
             help="Drop OS page cache before each measured payload for cold storage reads.",
         ),
     ] = False,
+    drop_caches_sync: Annotated[
+        bool,
+        typer.Option(
+            "--drop-caches-sync/--no-drop-caches-sync",
+            help="Run sync before dropping caches to flush dirty pages. More deterministic but slower.",
+        ),
+    ] = True,
     client_metrics: Annotated[
         bool,
         typer.Option(
@@ -161,6 +168,7 @@ def execute_scenarios(
                                 per_payload_metrics_logs=per_payload_metrics_logs,
                                 evm_warmup=evm_warmup,
                                 drop_caches=drop_caches,
+                                drop_caches_sync=drop_caches_sync,
                                 client_metrics=client_metrics,
                                 stable_cpu=stable_cpu,
                             ),
