@@ -37,6 +37,7 @@ class NethermindConfig(ClientConfig):
                 "--Network.MaxActivePeers=0",
             ],
             prometheus_metrics_path="/metrics",
+            processing_time_metric="nethermind_last_block_processing_time_in_ms",
             default_env={},
         )
 

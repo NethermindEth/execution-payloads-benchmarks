@@ -13,6 +13,9 @@ Supports per-block modes controlled by environment variables:
 - GC drain (EXPB_EL_RPC_URL): sends eth_blockNumber before each measured block
   to absorb any pending .NET GC from the previous block's processing, preventing
   GC pauses from inflating K6 TTFB measurements.
+- Client metrics (EXPB_CLIENT_METRICS_URL + EXPB_CLIENT_PROCESSING_METRIC):
+  scrapes the client's Prometheus endpoint after each block to capture the
+  server-side processing time, immune to GC/deserialization jitter.
 - EVM warmup (EXPB_EL_RPC_URL + EXPB_SIMULATE_FILE): fires eth_simulateV1
   before each block to warm contract code, state trie, and DB block cache.
 - Drop caches (EXPB_DROP_CACHES): writes to /proc/sys/vm/drop_caches
@@ -38,6 +41,9 @@ SIMULATE_FILE = os.environ.get("EXPB_SIMULATE_FILE", "")
 DROP_CACHES = os.environ.get("EXPB_DROP_CACHES", "") == "1"
 DROP_CACHES_SKIP = int(os.environ.get("EXPB_DROP_CACHES_SKIP", "0"))
 GC_DRAIN_SKIP = int(os.environ.get("EXPB_GC_DRAIN_SKIP", "0"))
+CLIENT_METRICS_URL = os.environ.get("EXPB_CLIENT_METRICS_URL", "")
+CLIENT_PROCESSING_METRIC = os.environ.get("EXPB_CLIENT_PROCESSING_METRIC", "")
+CLIENT_METRICS_SKIP = int(os.environ.get("EXPB_CLIENT_METRICS_SKIP", "0"))
 
 _ETH_BLOCK_NUMBER_BODY = json.dumps(
     {"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}
@@ -173,6 +179,36 @@ def drain_gc(idx):
         return False, elapsed_ms, str(e)
 
 
+def scrape_client_metric(prev_idx):
+    """Scrape the client's Prometheus endpoint to get server-side processing time.
+
+    The metric value reflects the PREVIOUS block (the one K6 just finished
+    processing).  Called after gc_drain so any pending GC has been absorbed
+    and the metrics endpoint responds cleanly.
+
+    Skips warmup blocks (prev_idx < CLIENT_METRICS_SKIP).
+    Returns (value_ms: float|None, elapsed_ms: float, error: str|None).
+    """
+    if not CLIENT_METRICS_URL or not CLIENT_PROCESSING_METRIC:
+        return None, 0.0, None
+    if isinstance(prev_idx, int) and prev_idx < CLIENT_METRICS_SKIP:
+        return None, 0.0, None
+    t0 = time.monotonic()
+    try:
+        req = urllib.request.Request(CLIENT_METRICS_URL, method="GET")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        for line in body.splitlines():
+            if line.startswith(CLIENT_PROCESSING_METRIC + " "):
+                value_str = line[len(CLIENT_PROCESSING_METRIC) + 1:].strip()
+                return float(value_str), elapsed_ms, None
+        return None, elapsed_ms, f"metric {CLIENT_PROCESSING_METRIC} not found"
+    except Exception as e:
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        return None, elapsed_ms, str(e)
+
+
 def warmup_block(idx, simulate_json):
     """Fire eth_simulateV1 to warm EVM caches for the next block.
 
@@ -250,6 +286,23 @@ class RequestHandler(BaseHTTPRequestHandler):
                     flush=True,
                 )
 
+        # Scrape client-side processing time for the previous block
+        # (the one K6 just finished, before we return the next payload)
+        prev_idx = idx - 1
+        cm_val, cm_ms, cm_err = scrape_client_metric(prev_idx)
+        if cm_val is not None:
+            print(
+                f"[payload-server] client_metric block={prev_idx} "
+                f"processing_ms={cm_val:.1f} scrape_elapsed={cm_ms:.1f}ms",
+                flush=True,
+            )
+        elif cm_err is not None and CLIENT_METRICS_URL and prev_idx >= CLIENT_METRICS_SKIP:
+            print(
+                f"[payload-server] client_metric block={prev_idx} "
+                f"FAILED scrape_elapsed={cm_ms:.1f}ms error={cm_err}",
+                flush=True,
+            )
+
         # Drop OS page cache before the block (cold storage mode)
         dc_ok, dc_ms, dc_err = drop_caches_block(idx)
         if dc_ok is not None:
@@ -302,6 +355,9 @@ def main():
     print(f"[payload-server] Simulate file: {SIMULATE_FILE or '(none)'}", flush=True)
     print(f"[payload-server] GC drain: {'enabled' if EL_RPC_URL else 'disabled'}"
           f"{f' (skip first {GC_DRAIN_SKIP} blocks)' if EL_RPC_URL and GC_DRAIN_SKIP else ''}", flush=True)
+    print(f"[payload-server] Client metrics: {'enabled' if CLIENT_METRICS_URL else 'disabled'}"
+          f"{f' metric={CLIENT_PROCESSING_METRIC}' if CLIENT_METRICS_URL else ''}"
+          f"{f' (skip first {CLIENT_METRICS_SKIP} blocks)' if CLIENT_METRICS_URL and CLIENT_METRICS_SKIP else ''}", flush=True)
     print(f"[payload-server] Drop caches: {'enabled' if DROP_CACHES else 'disabled'}"
           f"{f' (skip first {DROP_CACHES_SKIP} blocks)' if DROP_CACHES and DROP_CACHES_SKIP else ''}", flush=True)
 

@@ -55,6 +55,13 @@ def execute_scenario(
             help="Drop OS page cache before each measured payload for cold storage reads.",
         ),
     ] = True,
+    client_metrics: Annotated[
+        bool,
+        typer.Option(
+            "--client-metrics/--no-client-metrics",
+            help="Scrape the client's Prometheus endpoint between blocks to capture server-side processing time (e.g. nethermind_last_block_processing_time_in_ms).",
+        ),
+    ] = True,
     use_lock: Annotated[
         bool,
         typer.Option(
@@ -118,6 +125,7 @@ def execute_scenario(
                         per_payload_metrics_logs=per_payload_metrics_logs,
                         evm_warmup=evm_warmup,
                         drop_caches=drop_caches,
+                        client_metrics=client_metrics,
                     ),
                 )
     except ExecutionLockError as e:
