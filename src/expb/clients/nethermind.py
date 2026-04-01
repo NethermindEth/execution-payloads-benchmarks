@@ -34,7 +34,7 @@ class NethermindConfig(ClientConfig):
                 "--Metrics.ExposeHost=0.0.0.0",
                 # Required for SSE data feed (/data/events)
                 "--HealthChecks.Enabled=true",
-                "--Init.LogRules=lambda_method265",
+                "--Init.LogRules=lambda_method265:Debug",
                 # Disable peering
                 "--Init.DiscoveryEnabled=false",
                 "--Network.MaxActivePeers=0",
