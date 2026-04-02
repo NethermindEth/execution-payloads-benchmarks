@@ -137,6 +137,9 @@ class ExecutorConfig:
         ## Alloy config file
         self.alloy_config_file: Path = self.outputs_dir / "config.alloy"
 
+        ## Pre-built simulate payloads file (only used when evm_warmup is on)
+        self.simulate_payloads_file: Path = self.outputs_dir / "simulate-payloads.jsonl"
+
         ## Payload server config
         self.payload_server_script_file: Path = self.outputs_dir / "payload-server.py"
         self._payload_server_container_port: int = PAYLOAD_SERVER_PORT
@@ -144,11 +147,10 @@ class ExecutorConfig:
         self._payload_server_container_script: str = (
             f"{self._payload_server_container_work_dir}/payload-server.py"
         )
-        self._payload_server_container_payloads_file: str = (
-            f"/payloads/{self.payloads_file.name}"
-        )
-        self._payload_server_container_fcus_file: str = (
-            f"/payloads/{self.fcus_file.name}"
+        self._payload_server_container_payloads_file: str = "/payloads/payloads.jsonl"
+        self._payload_server_container_fcus_file: str = "/payloads/fcus.jsonl"
+        self._payload_server_container_simulate_file: str = (
+            "/payloads/simulate-payloads.jsonl"
         )
 
         # Executor Exports config
@@ -219,6 +221,22 @@ class ExecutorConfig:
                 "IPAddress"
             ]
             return f"http://{container_ip}:{CLIENT_RPC_PORT}"
+        else:
+            raise ValueError("Container attributes are not available")
+
+    def get_execution_client_sse_url(
+        self,
+        container: Container,
+        network: DockerNetwork,
+    ) -> str:
+        """Build the SSE data feed URL (served on the JSON-RPC HTTP port)."""
+        container.reload()
+        if container.attrs is not None:
+            container_ip = container.attrs["NetworkSettings"]["Networks"][network.name][
+                "IPAddress"
+            ]
+            sse_path = self.execution_client.value.sse_data_feed_path
+            return f"http://{container_ip}:{CLIENT_RPC_PORT}{sse_path}"
         else:
             raise ValueError("Container attributes are not available")
 
@@ -329,8 +347,10 @@ class ExecutorConfig:
     def get_payload_server_container_image(self) -> str:
         return self.docker_images.payload_server
 
-    def get_payload_server_volumes(self) -> dict[str, dict[str, str]]:
-        return {
+    def get_payload_server_volumes(
+        self, drop_caches: bool = False, evm_warmup: bool = False
+    ) -> dict[str, dict[str, str]]:
+        volumes = {
             str(self.payloads_file.resolve()): {
                 "bind": self._payload_server_container_payloads_file,
                 "mode": "ro",
@@ -344,18 +364,52 @@ class ExecutorConfig:
                 "mode": "ro",
             },
         }
+        if evm_warmup:
+            volumes[str(self.simulate_payloads_file.resolve())] = {
+                "bind": self._payload_server_container_simulate_file,
+                "mode": "ro",
+            }
+        if drop_caches:
+            volumes["/proc/sys/vm"] = {
+                "bind": "/host_proc_sys_vm",
+                "mode": "rw",
+            }
+        return volumes
 
     def get_payload_server_command(self) -> list[str]:
         return ["python3", self._payload_server_container_script]
 
-    def get_payload_server_environment(self) -> dict[str, str]:
-        return {
+    def get_payload_server_environment(
+        self,
+        el_rpc_url: str = "",
+        drop_caches: bool = False,
+        drop_caches_sync: bool = True,
+        evm_warmup: bool = False,
+        client_sse_url: str = "",
+    ) -> dict[str, str]:
+        skip = self.k6_payloads_skip or 0
+        warmup = self.k6_payloads_warmup or 0
+        amount = self.k6_payloads_amount
+        env = {
             "EXPB_PAYLOADS_FILE": self._payload_server_container_payloads_file,
             "EXPB_FCUS_FILE": self._payload_server_container_fcus_file,
+            "EXPB_SKIP": str(skip),
+            "EXPB_TOTAL": str(warmup + amount),
             "EXPB_SERVER_PORT": str(self._payload_server_container_port),
-            "EXPB_CACHE_SIZE": "100",
-            "EXPB_SKIP": str(self.k6_payloads_skip or 0),
         }
+        if el_rpc_url:
+            env["EXPB_EL_RPC_URL"] = el_rpc_url
+            env["EXPB_GC_DRAIN_SKIP"] = str(skip + warmup)
+        if evm_warmup and el_rpc_url:
+            env["EXPB_SIMULATE_FILE"] = self._payload_server_container_simulate_file
+        if drop_caches:
+            env["EXPB_DROP_CACHES"] = "1"
+            env["EXPB_DROP_CACHES_SYNC"] = "1" if drop_caches_sync else "0"
+            env["EXPB_DROP_CACHES_SKIP"] = str(skip + warmup)
+        if client_sse_url:
+            env["EXPB_CLIENT_SSE_URL"] = client_sse_url
+            env["EXPB_CLIENT_SSE_SKIP"] = str(skip + warmup)
+        return env
 
     def get_payload_server_url(
         self,
@@ -432,6 +486,7 @@ class ExecutorConfig:
             f"--env=EXPB_ENABLE_LOGGING={int(enable_logging)}",
             f"--env=EXPB_PER_PAYLOAD_METRICS_LOGS={int(per_payload_metrics_logs)}",
             f"--env=EXPB_WARMUP_WAIT={self.k6_warmup_wait}",
+            f"--env=testid={self.test_id}",
         ]
         if self.exports is not None and self.exports.prometheus_rw is not None:
             command.append("--out=experimental-prometheus-rw")
