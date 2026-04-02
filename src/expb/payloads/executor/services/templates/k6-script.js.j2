@@ -241,10 +241,12 @@ function processNextPayload(base_tags = {}, warmup = false) {
   }
 }
 
+const base_tags = { testid: __ENV.testid || 'expb' };
+
 export function setup() {
   // execute warmup payloads (server counter starts at skip, so first N are warmup)
   for (let i = 0; i < payloadsWarmup; i++) {
-    processNextPayload({}, true);
+    processNextPayload(base_tags, true);
   }
 }
 
@@ -253,5 +255,5 @@ export default function () {
     sleep(warmupWait);
   }
 
-  processNextPayload({}, false);
+  processNextPayload(base_tags, false);
 }
