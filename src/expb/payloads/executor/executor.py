@@ -50,6 +50,7 @@ class ExecutorExecuteOptions:
         drop_caches_sync: bool = True,
         client_metrics: bool = True,
         stable_cpu: bool = True,
+        dottrace: bool = False,
     ):
         self.collect_per_payload_metrics: bool = collect_per_payload_metrics
         self.print_logs_to_console: bool = print_logs_to_console
@@ -59,6 +60,7 @@ class ExecutorExecuteOptions:
         self.drop_caches_sync: bool = drop_caches_sync
         self.client_metrics: bool = client_metrics
         self.stable_cpu: bool = stable_cpu
+        self.dottrace: bool = dottrace
 
 
 class Executor:
@@ -317,6 +319,7 @@ class Executor:
         container_network: Network | None = None,
         pyroscope: Pyroscope | None = None,
         stop_signal: str | None = None,
+        dottrace: bool = False,
     ) -> Container:
         # Command
         execution_container_command = self.config.get_execution_client_command()
@@ -346,7 +349,7 @@ class Executor:
             )
 
         # dotTrace profiling
-        if self.config.dottrace:
+        if dottrace:
             dottrace_host_path = self._ensure_dottrace_installed()
             dottrace_output_dir = self.config.outputs_dir / "dottrace"
             dottrace_output_dir.mkdir(parents=True, exist_ok=True)
@@ -356,7 +359,8 @@ class Executor:
             execution_container_volumes.append(
                 f"{dottrace_output_dir}:{self._DOTTRACE_OUTPUT_PATH}:rw"
             )
-            snapshot_file = f"{self._DOTTRACE_OUTPUT_PATH}/trace.dtp"
+            trace_name = f"{self.config.test_id}.dtp"
+            snapshot_file = f"{self._DOTTRACE_OUTPUT_PATH}/{trace_name}"
             execution_container_command = [
                 f"{self._DOTTRACE_CONTAINER_PATH}/dottrace",
                 "start",
@@ -366,7 +370,7 @@ class Executor:
             stop_signal = "SIGINT"
             self.log.info(
                 "dotTrace profiling enabled",
-                snapshot_output=str(dottrace_output_dir / "trace.dtp"),
+                snapshot_output=str(dottrace_output_dir / trace_name),
             )
 
         # Run execution container
@@ -1175,15 +1179,17 @@ class Executor:
                 if self.config.resources
                 else None,
             )
+            dottrace_enabled = options.dottrace or self.config.dottrace
             stop_signal = (
-                # If there are extra commands to execute, use SIGINT to stop the execution client
-                # instead of SIGTERM
-                "SIGINT" if self.config.execution_client_extra_commands else None
+                "SIGINT"
+                if self.config.execution_client_extra_commands or dottrace_enabled
+                else None
             )
             execution_client_container = self.start_execution_client(
                 container_network=containers_network,
                 pyroscope=alloy_pyroscope,
                 stop_signal=stop_signal,
+                dottrace=dottrace_enabled,
             )
 
             # Get execution client RPC URL immediately (container IP is
