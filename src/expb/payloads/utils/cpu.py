@@ -120,7 +120,8 @@ class CpuStabilizer:
     ):
         self.log = logger
         self._docker_client = docker_client
-        self._use_docker = False
+        self._turbo_via_docker = False
+        self._governors_via_docker = False
         self._original_turbo: str | None = None
         self._turbo_path: str | None = None
         self._turbo_enable_value: str | None = None
@@ -136,28 +137,11 @@ class CpuStabilizer:
             return None
 
     def apply(self) -> None:
+        self._apply_turbo()
+        self._apply_governors()
+
+    def _apply_turbo(self) -> None:
         turbo_info = _detect_turbo_path()
-        governor_paths = _get_governor_paths()
-
-        if turbo_info is None and not governor_paths:
-            client = self._get_docker_client()
-            if client is not None:
-                self._apply_via_docker(client)
-                return
-            if self.log:
-                self.log.warning(
-                    "Sysfs paths not found and Docker not available, "
-                    "CPU stabilization skipped",
-                )
-            return
-
-        self._apply_local(turbo_info, governor_paths)
-
-    def _apply_local(
-        self,
-        turbo_info: tuple[str, str, str] | None,
-        governor_paths: list[str],
-    ) -> None:
         if turbo_info:
             path, disable_val, enable_val = turbo_info
             self._turbo_path = path
@@ -176,16 +160,43 @@ class CpuStabilizer:
                         "Failed to disable turbo boost (permission denied?)",
                         path=path,
                     )
-        else:
-            if self.log:
-                self.log.warning("Turbo boost sysfs path not found, skipping")
+            return
 
-        for gpath in governor_paths:
-            original = _read_sys(gpath)
-            if original is not None:
-                self._original_governors[gpath] = original
-            _write_sys(gpath, "performance")
+        client = self._get_docker_client()
+        if client is not None:
+            turbo_info = _docker_detect_turbo_path(client)
+            if turbo_info:
+                path, disable_val, enable_val = turbo_info
+                self._turbo_path = path
+                self._turbo_enable_value = enable_val
+                self._turbo_via_docker = True
+                self._original_turbo = _docker_read_sys(client, path)
+                if _docker_write_sys(client, path, disable_val):
+                    if self.log:
+                        self.log.info(
+                            "Turbo boost disabled via Docker",
+                            path=path,
+                            original=self._original_turbo,
+                        )
+                else:
+                    if self.log:
+                        self.log.warning(
+                            "Failed to disable turbo boost via Docker",
+                            path=path,
+                        )
+                return
+
+        if self.log:
+            self.log.warning("Turbo boost sysfs path not found, skipping")
+
+    def _apply_governors(self) -> None:
+        governor_paths = _get_governor_paths()
         if governor_paths:
+            for gpath in governor_paths:
+                original = _read_sys(gpath)
+                if original is not None:
+                    self._original_governors[gpath] = original
+                _write_sys(gpath, "performance")
             if self.log:
                 sample = _read_sys(governor_paths[0])
                 self.log.info(
@@ -193,77 +204,50 @@ class CpuStabilizer:
                     governor=sample,
                     cores=len(governor_paths),
                 )
-        else:
-            if self.log:
-                self.log.warning("No CPU governor paths found, skipping")
-
-    def _apply_via_docker(self, client: DockerClient) -> None:
-        if self.log:
-            self.log.info(
-                "Sysfs not available locally, using Docker to configure host CPU",
-            )
-
-        turbo_info = _docker_detect_turbo_path(client)
-        if turbo_info:
-            path, disable_val, enable_val = turbo_info
-            self._turbo_path = path
-            self._turbo_enable_value = enable_val
-            self._use_docker = True
-            self._original_turbo = _docker_read_sys(client, path)
-            if _docker_write_sys(client, path, disable_val):
-                if self.log:
-                    self.log.info(
-                        "Turbo boost disabled via Docker",
-                        path=path,
-                        original=self._original_turbo,
-                    )
-            else:
-                if self.log:
-                    self.log.warning(
-                        "Failed to disable turbo boost via Docker",
-                        path=path,
-                    )
-        else:
-            if self.log:
-                self.log.warning(
-                    "Turbo boost sysfs path not found on host, skipping",
-                )
-
-        governor_paths = _docker_get_governor_paths(client)
-        for gpath in governor_paths:
-            original = _docker_read_sys(client, gpath)
-            if original is not None:
-                self._original_governors[gpath] = original
-            _docker_write_sys(client, gpath, "performance")
-        if governor_paths:
-            self._use_docker = True
-            if self.log:
-                sample = _docker_read_sys(client, governor_paths[0])
-                self.log.info(
-                    "CPU governor set via Docker",
-                    governor=sample,
-                    cores=len(governor_paths),
-                )
-        else:
-            if self.log:
-                self.log.warning("No CPU governor paths found on host, skipping")
-
-    def restore(self) -> None:
-        if self._use_docker:
-            client = self._get_docker_client()
-            if client is not None:
-                self._restore_via_docker(client)
-                return
-            if self.log:
-                self.log.warning(
-                    "Docker not available for restore, host CPU settings not restored",
-                )
             return
 
-        self._restore_local()
+        client = self._get_docker_client()
+        if client is not None:
+            governor_paths = _docker_get_governor_paths(client)
+            if governor_paths:
+                self._governors_via_docker = True
+                for gpath in governor_paths:
+                    original = _docker_read_sys(client, gpath)
+                    if original is not None:
+                        self._original_governors[gpath] = original
+                    _docker_write_sys(client, gpath, "performance")
+                if self.log:
+                    sample = _docker_read_sys(client, governor_paths[0])
+                    self.log.info(
+                        "CPU governor set via Docker",
+                        governor=sample,
+                        cores=len(governor_paths),
+                    )
+                return
 
-    def _restore_local(self) -> None:
-        if self._turbo_path and self._original_turbo is not None:
+        if self.log:
+            self.log.warning("No CPU governor paths found, skipping")
+
+    def restore(self) -> None:
+        self._restore_turbo()
+        self._restore_governors()
+
+    def _restore_turbo(self) -> None:
+        if not self._turbo_path or self._original_turbo is None:
+            return
+
+        if self._turbo_via_docker:
+            client = self._get_docker_client()
+            if client is not None:
+                if _docker_write_sys(client, self._turbo_path, self._original_turbo):
+                    if self.log:
+                        self.log.info(
+                            "Turbo boost restored via Docker",
+                            value=self._original_turbo,
+                        )
+            elif self.log:
+                self.log.warning("Docker not available, turbo boost not restored")
+        else:
             if _write_sys(self._turbo_path, self._original_turbo):
                 if self.log:
                     self.log.info(
@@ -271,30 +255,28 @@ class CpuStabilizer:
                         value=self._original_turbo,
                     )
 
-        for gpath, original in self._original_governors.items():
-            _write_sys(gpath, original)
-        if self._original_governors:
+    def _restore_governors(self) -> None:
+        if not self._original_governors:
+            return
+
+        if self._governors_via_docker:
+            client = self._get_docker_client()
+            if client is not None:
+                for gpath, original in self._original_governors.items():
+                    _docker_write_sys(client, gpath, original)
+                if self.log:
+                    self.log.info(
+                        "CPU governors restored via Docker",
+                        cores=len(self._original_governors),
+                    )
+            elif self.log:
+                self.log.warning("Docker not available, governors not restored")
+        else:
+            for gpath, original in self._original_governors.items():
+                _write_sys(gpath, original)
             if self.log:
                 self.log.info(
                     "CPU governors restored",
-                    cores=len(self._original_governors),
-                )
-
-    def _restore_via_docker(self, client: DockerClient) -> None:
-        if self._turbo_path and self._original_turbo is not None:
-            if _docker_write_sys(client, self._turbo_path, self._original_turbo):
-                if self.log:
-                    self.log.info(
-                        "Turbo boost restored via Docker",
-                        value=self._original_turbo,
-                    )
-
-        for gpath, original in self._original_governors.items():
-            _docker_write_sys(client, gpath, original)
-        if self._original_governors:
-            if self.log:
-                self.log.info(
-                    "CPU governors restored via Docker",
                     cores=len(self._original_governors),
                 )
 
