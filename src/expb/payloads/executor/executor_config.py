@@ -183,7 +183,9 @@ class ExecutorConfig:
         )
 
     def get_execution_client_env(self) -> dict[str, str]:
-        return self.execution_client_extra_env.copy()
+        env = self.execution_client.value.default_env.copy()
+        env.update(self.execution_client_extra_env)
+        return env
 
     def get_execution_client_ports(self) -> dict[str, tuple[str, str]]:
         return {
