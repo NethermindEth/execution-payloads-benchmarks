@@ -1,3 +1,4 @@
+import glob
 import json
 import os
 import re
@@ -96,9 +97,68 @@ class Executor:
 
     def run_preflight_checks(self) -> None:
         """Run preflight checks and log warnings for suboptimal system configuration."""
+        self._log_system_diagnostics()
         self._check_cpu_governor()
         self._check_transparent_huge_pages()
         self._check_noisy_timers()
+
+    def _log_system_diagnostics(self) -> None:
+        """Log system state snapshot for benchmark reproducibility diagnostics."""
+        diag: dict[str, object] = {}
+        try:
+            freq_paths = glob.glob(
+                "/sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq"
+            )
+            if freq_paths:
+                freqs = []
+                for p in sorted(freq_paths):
+                    val = Path(p).read_text().strip()
+                    freqs.append(int(val))
+                diag["cpu_freq_min_khz"] = min(freqs)
+                diag["cpu_freq_max_khz"] = max(freqs)
+                diag["cpu_freq_avg_khz"] = sum(freqs) // len(freqs)
+
+            max_freq_path = Path(
+                "/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq"
+            )
+            if max_freq_path.exists():
+                diag["scaling_max_freq_khz"] = int(
+                    max_freq_path.read_text().strip()
+                )
+
+            temp_path = Path("/sys/class/thermal/thermal_zone0/temp")
+            if temp_path.exists():
+                diag["cpu_temp_c"] = int(temp_path.read_text().strip()) / 1000
+
+            online_cpus = []
+            offline_cpus = []
+            for p in sorted(
+                glob.glob("/sys/devices/system/cpu/cpu[0-9]*/online")
+            ):
+                cpu_id = int(p.split("/cpu")[2].split("/")[0])
+                if Path(p).read_text().strip() == "1":
+                    online_cpus.append(cpu_id)
+                else:
+                    offline_cpus.append(cpu_id)
+            online_cpus.insert(0, 0)
+            diag["online_cpus"] = online_cpus
+            if offline_cpus:
+                diag["offline_cpus"] = offline_cpus
+
+            mem_path = Path("/proc/meminfo")
+            if mem_path.exists():
+                meminfo = mem_path.read_text()
+                for line in meminfo.splitlines():
+                    if line.startswith("MemAvailable:"):
+                        diag["mem_available_mb"] = (
+                            int(line.split()[1]) // 1024
+                        )
+                        break
+        except Exception:
+            pass
+
+        if diag:
+            self.log.info("System diagnostics", **diag)
 
     def _check_cpu_governor(self) -> None:
         """Log a warning if any CPU is not using the 'performance' governor."""
