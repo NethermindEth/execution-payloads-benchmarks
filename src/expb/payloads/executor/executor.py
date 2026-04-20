@@ -248,7 +248,6 @@ class Executor:
         self,
         execution_client_rpc_url: str,
     ) -> None:
-        time.sleep(self.config.startup_wait)
         headers = {"Content-Type": "application/json"}
         payload = {
             "jsonrpc": "2.0",
@@ -256,7 +255,7 @@ class Executor:
             "params": [],
             "id": 1,
         }
-        max_attempts = self.config.json_rpc_wait_max_retries
+        max_attempts = self.config.startup_wait + self.config.json_rpc_wait_max_retries
         for attempt in range(1, max_attempts + 1):
             try:
                 response = requests.post(
@@ -814,7 +813,7 @@ class Executor:
             k6_container = self.config.docker_client.containers.get(
                 self.config.get_k6_container_name()
             )
-            k6_container.stop()
+            k6_container.stop(timeout=3)
             logs_file = self.config.outputs_dir / "k6.log"
             self.log.info("Saving k6 logs", logs_file=logs_file)
             logs_stream = k6_container.logs(
@@ -845,7 +844,7 @@ class Executor:
             )
             execution_client_container.reload()
             execution_client_volumes = execution_client_container.attrs["Mounts"]
-            execution_client_container.stop()
+            execution_client_container.stop(timeout=5)
             logs_file = (
                 self.config.outputs_dir
                 / f"{self.config.get_execution_client_name()}.log"
@@ -882,7 +881,7 @@ class Executor:
             payload_server_container = self.config.docker_client.containers.get(
                 self.config.get_payload_server_container_name()
             )
-            payload_server_container.stop()
+            payload_server_container.stop(timeout=3)
             logs_file = self.config.outputs_dir / "payload-server.log"
             self.log.info("Saving payload server logs", logs_file=logs_file)
             logs_stream = payload_server_container.logs(
@@ -906,7 +905,7 @@ class Executor:
             alloy_container = self.config.docker_client.containers.get(
                 self.config.get_alloy_container_name()
             )
-            alloy_container.stop()
+            alloy_container.stop(timeout=3)
             alloy_container.remove()
         except docker.errors.NotFound:
             pass
