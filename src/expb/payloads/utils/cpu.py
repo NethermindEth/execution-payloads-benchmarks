@@ -55,15 +55,8 @@ def _get_max_freq_paths() -> list[str]:
 
 
 def _get_base_frequency() -> str | None:
-    """Get the CPU base (non-turbo) frequency in kHz.
-
-    Tries base_frequency sysfs first, then falls back to cpuinfo_min_freq
-    (which on 'performance' governor systems often equals base clock).
-    """
-    base = _read_sys("/sys/devices/system/cpu/cpu0/cpufreq/base_frequency")
-    if base is not None:
-        return base
-    return _read_sys("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_min_freq")
+    """Get the CPU base (non-turbo) frequency in kHz."""
+    return _read_sys("/sys/devices/system/cpu/cpu0/cpufreq/base_frequency")
 
 
 def _docker_run_cmd(client: DockerClient, cmd: str) -> str:
@@ -134,13 +127,8 @@ def _docker_get_max_freq_paths(client: DockerClient) -> list[str]:
 
 
 def _docker_get_base_frequency(client: DockerClient) -> str | None:
-    base = _docker_read_sys(
-        client, "/sys/devices/system/cpu/cpu0/cpufreq/base_frequency"
-    )
-    if base is not None:
-        return base
     return _docker_read_sys(
-        client, "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_min_freq"
+        client, "/sys/devices/system/cpu/cpu0/cpufreq/base_frequency"
     )
 
 
