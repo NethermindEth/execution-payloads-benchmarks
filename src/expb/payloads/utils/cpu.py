@@ -264,3 +264,73 @@ class TimerStabilizer:
 
     def __exit__(self, *exc) -> None:
         self.restore()
+
+
+class SmtStabilizer:
+    """Offlines HT/SMT sibling CPUs during benchmarks for cache isolation.
+
+    Takes a list of CPU IDs to offline. Only CPUs that were online at apply
+    time are offlined, and only those are brought back online on restore.
+    """
+
+    def __init__(
+        self,
+        cpus_to_offline: list[int],
+        logger: Logger | None = None,
+    ):
+        self.log = logger
+        self._cpus_to_offline = cpus_to_offline
+        self._offlined_cpus: list[int] = []
+
+    @staticmethod
+    def _cpu_online_path(cpu_id: int) -> str:
+        return f"/sys/devices/system/cpu/cpu{cpu_id}/online"
+
+    def apply(self) -> None:
+        if not self._cpus_to_offline:
+            return
+
+        for cpu_id in self._cpus_to_offline:
+            path = self._cpu_online_path(cpu_id)
+            current = _read_sys(path)
+            if current is None:
+                continue
+            if current == "0":
+                continue
+            if _write_sys(path, "0"):
+                self._offlined_cpus.append(cpu_id)
+            elif self.log:
+                self.log.warning(
+                    "Failed to offline CPU (permission denied?)",
+                    cpu=cpu_id,
+                )
+
+        if self._offlined_cpus and self.log:
+            self.log.info(
+                "SMT siblings offlined",
+                cpus=self._offlined_cpus,
+            )
+
+    def restore(self) -> None:
+        if not self._offlined_cpus:
+            return
+
+        for cpu_id in self._offlined_cpus:
+            path = self._cpu_online_path(cpu_id)
+            if not _write_sys(path, "1"):
+                if self.log:
+                    self.log.warning("Failed to online CPU", cpu=cpu_id)
+
+        if self.log:
+            self.log.info(
+                "SMT siblings restored",
+                cpus=self._offlined_cpus,
+            )
+        self._offlined_cpus = []
+
+    def __enter__(self) -> SmtStabilizer:
+        self.apply()
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.restore()

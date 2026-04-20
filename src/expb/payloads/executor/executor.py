@@ -30,7 +30,7 @@ from expb.payloads.executor.services.payload_server import (
     get_payload_server_script,
 )
 from expb.payloads.executor.services.snapshots import setup_snapshot_service
-from expb.payloads.utils.cpu import CpuStabilizer, TimerStabilizer
+from expb.payloads.utils.cpu import CpuStabilizer, SmtStabilizer, TimerStabilizer
 from expb.payloads.utils.networking import limit_container_bandwidth
 
 PER_PAYLOAD_METRIC_LOG_PATTERN = re.compile(
@@ -932,6 +932,7 @@ class Executor:
     ) -> None:
         cpu_stabilizer: CpuStabilizer | None = None
         timer_stabilizer: TimerStabilizer | None = None
+        smt_stabilizer: SmtStabilizer | None = None
         prev_sigterm = None
         if os.name != "nt":
 
@@ -951,6 +952,12 @@ class Executor:
             if options.stable_cpu:
                 timer_stabilizer = TimerStabilizer(logger=self.log)
                 timer_stabilizer.apply()
+                if self.config.offline_cpus:
+                    smt_stabilizer = SmtStabilizer(
+                        cpus_to_offline=self.config.offline_cpus,
+                        logger=self.log,
+                    )
+                    smt_stabilizer.apply()
                 cpu_stabilizer = CpuStabilizer(
                     logger=self.log,
                     max_frequency_khz=self.config.cpu_max_frequency_khz,
@@ -1161,6 +1168,8 @@ class Executor:
             )
             if cpu_stabilizer is not None:
                 cpu_stabilizer.restore()
+            if smt_stabilizer is not None:
+                smt_stabilizer.restore()
             if timer_stabilizer is not None:
                 timer_stabilizer.restore()
             if prev_sigterm is not None:
@@ -1192,6 +1201,7 @@ class Executor:
                 docker_images=scenarios.docker_images,
                 exports=scenarios.exports,
                 cpu_max_frequency_khz=scenarios.cpu_max_frequency_khz,
+                offline_cpus=scenarios.offline_cpus,
             ),
             logger=logger,
         )

@@ -269,6 +269,12 @@ class Scenarios(BaseModel):
         default=None,
         ge=100000,
     )
+    offline_cpus: list[int] = Field(
+        description="List of CPU IDs to offline during benchmarks for HT/SMT cache isolation. "
+        "Typically the HT siblings of benchmark cores (e.g., [9,10,11,12,13,14,15] to keep "
+        "only one thread per physical core). CPUs are brought back online after each scenario.",
+        default=[],
+    )
     docker_images: ScenariosImages = Field(
         description="Images configuration for the scenarios.",
         alias="images",

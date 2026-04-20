@@ -7,6 +7,11 @@ pull_images: true
 # Original frequencies are restored after each scenario.
 # cpu_max_frequency_khz: 3800000
 
+# Optional: Offline HT/SMT sibling CPUs during benchmarks for cache isolation.
+# Ensures one thread per physical core for the benchmark, eliminating L1/L2 cache
+# contention from sibling threads. CPUs are brought back online after each scenario.
+# offline_cpus: [9, 10, 11, 12, 13, 14, 15]
+
 # Docker images to use (pin to specific versions for reproducible benchmarks)
 images:
   k6: grafana/k6:1.6.1
