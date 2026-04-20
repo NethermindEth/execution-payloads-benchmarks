@@ -278,6 +278,10 @@ class Executor:
     _DOTTRACE_CONTAINER_PATH = "/opt/dottrace"
     _DOTTRACE_OUTPUT_PATH = "/dottrace-output"
     _DOTTRACE_DEFAULT_INSTALL_PATH = "/opt/dottrace"
+    _DOTTRACE_DOWNLOAD_URL = (
+        "https://download.jetbrains.com/resharper/dotUltimate.2026.1.0.1/"
+        "JetBrains.dotTrace.CommandLineTools.linux-x64.2026.1.0.1.tar.gz"
+    )
 
     def _ensure_dottrace_installed(self) -> str:
         """Ensure dotTrace CLI tools are installed, return the host path."""
@@ -287,33 +291,74 @@ class Executor:
             self.log.info("dotTrace found", path=path)
             return path
 
-        self.log.info("dotTrace not found, installing", path=path)
+        self.log.info(
+            "dotTrace not found, downloading full Console Profiler bundle",
+            path=path,
+        )
         try:
+            tarball = "/tmp/dottrace-console.tar.gz"
             subprocess.run(
-                [
-                    "dotnet",
-                    "tool",
-                    "install",
-                    "--tool-path",
-                    path,
-                    "JetBrains.dotTrace.GlobalTools",
-                ],
+                ["curl", "-L", "-o", tarball, self._DOTTRACE_DOWNLOAD_URL],
                 check=True,
+                capture_output=True,
+                timeout=120,
+            )
+            Path(path).mkdir(parents=True, exist_ok=True)
+            subprocess.run(
+                ["tar", "xzf", tarball, "-C", path],
+                check=True,
+                capture_output=True,
+                timeout=60,
+            )
+            Path(tarball).unlink(missing_ok=True)
+            self.log.info("dotTrace installed", path=path)
+        except subprocess.CalledProcessError as e:
+            self.log.error(
+                "Failed to install dotTrace",
+                stderr=e.stderr.decode() if isinstance(e.stderr, bytes) else e.stderr,
+            )
+            raise
+        return path
+
+    def _generate_dottrace_report(self) -> None:
+        """Generate dotTrace reports from the snapshot using Reporter."""
+        dottrace_dir = self.config.outputs_dir / "dottrace"
+        dtp_files = list(dottrace_dir.glob("*.dtp"))
+        if not dtp_files:
+            self.log.warning("No .dtp snapshot found, skipping report")
+            return
+
+        snapshot = dtp_files[0]
+        reporter_bin = Path(self._DOTTRACE_DEFAULT_INSTALL_PATH) / "Reporter"
+        if not reporter_bin.exists():
+            self.log.warning("dotTrace Reporter not found, skipping report")
+            return
+
+        report_file = dottrace_dir / "report.xml"
+        try:
+            result = subprocess.run(
+                [
+                    str(reporter_bin),
+                    "report",
+                    str(snapshot),
+                    f"--save-to={report_file}",
+                ],
                 capture_output=True,
                 text=True,
                 timeout=120,
             )
-            self.log.info("dotTrace installed", path=path)
-        except FileNotFoundError:
-            self.log.error(
-                "dotnet CLI not found, cannot install dotTrace. "
-                "Install .NET SDK or provide dottrace_path manually."
-            )
-            raise
-        except subprocess.CalledProcessError as e:
-            self.log.error("Failed to install dotTrace", stderr=e.stderr)
-            raise
-        return path
+            if result.returncode == 0:
+                self.log.info(
+                    "dotTrace report generated",
+                    file=str(report_file),
+                )
+            else:
+                self.log.warning(
+                    "dotTrace report failed",
+                    stderr=result.stderr[:500],
+                )
+        except Exception as e:
+            self.log.warning("dotTrace report error", error=str(e))
 
 
     def start_execution_client(
@@ -1044,6 +1089,9 @@ class Executor:
                     )
         except docker.errors.NotFound:
             pass
+
+        if self._dottrace_active:
+            self._generate_dottrace_report()
 
         if print_logs_to_console and print_per_payload_metrics_table:
             self._print_per_payload_metrics_table(per_payload_metrics_rows)
