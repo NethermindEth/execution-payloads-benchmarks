@@ -278,6 +278,7 @@ class Executor:
     _DOTTRACE_CONTAINER_PATH = "/opt/dottrace"
     _DOTTRACE_OUTPUT_PATH = "/dottrace-output"
     _DOTTRACE_DEFAULT_INSTALL_PATH = "/opt/dottrace"
+    _DOTTRACE_REPORT_TYPES = ["HotSpots", "CallTree"]
 
     def _ensure_dottrace_installed(self) -> str:
         """Ensure dotTrace CLI tools are installed, return the host path."""
@@ -314,6 +315,54 @@ class Executor:
             self.log.error("Failed to install dotTrace", stderr=e.stderr)
             raise
         return path
+
+    def _generate_dottrace_report(self) -> None:
+        """Generate dotTrace reports from the snapshot file."""
+        dottrace_dir = self.config.outputs_dir / "dottrace"
+        dtp_files = list(dottrace_dir.glob("*.dtp"))
+        if not dtp_files:
+            self.log.warning("No .dtp snapshot files found, skipping report")
+            return
+
+        snapshot = dtp_files[0]
+        dottrace_bin = Path(self._DOTTRACE_DEFAULT_INSTALL_PATH) / "dottrace"
+        if not dottrace_bin.exists():
+            self.log.warning("dotTrace binary not found, skipping report")
+            return
+
+        for report_type in self._DOTTRACE_REPORT_TYPES:
+            report_file = dottrace_dir / f"report-{report_type.lower()}.xml"
+            try:
+                result = subprocess.run(
+                    [
+                        str(dottrace_bin),
+                        "report",
+                        str(snapshot),
+                        f"--report-type={report_type}",
+                        f"--save-to={report_file}",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+                if result.returncode == 0:
+                    self.log.info(
+                        "dotTrace report generated",
+                        type=report_type,
+                        file=str(report_file),
+                    )
+                else:
+                    self.log.warning(
+                        "dotTrace report failed",
+                        type=report_type,
+                        stderr=result.stderr[:500],
+                    )
+            except Exception as e:
+                self.log.warning(
+                    "dotTrace report error",
+                    type=report_type,
+                    error=str(e),
+                )
 
     def start_execution_client(
         self,
@@ -1043,6 +1092,9 @@ class Executor:
                     )
         except docker.errors.NotFound:
             pass
+
+        if self._dottrace_active:
+            self._generate_dottrace_report()
 
         if print_logs_to_console and print_per_payload_metrics_table:
             self._print_per_payload_metrics_table(per_payload_metrics_rows)
