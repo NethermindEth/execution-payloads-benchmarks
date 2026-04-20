@@ -262,6 +262,13 @@ class Scenarios(BaseModel):
         description="Pull the docker images before execution.",
         default=False,
     )
+    cpu_max_frequency_khz: int | None = Field(
+        description="Cap CPU scaling_max_freq to this value (in kHz) during benchmarks to prevent turbo boost. "
+        "Use the CPU's nominal/base frequency (e.g., 3800000 for 3.8 GHz). "
+        "Original frequencies are restored after each scenario.",
+        default=None,
+        ge=100000,
+    )
     docker_images: ScenariosImages = Field(
         description="Images configuration for the scenarios.",
         alias="images",

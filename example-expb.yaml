@@ -1,6 +1,12 @@
 ﻿# Pull images before execution
 pull_images: true
 
+# Optional: Cap CPU frequency to prevent turbo boost during benchmarks.
+# Set to your CPU's nominal/base frequency in kHz (e.g., 3800000 for 3.8 GHz).
+# Useful when the turbo boost sysfs toggle is not available (e.g., amd-pstate-epp driver).
+# Original frequencies are restored after each scenario.
+# cpu_max_frequency_khz: 3800000
+
 # Docker images to use (pin to specific versions for reproducible benchmarks)
 images:
   k6: grafana/k6:1.6.1

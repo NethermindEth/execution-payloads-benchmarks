@@ -43,6 +43,7 @@ class ExecutorConfig:
         exports: Exports | None = None,
         json_rpc_wait_max_retries: int = 1800,
         limit_bandwidth: bool = False,
+        cpu_max_frequency_khz: int | None = None,
     ) -> None:
         # Executor Basic config
         self.scenario_name: str = scenario.name or "default"
@@ -74,6 +75,7 @@ class ExecutorConfig:
         self.resources: ScenariosResources | None = resources
         self.limit_bandwidth: bool = limit_bandwidth
         self.json_rpc_wait_max_retries: int = json_rpc_wait_max_retries
+        self.cpu_max_frequency_khz: int | None = cpu_max_frequency_khz
         ## K6 script config
         self.k6_payloads_amount: int = scenario.payloads_amount
         self.k6_payloads_delay: float = scenario.payloads_delay

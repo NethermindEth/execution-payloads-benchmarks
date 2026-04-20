@@ -44,18 +44,28 @@ def _get_governor_paths() -> list[str]:
     return sorted(glob.glob("/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor"))
 
 
+def _get_max_freq_paths() -> list[str]:
+    return sorted(glob.glob("/sys/devices/system/cpu/cpu*/cpufreq/scaling_max_freq"))
+
+
 class CpuStabilizer:
     """Disables turbo boost and sets the CPU governor to 'performance'.
 
     Use as a context manager to automatically restore original settings.
     """
 
-    def __init__(self, logger: Logger | None = None):
+    def __init__(
+        self,
+        logger: Logger | None = None,
+        max_frequency_khz: int | None = None,
+    ):
         self.log = logger
+        self._max_frequency_khz = max_frequency_khz
         self._original_turbo: str | None = None
         self._turbo_path: str | None = None
         self._turbo_enable_value: str | None = None
         self._original_governors: dict[str, str] = {}
+        self._original_max_freqs: dict[str, str] = {}
 
     def apply(self) -> None:
         turbo_info = _detect_turbo_path()
@@ -77,9 +87,14 @@ class CpuStabilizer:
                         "Failed to disable turbo boost (permission denied?)",
                         path=path,
                     )
+        elif self._max_frequency_khz is not None:
+            self._apply_freq_cap()
         else:
             if self.log:
-                self.log.warning("Turbo boost sysfs path not found, skipping")
+                self.log.warning(
+                    "Turbo boost sysfs path not found and cpu_max_frequency_khz "
+                    "not configured, turbo boost not disabled",
+                )
 
         governor_paths = _get_governor_paths()
         for gpath in governor_paths:
@@ -99,6 +114,31 @@ class CpuStabilizer:
             if self.log:
                 self.log.warning("No CPU governor paths found, skipping")
 
+    def _apply_freq_cap(self) -> None:
+        freq_paths = _get_max_freq_paths()
+        if not freq_paths:
+            if self.log:
+                self.log.warning("No scaling_max_freq paths found, skipping frequency cap")
+            return
+        cap = str(self._max_frequency_khz)
+        for fpath in freq_paths:
+            original = _read_sys(fpath)
+            if original is not None:
+                self._original_max_freqs[fpath] = original
+            if not _write_sys(fpath, cap):
+                if self.log:
+                    self.log.warning(
+                        "Failed to set scaling_max_freq (permission denied?)",
+                        path=fpath,
+                    )
+                return
+        if self.log:
+            self.log.info(
+                "Turbo boost disabled via frequency cap",
+                max_freq_khz=self._max_frequency_khz,
+                cores=len(freq_paths),
+            )
+
     def restore(self) -> None:
         if self._turbo_path and self._original_turbo is not None:
             if _write_sys(self._turbo_path, self._original_turbo):
@@ -107,6 +147,15 @@ class CpuStabilizer:
                         "Turbo boost restored",
                         value=self._original_turbo,
                     )
+
+        for fpath, original in self._original_max_freqs.items():
+            _write_sys(fpath, original)
+        if self._original_max_freqs:
+            if self.log:
+                self.log.info(
+                    "Max frequencies restored",
+                    cores=len(self._original_max_freqs),
+                )
 
         for gpath, original in self._original_governors.items():
             _write_sys(gpath, original)

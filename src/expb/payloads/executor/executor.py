@@ -948,7 +948,10 @@ class Executor:
             self.run_preflight_checks()
 
             if options.stable_cpu:
-                cpu_stabilizer = CpuStabilizer(logger=self.log)
+                cpu_stabilizer = CpuStabilizer(
+                    logger=self.log,
+                    max_frequency_khz=self.config.cpu_max_frequency_khz,
+                )
                 cpu_stabilizer.apply()
 
             self.clean_system_cache()
@@ -1183,6 +1186,7 @@ class Executor:
                 pull_images=scenarios.pull_images,
                 docker_images=scenarios.docker_images,
                 exports=scenarios.exports,
+                cpu_max_frequency_khz=scenarios.cpu_max_frequency_khz,
             ),
             logger=logger,
         )
