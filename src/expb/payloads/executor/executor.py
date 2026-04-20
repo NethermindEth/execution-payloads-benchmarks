@@ -952,6 +952,11 @@ class Executor:
             if options.stable_cpu:
                 timer_stabilizer = TimerStabilizer(logger=self.log)
                 timer_stabilizer.apply()
+                cpu_stabilizer = CpuStabilizer(
+                    logger=self.log,
+                    max_frequency_khz=self.config.cpu_max_frequency_khz,
+                )
+                cpu_stabilizer.apply()
                 smt_stabilizer = SmtStabilizer(
                     logger=self.log,
                     cpuset=self.config.resources.cpuset
@@ -963,11 +968,6 @@ class Executor:
                     offline_cpus=self.config.offline_cpus or None,
                 )
                 smt_stabilizer.apply()
-                cpu_stabilizer = CpuStabilizer(
-                    logger=self.log,
-                    max_frequency_khz=self.config.cpu_max_frequency_khz,
-                )
-                cpu_stabilizer.apply()
 
             self.clean_system_cache()
             self.prepare_directories()
@@ -1171,10 +1171,10 @@ class Executor:
                 ),
                 print_per_payload_metrics_table=options.per_payload_metrics_logs,
             )
-            if cpu_stabilizer is not None:
-                cpu_stabilizer.restore()
             if smt_stabilizer is not None:
                 smt_stabilizer.restore()
+            if cpu_stabilizer is not None:
+                cpu_stabilizer.restore()
             if timer_stabilizer is not None:
                 timer_stabilizer.restore()
             if prev_sigterm is not None:
