@@ -274,6 +274,12 @@ class Scenarios(BaseModel):
         "When empty (default), HT siblings are auto-detected from cpuset and infra_cpuset topology.",
         default=[],
     )
+    dottrace: bool = Field(
+        description="Enable dotTrace profiling of the execution client. "
+        "Automatically installs dotTrace CLI tools if not present. "
+        "Snapshot is saved to the outputs directory.",
+        default=False,
+    )
     docker_images: ScenariosImages = Field(
         description="Images configuration for the scenarios.",
         alias="images",

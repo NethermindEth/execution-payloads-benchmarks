@@ -272,6 +272,46 @@ class Executor:
         )
         self.config.jwt_secret_file.write_text(secrets.token_bytes(32).hex())
 
+    _DOTTRACE_CONTAINER_PATH = "/opt/dottrace"
+    _DOTTRACE_OUTPUT_PATH = "/dottrace-output"
+    _DOTTRACE_DEFAULT_INSTALL_PATH = "/opt/dottrace"
+
+    def _ensure_dottrace_installed(self) -> str:
+        """Ensure dotTrace CLI tools are installed, return the host path."""
+        path = self._DOTTRACE_DEFAULT_INSTALL_PATH
+        dottrace_bin = Path(path) / "dottrace"
+        if dottrace_bin.exists():
+            self.log.info("dotTrace found", path=path)
+            return path
+
+        self.log.info("dotTrace not found, installing", path=path)
+        try:
+            subprocess.run(
+                [
+                    "dotnet",
+                    "tool",
+                    "install",
+                    "--tool-path",
+                    path,
+                    "JetBrains.dotTrace.CommandLineTools",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.log.info("dotTrace installed", path=path)
+        except FileNotFoundError:
+            self.log.error(
+                "dotnet CLI not found, cannot install dotTrace. "
+                "Install .NET SDK or provide dottrace_path manually."
+            )
+            raise
+        except subprocess.CalledProcessError as e:
+            self.log.error("Failed to install dotTrace", stderr=e.stderr)
+            raise
+        return path
+
     def start_execution_client(
         self,
         container_network: Network | None = None,
@@ -303,6 +343,30 @@ class Executor:
                 pyroscope=pyroscope,
                 command=execution_container_command,
                 environment=execution_container_environment,
+            )
+
+        # dotTrace profiling
+        if self.config.dottrace:
+            dottrace_host_path = self._ensure_dottrace_installed()
+            dottrace_output_dir = self.config.outputs_dir / "dottrace"
+            dottrace_output_dir.mkdir(parents=True, exist_ok=True)
+            execution_container_volumes.append(
+                f"{dottrace_host_path}:{self._DOTTRACE_CONTAINER_PATH}:ro"
+            )
+            execution_container_volumes.append(
+                f"{dottrace_output_dir}:{self._DOTTRACE_OUTPUT_PATH}:rw"
+            )
+            snapshot_file = f"{self._DOTTRACE_OUTPUT_PATH}/trace.dtp"
+            execution_container_command = [
+                f"{self._DOTTRACE_CONTAINER_PATH}/dottrace",
+                "start",
+                f"--output={snapshot_file}",
+                "--",
+            ] + execution_container_command
+            stop_signal = "SIGINT"
+            self.log.info(
+                "dotTrace profiling enabled",
+                snapshot_output=str(dottrace_output_dir / "trace.dtp"),
             )
 
         # Run execution container
@@ -1295,6 +1359,7 @@ class Executor:
                 exports=scenarios.exports,
                 cpu_max_frequency_khz=scenarios.cpu_max_frequency_khz,
                 offline_cpus=scenarios.offline_cpus,
+                dottrace=scenarios.dottrace,
             ),
             logger=logger,
         )
