@@ -49,6 +49,7 @@ class NethermindConfig(ClientConfig):
                 "DOTNET_TieredCompilation": "0",
                 "DOTNET_GCLatencyLevel": "0",
             },
+            entrypoint="/nethermind/nethermind",
         )
 
     def get_command(

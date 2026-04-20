@@ -349,6 +349,7 @@ class Executor:
             )
 
         # dotTrace profiling
+        dottrace_entrypoint = None
         if dottrace:
             dottrace_host_path = self._ensure_dottrace_installed()
             dottrace_output_dir = self.config.outputs_dir / "dottrace"
@@ -361,12 +362,18 @@ class Executor:
             )
             trace_name = f"{self.config.test_id}.dtp"
             snapshot_file = f"{self._DOTTRACE_OUTPUT_PATH}/{trace_name}"
-            execution_container_command = [
+            client_binary = self.config.execution_client.value.entrypoint
+            if client_binary is None:
+                raise ValueError(
+                    "dotTrace requires entrypoint to be set on the client config"
+                )
+            dottrace_entrypoint = [
                 f"{self._DOTTRACE_CONTAINER_PATH}/dottrace",
                 "start",
                 f"--output={snapshot_file}",
                 "--",
-            ] + execution_container_command
+                client_binary,
+            ]
             stop_signal = "SIGINT"
             self.log.info(
                 "dotTrace profiling enabled",
@@ -393,6 +400,8 @@ class Executor:
             group_add=self.config.docker_group_add,
             stop_signal=stop_signal,
         )
+        if dottrace_entrypoint:
+            run_kwargs["entrypoint"] = dottrace_entrypoint
         if self.config.resources and self.config.resources.cpuset is not None:
             run_kwargs["cpuset_cpus"] = self.config.resources.cpuset
         if self.config.resources and self.config.resources.mem_swappiness is not None:

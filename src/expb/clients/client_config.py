@@ -20,6 +20,7 @@ class ClientConfig:
         default_env: dict[str, str] = {},
         prometheus_metrics_path: str = "/metrics",
         sse_data_feed_path: str | None = None,
+        entrypoint: str | None = None,
     ):
         self.name = name
         self.default_image = default_image
@@ -27,6 +28,7 @@ class ClientConfig:
         self.default_env = default_env
         self.prometheus_metrics_path = prometheus_metrics_path
         self.sse_data_feed_path = sse_data_feed_path
+        self.entrypoint = entrypoint
 
     def get_command(
         self,
