@@ -1,6 +1,9 @@
+import glob
 import json
+import os
 import re
 import secrets
+import signal
 import subprocess
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -28,7 +31,7 @@ from expb.payloads.executor.services.payload_server import (
     get_payload_server_script,
 )
 from expb.payloads.executor.services.snapshots import setup_snapshot_service
-from expb.payloads.utils.cpu import CpuStabilizer
+from expb.payloads.utils.cpu import CpuStabilizer, SmtStabilizer, TimerStabilizer
 from expb.payloads.utils.networking import limit_container_bandwidth
 
 PER_PAYLOAD_METRIC_LOG_PATTERN = re.compile(
@@ -47,6 +50,7 @@ class ExecutorExecuteOptions:
         drop_caches_sync: bool = True,
         client_metrics: bool = True,
         stable_cpu: bool = True,
+        dottrace: bool = False,
     ):
         self.collect_per_payload_metrics: bool = collect_per_payload_metrics
         self.print_logs_to_console: bool = print_logs_to_console
@@ -56,6 +60,7 @@ class ExecutorExecuteOptions:
         self.drop_caches_sync: bool = drop_caches_sync
         self.client_metrics: bool = client_metrics
         self.stable_cpu: bool = stable_cpu
+        self.dottrace: bool = dottrace
 
 
 class Executor:
@@ -68,6 +73,7 @@ class Executor:
         self.log: Logger = logger
         self.running_command_futures: list[Future] = []
         self.executor_pool: ThreadPoolExecutor | None = None
+        self._dottrace_active: bool = False
 
     # Scenario Setup
     def prepare_directories(self) -> None:
@@ -94,9 +100,94 @@ class Executor:
 
     def run_preflight_checks(self) -> None:
         """Run preflight checks and log warnings for suboptimal system configuration."""
+        self._log_system_diagnostics()
         self._check_cpu_governor()
         self._check_transparent_huge_pages()
         self._check_noisy_timers()
+
+    def _collect_system_snapshot(self) -> dict[str, object]:
+        """Collect system state snapshot for diagnostics."""
+        diag: dict[str, object] = {}
+        try:
+            freq_paths = glob.glob(
+                "/sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq"
+            )
+            if freq_paths:
+                freqs = []
+                for p in sorted(freq_paths):
+                    val = Path(p).read_text().strip()
+                    freqs.append(int(val))
+                diag["cpu_freq_min_khz"] = min(freqs)
+                diag["cpu_freq_max_khz"] = max(freqs)
+                diag["cpu_freq_avg_khz"] = sum(freqs) // len(freqs)
+                diag["cpu_online_count"] = len(freqs)
+
+            max_freq_path = Path(
+                "/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq"
+            )
+            if max_freq_path.exists():
+                diag["scaling_max_freq_khz"] = int(
+                    max_freq_path.read_text().strip()
+                )
+
+            temp_path = Path("/sys/class/thermal/thermal_zone0/temp")
+            if temp_path.exists():
+                diag["cpu_temp_c"] = int(temp_path.read_text().strip()) / 1000
+
+            online_cpus = []
+            offline_cpus = []
+            for p in sorted(
+                glob.glob("/sys/devices/system/cpu/cpu[0-9]*/online")
+            ):
+                cpu_id = int(p.split("/cpu")[2].split("/")[0])
+                if Path(p).read_text().strip() == "1":
+                    online_cpus.append(cpu_id)
+                else:
+                    offline_cpus.append(cpu_id)
+            online_cpus.insert(0, 0)
+            diag["online_cpus"] = online_cpus
+            if offline_cpus:
+                diag["offline_cpus"] = offline_cpus
+
+            mem_path = Path("/proc/meminfo")
+            if mem_path.exists():
+                meminfo = mem_path.read_text()
+                for line in meminfo.splitlines():
+                    key = line.split(":")[0]
+                    if key in (
+                        "MemAvailable",
+                        "MemFree",
+                        "Cached",
+                        "Dirty",
+                        "Writeback",
+                    ):
+                        diag[f"mem_{key.lower()}_mb"] = (
+                            int(line.split()[1]) // 1024
+                        )
+
+            stat_path = Path("/proc/stat")
+            if stat_path.exists():
+                for line in stat_path.read_text().splitlines():
+                    if line.startswith("ctxt "):
+                        diag["context_switches"] = int(line.split()[1])
+                    elif line.startswith("procs_running "):
+                        diag["procs_running"] = int(line.split()[1])
+                    elif line.startswith("intr "):
+                        diag["total_interrupts"] = int(line.split()[1])
+
+            loadavg_path = Path("/proc/loadavg")
+            if loadavg_path.exists():
+                parts = loadavg_path.read_text().strip().split()
+                diag["load_1m"] = float(parts[0])
+                diag["load_5m"] = float(parts[1])
+        except Exception:
+            pass
+        return diag
+
+    def _log_system_diagnostics(self, label: str = "System diagnostics") -> None:
+        diag = self._collect_system_snapshot()
+        if diag:
+            self.log.info(label, **diag)
 
     def _check_cpu_governor(self) -> None:
         """Log a warning if any CPU is not using the 'performance' governor."""
@@ -158,8 +249,8 @@ class Executor:
             ]
             if active_noisy:
                 self.log.warning(
-                    "Active systemd timers may cause benchmark variance. "
-                    f"Fix: systemctl stop {' '.join(active_noisy)}",
+                    "Active systemd timers detected that may cause benchmark variance. "
+                    "They will be stopped automatically when --stable-cpu is enabled.",
                     active_timers=active_noisy,
                 )
         except Exception:
@@ -184,11 +275,53 @@ class Executor:
         )
         self.config.jwt_secret_file.write_text(secrets.token_bytes(32).hex())
 
+    _DOTTRACE_CONTAINER_PATH = "/opt/dottrace"
+    _DOTTRACE_OUTPUT_PATH = "/dottrace-output"
+    _DOTTRACE_DEFAULT_INSTALL_PATH = "/opt/dottrace"
+
+    def _ensure_dottrace_installed(self) -> str:
+        """Ensure dotTrace CLI tools are installed, return the host path."""
+        path = self._DOTTRACE_DEFAULT_INSTALL_PATH
+        dottrace_bin = Path(path) / "dottrace"
+        if dottrace_bin.exists():
+            self.log.info("dotTrace found", path=path)
+            return path
+
+        self.log.info("dotTrace not found, installing", path=path)
+        try:
+            subprocess.run(
+                [
+                    "dotnet",
+                    "tool",
+                    "install",
+                    "--tool-path",
+                    path,
+                    "JetBrains.dotTrace.GlobalTools",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.log.info("dotTrace installed", path=path)
+        except FileNotFoundError:
+            self.log.error(
+                "dotnet CLI not found, cannot install dotTrace. "
+                "Install .NET SDK first."
+            )
+            raise
+        except subprocess.CalledProcessError as e:
+            self.log.error("Failed to install dotTrace", stderr=e.stderr)
+            raise
+        return path
+
+
     def start_execution_client(
         self,
         container_network: Network | None = None,
         pyroscope: Pyroscope | None = None,
         stop_signal: str | None = None,
+        dottrace: bool = False,
     ) -> Container:
         # Command
         execution_container_command = self.config.get_execution_client_command()
@@ -217,6 +350,41 @@ class Executor:
                 environment=execution_container_environment,
             )
 
+        # dotTrace profiling
+        dottrace_entrypoint = None
+        if dottrace:
+            dottrace_host_path = self._ensure_dottrace_installed()
+            dottrace_output_dir = self.config.outputs_dir / "dottrace"
+            dottrace_output_dir.mkdir(parents=True, exist_ok=True)
+            execution_container_volumes.append(
+                f"{dottrace_host_path}:{self._DOTTRACE_CONTAINER_PATH}:ro"
+            )
+            execution_container_volumes.append(
+                f"{dottrace_output_dir}:{self._DOTTRACE_OUTPUT_PATH}:rw"
+            )
+            trace_name = f"{self.config.test_id}.dtp"
+            snapshot_file = f"{self._DOTTRACE_OUTPUT_PATH}/{trace_name}"
+            client_binary = self.config.execution_client.value.entrypoint
+            if client_binary is None:
+                raise ValueError(
+                    "dotTrace requires entrypoint to be set on the client config"
+                )
+            dottrace_entrypoint = [
+                f"{self._DOTTRACE_CONTAINER_PATH}/dottrace",
+                "start",
+                "--framework=NetCore",
+                f"--save-to={snapshot_file}",
+                "--propagate-exit-code",
+                "--",
+                client_binary,
+            ]
+            stop_signal = "SIGINT"
+            self._dottrace_active = True
+            self.log.info(
+                "dotTrace profiling enabled",
+                snapshot_output=str(dottrace_output_dir / trace_name),
+            )
+
         # Run execution container
         cpu_count = self.config.resources.cpu if self.config.resources else None
         mem_limit = self.config.resources.mem if self.config.resources else None
@@ -237,6 +405,8 @@ class Executor:
             group_add=self.config.docker_group_add,
             stop_signal=stop_signal,
         )
+        if dottrace_entrypoint:
+            run_kwargs["entrypoint"] = dottrace_entrypoint
         if self.config.resources and self.config.resources.cpuset is not None:
             run_kwargs["cpuset_cpus"] = self.config.resources.cpuset
         if self.config.resources and self.config.resources.mem_swappiness is not None:
@@ -248,7 +418,6 @@ class Executor:
         self,
         execution_client_rpc_url: str,
     ) -> None:
-        time.sleep(self.config.startup_wait)
         headers = {"Content-Type": "application/json"}
         payload = {
             "jsonrpc": "2.0",
@@ -256,7 +425,7 @@ class Executor:
             "params": [],
             "id": 1,
         }
-        max_attempts = self.config.json_rpc_wait_max_retries
+        max_attempts = self.config.startup_wait + self.config.json_rpc_wait_max_retries
         for attempt in range(1, max_attempts + 1):
             try:
                 response = requests.post(
@@ -814,7 +983,7 @@ class Executor:
             k6_container = self.config.docker_client.containers.get(
                 self.config.get_k6_container_name()
             )
-            k6_container.stop()
+            k6_container.stop(timeout=3)
             logs_file = self.config.outputs_dir / "k6.log"
             self.log.info("Saving k6 logs", logs_file=logs_file)
             logs_stream = k6_container.logs(
@@ -845,7 +1014,9 @@ class Executor:
             )
             execution_client_container.reload()
             execution_client_volumes = execution_client_container.attrs["Mounts"]
-            execution_client_container.stop()
+            execution_client_container.stop(
+                timeout=60 if self._dottrace_active else 5
+            )
             logs_file = (
                 self.config.outputs_dir
                 / f"{self.config.get_execution_client_name()}.log"
@@ -882,7 +1053,7 @@ class Executor:
             payload_server_container = self.config.docker_client.containers.get(
                 self.config.get_payload_server_container_name()
             )
-            payload_server_container.stop()
+            payload_server_container.stop(timeout=3)
             logs_file = self.config.outputs_dir / "payload-server.log"
             self.log.info("Saving payload server logs", logs_file=logs_file)
             logs_stream = payload_server_container.logs(
@@ -906,7 +1077,7 @@ class Executor:
             alloy_container = self.config.docker_client.containers.get(
                 self.config.get_alloy_container_name()
             )
-            alloy_container.stop()
+            alloy_container.stop(timeout=3)
             alloy_container.remove()
         except docker.errors.NotFound:
             pass
@@ -930,6 +1101,16 @@ class Executor:
         options: ExecutorExecuteOptions = ExecutorExecuteOptions(),
     ) -> None:
         cpu_stabilizer: CpuStabilizer | None = None
+        timer_stabilizer: TimerStabilizer | None = None
+        smt_stabilizer: SmtStabilizer | None = None
+        prev_sigterm = None
+        if os.name != "nt":
+
+            def _sigterm_handler(signum: int, frame: object) -> None:
+                raise SystemExit(128 + signum)
+
+            prev_sigterm = signal.getsignal(signal.SIGTERM)
+            signal.signal(signal.SIGTERM, _sigterm_handler)
         try:
             self.log.info(
                 "Preparing scenario",
@@ -939,8 +1120,25 @@ class Executor:
             self.run_preflight_checks()
 
             if options.stable_cpu:
-                cpu_stabilizer = CpuStabilizer(logger=self.log)
+                timer_stabilizer = TimerStabilizer(logger=self.log)
+                timer_stabilizer.apply()
+                cpu_stabilizer = CpuStabilizer(
+                    logger=self.log,
+                    max_frequency_khz=self.config.cpu_max_frequency_khz,
+                )
                 cpu_stabilizer.apply()
+                smt_stabilizer = SmtStabilizer(
+                    logger=self.log,
+                    cpuset=self.config.resources.cpuset
+                    if self.config.resources
+                    else None,
+                    infra_cpuset=self.config.resources.infra_cpuset
+                    if self.config.resources
+                    else None,
+                    offline_cpus=self.config.offline_cpus or None,
+                )
+                smt_stabilizer.apply()
+                self._log_system_diagnostics("System state after stabilizers applied")
 
             self.clean_system_cache()
             self.prepare_directories()
@@ -997,15 +1195,17 @@ class Executor:
                 if self.config.resources
                 else None,
             )
+            dottrace_enabled = options.dottrace or self.config.dottrace
             stop_signal = (
-                # If there are extra commands to execute, use SIGINT to stop the execution client
-                # instead of SIGTERM
-                "SIGINT" if self.config.execution_client_extra_commands else None
+                "SIGINT"
+                if self.config.execution_client_extra_commands or dottrace_enabled
+                else None
             )
             execution_client_container = self.start_execution_client(
                 container_network=containers_network,
                 pyroscope=alloy_pyroscope,
                 stop_signal=stop_signal,
+                dottrace=dottrace_enabled,
             )
 
             # Get execution client RPC URL immediately (container IP is
@@ -1130,6 +1330,7 @@ class Executor:
                 per_payload_metrics_logs=options.per_payload_metrics_logs,
             )
 
+            self._log_system_diagnostics("System state after benchmark")
             self.log.info(
                 "Payloads execution completed",
                 execution_client=self.config.get_execution_client_name(),
@@ -1144,8 +1345,14 @@ class Executor:
                 ),
                 print_per_payload_metrics_table=options.per_payload_metrics_logs,
             )
+            if smt_stabilizer is not None:
+                smt_stabilizer.restore()
             if cpu_stabilizer is not None:
                 cpu_stabilizer.restore()
+            if timer_stabilizer is not None:
+                timer_stabilizer.restore()
+            if prev_sigterm is not None:
+                signal.signal(signal.SIGTERM, prev_sigterm)
 
     @classmethod
     def from_scenarios(
@@ -1172,6 +1379,9 @@ class Executor:
                 pull_images=scenarios.pull_images,
                 docker_images=scenarios.docker_images,
                 exports=scenarios.exports,
+                cpu_max_frequency_khz=scenarios.cpu_max_frequency_khz,
+                offline_cpus=scenarios.offline_cpus,
+                dottrace=scenarios.dottrace,
             ),
             logger=logger,
         )

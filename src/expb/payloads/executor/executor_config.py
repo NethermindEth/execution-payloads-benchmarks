@@ -1,4 +1,5 @@
 import os
+import re
 import time
 from pathlib import Path
 
@@ -43,10 +44,14 @@ class ExecutorConfig:
         exports: Exports | None = None,
         json_rpc_wait_max_retries: int = 1800,
         limit_bandwidth: bool = False,
+        cpu_max_frequency_khz: int | None = None,
+        offline_cpus: list[int] | None = None,
+        dottrace: bool = False,
     ) -> None:
         # Executor Basic config
         self.scenario_name: str = scenario.name or "default"
-        self.executor_name: str = f"expb-executor-{self.scenario_name}"
+        safe_name = re.sub(r"[^a-zA-Z0-9_-]", "-", self.scenario_name)
+        self.executor_name: str = f"expb-executor-{safe_name}"
         self.test_id: str = f"{self.scenario_name}-{time.strftime('%Y%m%d-%H%M%S')}"
         self.startup_wait = scenario.startup_wait
         # Executor Client config
@@ -74,6 +79,9 @@ class ExecutorConfig:
         self.resources: ScenariosResources | None = resources
         self.limit_bandwidth: bool = limit_bandwidth
         self.json_rpc_wait_max_retries: int = json_rpc_wait_max_retries
+        self.cpu_max_frequency_khz: int | None = cpu_max_frequency_khz
+        self.offline_cpus: list[int] = offline_cpus or []
+        self.dottrace: bool = dottrace
         ## K6 script config
         self.k6_payloads_amount: int = scenario.payloads_amount
         self.k6_payloads_delay: float = scenario.payloads_delay
@@ -179,7 +187,9 @@ class ExecutorConfig:
         )
 
     def get_execution_client_env(self) -> dict[str, str]:
-        return self.execution_client_extra_env.copy()
+        env = self.execution_client.value.default_env.copy()
+        env.update(self.execution_client_extra_env)
+        return env
 
     def get_execution_client_ports(self) -> dict[str, tuple[str, str]]:
         return {

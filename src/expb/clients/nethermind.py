@@ -38,10 +38,18 @@ class NethermindConfig(ClientConfig):
                 # Disable peering
                 "--Init.DiscoveryEnabled=false",
                 "--Network.MaxActivePeers=0",
+                # Suppress forced GC between blocks for stable benchmarks
+                "--Merge.SweepMemory=NoGC",
+                "--Merge.CompactMemory=No",
+                "--Merge.CollectionsPerDecommit=-1",
             ],
             prometheus_metrics_path="/metrics",
             sse_data_feed_path="/data/events",
-            default_env={},
+            default_env={
+                "DOTNET_TieredCompilation": "0",
+                "DOTNET_GCLatencyLevel": "0",
+            },
+            entrypoint="/nethermind/nethermind",
         )
 
     def get_command(

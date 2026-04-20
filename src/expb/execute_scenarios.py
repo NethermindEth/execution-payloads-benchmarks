@@ -81,6 +81,13 @@ def execute_scenarios(
             help="Disable turbo boost and set CPU governor to 'performance' for consistent benchmark results across runs.",
         ),
     ] = True,
+    dottrace: Annotated[
+        bool,
+        typer.Option(
+            "--dottrace/--no-dottrace",
+            help="Enable JetBrains dotTrace profiling. Auto-installs if needed. Snapshot saved to outputs directory.",
+        ),
+    ] = False,
     use_lock: Annotated[
         bool,
         typer.Option(
@@ -171,6 +178,7 @@ def execute_scenarios(
                                 drop_caches_sync=drop_caches_sync,
                                 client_metrics=client_metrics,
                                 stable_cpu=stable_cpu,
+                                dottrace=dottrace,
                             ),
                         )
                 if not loop:
