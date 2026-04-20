@@ -102,8 +102,8 @@ class Executor:
         self._check_transparent_huge_pages()
         self._check_noisy_timers()
 
-    def _log_system_diagnostics(self) -> None:
-        """Log system state snapshot for benchmark reproducibility diagnostics."""
+    def _collect_system_snapshot(self) -> dict[str, object]:
+        """Collect system state snapshot for diagnostics."""
         diag: dict[str, object] = {}
         try:
             freq_paths = glob.glob(
@@ -117,6 +117,7 @@ class Executor:
                 diag["cpu_freq_min_khz"] = min(freqs)
                 diag["cpu_freq_max_khz"] = max(freqs)
                 diag["cpu_freq_avg_khz"] = sum(freqs) // len(freqs)
+                diag["cpu_online_count"] = len(freqs)
 
             max_freq_path = Path(
                 "/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq"
@@ -149,16 +150,41 @@ class Executor:
             if mem_path.exists():
                 meminfo = mem_path.read_text()
                 for line in meminfo.splitlines():
-                    if line.startswith("MemAvailable:"):
-                        diag["mem_available_mb"] = (
+                    key = line.split(":")[0]
+                    if key in (
+                        "MemAvailable",
+                        "MemFree",
+                        "Cached",
+                        "Dirty",
+                        "Writeback",
+                    ):
+                        diag[f"mem_{key.lower()}_mb"] = (
                             int(line.split()[1]) // 1024
                         )
-                        break
+
+            stat_path = Path("/proc/stat")
+            if stat_path.exists():
+                for line in stat_path.read_text().splitlines():
+                    if line.startswith("ctxt "):
+                        diag["context_switches"] = int(line.split()[1])
+                    elif line.startswith("procs_running "):
+                        diag["procs_running"] = int(line.split()[1])
+                    elif line.startswith("intr "):
+                        diag["total_interrupts"] = int(line.split()[1])
+
+            loadavg_path = Path("/proc/loadavg")
+            if loadavg_path.exists():
+                parts = loadavg_path.read_text().strip().split()
+                diag["load_1m"] = float(parts[0])
+                diag["load_5m"] = float(parts[1])
         except Exception:
             pass
+        return diag
 
+    def _log_system_diagnostics(self, label: str = "System diagnostics") -> None:
+        diag = self._collect_system_snapshot()
         if diag:
-            self.log.info("System diagnostics", **diag)
+            self.log.info(label, **diag)
 
     def _check_cpu_governor(self) -> None:
         """Log a warning if any CPU is not using the 'performance' governor."""
@@ -1028,6 +1054,7 @@ class Executor:
                     offline_cpus=self.config.offline_cpus or None,
                 )
                 smt_stabilizer.apply()
+                self._log_system_diagnostics("System state after stabilizers applied")
 
             self.clean_system_cache()
             self.prepare_directories()
@@ -1217,6 +1244,7 @@ class Executor:
                 per_payload_metrics_logs=options.per_payload_metrics_logs,
             )
 
+            self._log_system_diagnostics("System state after benchmark")
             self.log.info(
                 "Payloads execution completed",
                 execution_client=self.config.get_execution_client_name(),
