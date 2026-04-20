@@ -30,7 +30,7 @@ from expb.payloads.executor.services.payload_server import (
     get_payload_server_script,
 )
 from expb.payloads.executor.services.snapshots import setup_snapshot_service
-from expb.payloads.utils.cpu import CpuStabilizer
+from expb.payloads.utils.cpu import CpuStabilizer, TimerStabilizer
 from expb.payloads.utils.networking import limit_container_bandwidth
 
 PER_PAYLOAD_METRIC_LOG_PATTERN = re.compile(
@@ -160,8 +160,8 @@ class Executor:
             ]
             if active_noisy:
                 self.log.warning(
-                    "Active systemd timers may cause benchmark variance. "
-                    f"Fix: systemctl stop {' '.join(active_noisy)}",
+                    "Active systemd timers detected that may cause benchmark variance. "
+                    "They will be stopped automatically when --stable-cpu is enabled.",
                     active_timers=active_noisy,
                 )
         except Exception:
@@ -931,6 +931,7 @@ class Executor:
         options: ExecutorExecuteOptions = ExecutorExecuteOptions(),
     ) -> None:
         cpu_stabilizer: CpuStabilizer | None = None
+        timer_stabilizer: TimerStabilizer | None = None
         prev_sigterm = None
         if os.name != "nt":
 
@@ -948,6 +949,8 @@ class Executor:
             self.run_preflight_checks()
 
             if options.stable_cpu:
+                timer_stabilizer = TimerStabilizer(logger=self.log)
+                timer_stabilizer.apply()
                 cpu_stabilizer = CpuStabilizer(
                     logger=self.log,
                     max_frequency_khz=self.config.cpu_max_frequency_khz,
@@ -1158,6 +1161,8 @@ class Executor:
             )
             if cpu_stabilizer is not None:
                 cpu_stabilizer.restore()
+            if timer_stabilizer is not None:
+                timer_stabilizer.restore()
             if prev_sigterm is not None:
                 signal.signal(signal.SIGTERM, prev_sigterm)
 

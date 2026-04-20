@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import glob
 import os
+import subprocess
 from pathlib import Path
 
 from expb.logging import Logger
@@ -172,6 +173,92 @@ class CpuStabilizer:
                 )
 
     def __enter__(self) -> CpuStabilizer:
+        self.apply()
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.restore()
+
+
+NOISY_TIMERS = [
+    "sysstat-collect.timer",
+    "apt-daily.timer",
+    "apt-daily-upgrade.timer",
+    "fwupd-refresh.timer",
+    "fstrim.timer",
+]
+
+
+class TimerStabilizer:
+    """Stops systemd timers that cause I/O and CPU spikes during benchmarks.
+
+    Restores (starts) them after the benchmark completes.
+    """
+
+    def __init__(self, logger: Logger | None = None):
+        self.log = logger
+        self._stopped_timers: list[str] = []
+
+    def apply(self) -> None:
+        try:
+            result = subprocess.run(
+                ["systemctl", "list-timers", "--no-pager", "--no-legend"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode != 0:
+                return
+        except Exception:
+            return
+
+        active = [t for t in NOISY_TIMERS if t in result.stdout]
+        if not active:
+            if self.log:
+                self.log.info("No noisy systemd timers active")
+            return
+
+        for timer in active:
+            try:
+                subprocess.run(
+                    ["systemctl", "stop", timer],
+                    capture_output=True,
+                    timeout=10,
+                )
+                self._stopped_timers.append(timer)
+            except Exception:
+                if self.log:
+                    self.log.warning("Failed to stop timer", timer=timer)
+
+        if self._stopped_timers and self.log:
+            self.log.info(
+                "Systemd timers stopped",
+                timers=self._stopped_timers,
+            )
+
+    def restore(self) -> None:
+        if not self._stopped_timers:
+            return
+
+        for timer in self._stopped_timers:
+            try:
+                subprocess.run(
+                    ["systemctl", "start", timer],
+                    capture_output=True,
+                    timeout=10,
+                )
+            except Exception:
+                if self.log:
+                    self.log.warning("Failed to restart timer", timer=timer)
+
+        if self.log:
+            self.log.info(
+                "Systemd timers restored",
+                timers=self._stopped_timers,
+            )
+        self._stopped_timers = []
+
+    def __enter__(self) -> TimerStabilizer:
         self.apply()
         return self
 
