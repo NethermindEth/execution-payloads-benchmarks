@@ -370,7 +370,9 @@ class Executor:
             dottrace_entrypoint = [
                 f"{self._DOTTRACE_CONTAINER_PATH}/dottrace",
                 "start",
-                f"--output={snapshot_file}",
+                "--framework=NetCore",
+                f"--save-to={snapshot_file}",
+                "--propagate-exit-code",
                 "--",
                 client_binary,
             ]
