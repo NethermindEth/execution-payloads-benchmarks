@@ -939,7 +939,10 @@ class Executor:
             self.run_preflight_checks()
 
             if options.stable_cpu:
-                cpu_stabilizer = CpuStabilizer(logger=self.log)
+                cpu_stabilizer = CpuStabilizer(
+                    logger=self.log,
+                    docker_client=self.config.docker_client,
+                )
                 cpu_stabilizer.apply()
 
             self.clean_system_cache()
