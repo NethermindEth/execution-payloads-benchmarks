@@ -295,7 +295,7 @@ class Executor:
                     "install",
                     "--tool-path",
                     path,
-                    "JetBrains.dotTrace.CommandLineTools",
+                    "JetBrains.dotTrace.GlobalTools",
                 ],
                 check=True,
                 capture_output=True,
