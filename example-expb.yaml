@@ -7,9 +7,8 @@ pull_images: true
 # Original frequencies are restored after each scenario.
 # cpu_max_frequency_khz: 3800000
 
-# Optional: Offline HT/SMT sibling CPUs during benchmarks for cache isolation.
-# Ensures one thread per physical core for the benchmark, eliminating L1/L2 cache
-# contention from sibling threads. CPUs are brought back online after each scenario.
+# HT/SMT siblings of cpuset and infra_cpuset cores are auto-detected and offlined
+# during benchmarks for cache isolation. Override with explicit list if needed:
 # offline_cpus: [9, 10, 11, 12, 13, 14, 15]
 
 # Docker images to use (pin to specific versions for reproducible benchmarks)

@@ -49,6 +49,54 @@ def _get_max_freq_paths() -> list[str]:
     return sorted(glob.glob("/sys/devices/system/cpu/cpu*/cpufreq/scaling_max_freq"))
 
 
+def _parse_cpuset(cpuset: str) -> set[int]:
+    """Parse a cpuset string like '2-7,10-15' into a set of CPU IDs."""
+    cpus: set[int] = set()
+    for part in cpuset.split(","):
+        part = part.strip()
+        if "-" in part:
+            start, end = part.split("-", 1)
+            cpus.update(range(int(start), int(end) + 1))
+        else:
+            cpus.add(int(part))
+    return cpus
+
+
+def _get_cpu_topology() -> dict[int, list[int]]:
+    """Read CPU topology. Returns {core_id: [cpu_id, ...]} mapping."""
+    cores: dict[int, list[int]] = {}
+    for path in sorted(glob.glob("/sys/devices/system/cpu/cpu[0-9]*/topology/core_id")):
+        cpu_id = int(path.split("/cpu")[2].split("/")[0])
+        core_id_str = _read_sys(path)
+        if core_id_str is not None:
+            core_id = int(core_id_str)
+            cores.setdefault(core_id, []).append(cpu_id)
+    return cores
+
+
+def detect_smt_siblings(cpuset: str, infra_cpuset: str | None = None) -> list[int]:
+    """Find HT/SMT siblings that should be offlined for the given cpusets.
+
+    Returns CPU IDs that share a physical core with any CPU in cpuset or
+    infra_cpuset but are not themselves in either set.
+    """
+    used_cpus = _parse_cpuset(cpuset)
+    if infra_cpuset:
+        used_cpus |= _parse_cpuset(infra_cpuset)
+
+    topology = _get_cpu_topology()
+    to_offline: set[int] = set()
+    for _core_id, cpu_ids in topology.items():
+        if len(cpu_ids) < 2:
+            continue
+        pinned = [c for c in cpu_ids if c in used_cpus]
+        if pinned:
+            siblings = [c for c in cpu_ids if c not in used_cpus]
+            to_offline.update(siblings)
+
+    return sorted(to_offline)
+
+
 class CpuStabilizer:
     """Disables turbo boost and sets the CPU governor to 'performance'.
 
@@ -269,17 +317,26 @@ class TimerStabilizer:
 class SmtStabilizer:
     """Offlines HT/SMT sibling CPUs during benchmarks for cache isolation.
 
-    Takes a list of CPU IDs to offline. Only CPUs that were online at apply
-    time are offlined, and only those are brought back online on restore.
+    Auto-detects siblings from CPU topology when cpuset is provided.
+    Falls back to explicit cpu list via offline_cpus override.
+    Only CPUs that were online at apply time are offlined, and only
+    those are brought back online on restore.
     """
 
     def __init__(
         self,
-        cpus_to_offline: list[int],
         logger: Logger | None = None,
+        cpuset: str | None = None,
+        infra_cpuset: str | None = None,
+        offline_cpus: list[int] | None = None,
     ):
         self.log = logger
-        self._cpus_to_offline = cpus_to_offline
+        if offline_cpus:
+            self._cpus_to_offline = offline_cpus
+        elif cpuset:
+            self._cpus_to_offline = detect_smt_siblings(cpuset, infra_cpuset)
+        else:
+            self._cpus_to_offline = []
         self._offlined_cpus: list[int] = []
 
     @staticmethod
@@ -288,6 +345,8 @@ class SmtStabilizer:
 
     def apply(self) -> None:
         if not self._cpus_to_offline:
+            if self.log:
+                self.log.info("No SMT siblings to offline (no cpuset configured or no HT detected)")
             return
 
         for cpu_id in self._cpus_to_offline:
@@ -307,7 +366,7 @@ class SmtStabilizer:
 
         if self._offlined_cpus and self.log:
             self.log.info(
-                "SMT siblings offlined",
+                "SMT siblings offlined for cache isolation",
                 cpus=self._offlined_cpus,
             )
 

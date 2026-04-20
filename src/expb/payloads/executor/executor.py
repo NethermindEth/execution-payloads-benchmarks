@@ -952,12 +952,17 @@ class Executor:
             if options.stable_cpu:
                 timer_stabilizer = TimerStabilizer(logger=self.log)
                 timer_stabilizer.apply()
-                if self.config.offline_cpus:
-                    smt_stabilizer = SmtStabilizer(
-                        cpus_to_offline=self.config.offline_cpus,
-                        logger=self.log,
-                    )
-                    smt_stabilizer.apply()
+                smt_stabilizer = SmtStabilizer(
+                    logger=self.log,
+                    cpuset=self.config.resources.cpuset
+                    if self.config.resources
+                    else None,
+                    infra_cpuset=self.config.resources.infra_cpuset
+                    if self.config.resources
+                    else None,
+                    offline_cpus=self.config.offline_cpus or None,
+                )
+                smt_stabilizer.apply()
                 cpu_stabilizer = CpuStabilizer(
                     logger=self.log,
                     max_frequency_khz=self.config.cpu_max_frequency_khz,
