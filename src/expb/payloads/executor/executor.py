@@ -73,6 +73,7 @@ class Executor:
         self.log: Logger = logger
         self.running_command_futures: list[Future] = []
         self.executor_pool: ThreadPoolExecutor | None = None
+        self._dottrace_active: bool = False
 
     # Scenario Setup
     def prepare_directories(self) -> None:
@@ -377,6 +378,7 @@ class Executor:
                 client_binary,
             ]
             stop_signal = "SIGINT"
+            self._dottrace_active = True
             self.log.info(
                 "dotTrace profiling enabled",
                 snapshot_output=str(dottrace_output_dir / trace_name),
@@ -1011,7 +1013,9 @@ class Executor:
             )
             execution_client_container.reload()
             execution_client_volumes = execution_client_container.attrs["Mounts"]
-            execution_client_container.stop(timeout=5)
+            execution_client_container.stop(
+                timeout=60 if self._dottrace_active else 5
+            )
             logs_file = (
                 self.config.outputs_dir
                 / f"{self.config.get_execution_client_name()}.log"
