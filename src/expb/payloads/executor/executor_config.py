@@ -1,4 +1,5 @@
 import os
+import re
 import time
 from pathlib import Path
 
@@ -48,7 +49,8 @@ class ExecutorConfig:
     ) -> None:
         # Executor Basic config
         self.scenario_name: str = scenario.name or "default"
-        self.executor_name: str = f"expb-executor-{self.scenario_name}"
+        safe_name = re.sub(r"[^a-zA-Z0-9_-]", "-", self.scenario_name)
+        self.executor_name: str = f"expb-executor-{safe_name}"
         self.test_id: str = f"{self.scenario_name}-{time.strftime('%Y%m%d-%H%M%S')}"
         self.startup_wait = scenario.startup_wait
         # Executor Client config
