@@ -50,6 +50,22 @@ def _get_governor_paths() -> list[str]:
     return sorted(glob.glob("/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor"))
 
 
+def _get_max_freq_paths() -> list[str]:
+    return sorted(glob.glob("/sys/devices/system/cpu/cpu*/cpufreq/scaling_max_freq"))
+
+
+def _get_base_frequency() -> str | None:
+    """Get the CPU base (non-turbo) frequency in kHz.
+
+    Tries base_frequency sysfs first, then falls back to cpuinfo_min_freq
+    (which on 'performance' governor systems often equals base clock).
+    """
+    base = _read_sys("/sys/devices/system/cpu/cpu0/cpufreq/base_frequency")
+    if base is not None:
+        return base
+    return _read_sys("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_min_freq")
+
+
 def _docker_run_cmd(client: DockerClient, cmd: str) -> str:
     """Run a shell command in a privileged container with host /sys mounted."""
     output: bytes = client.containers.run(
@@ -104,6 +120,30 @@ def _docker_get_governor_paths(client: DockerClient) -> list[str]:
     return []
 
 
+def _docker_get_max_freq_paths(client: DockerClient) -> list[str]:
+    try:
+        output = _docker_run_cmd(
+            client,
+            "ls -1 /sys/devices/system/cpu/cpu*/cpufreq/scaling_max_freq 2>/dev/null",
+        )
+        if output:
+            return sorted(output.splitlines())
+    except (APIError, DockerException):
+        pass
+    return []
+
+
+def _docker_get_base_frequency(client: DockerClient) -> str | None:
+    base = _docker_read_sys(
+        client, "/sys/devices/system/cpu/cpu0/cpufreq/base_frequency"
+    )
+    if base is not None:
+        return base
+    return _docker_read_sys(
+        client, "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_min_freq"
+    )
+
+
 class CpuStabilizer:
     """Disables turbo boost and sets the CPU governor to 'performance'.
 
@@ -122,10 +162,12 @@ class CpuStabilizer:
         self._docker_client = docker_client
         self._turbo_via_docker = False
         self._governors_via_docker = False
+        self._freq_cap_via_docker = False
         self._original_turbo: str | None = None
         self._turbo_path: str | None = None
         self._turbo_enable_value: str | None = None
         self._original_governors: dict[str, str] = {}
+        self._original_max_freqs: dict[str, str] = {}
 
     def _get_docker_client(self) -> DockerClient | None:
         if self._docker_client is not None:
@@ -141,6 +183,14 @@ class CpuStabilizer:
         self._apply_governors()
 
     def _apply_turbo(self) -> None:
+        if self._apply_turbo_sysfs():
+            return
+        if self._apply_turbo_freq_cap():
+            return
+        if self.log:
+            self.log.warning("No method available to disable turbo boost, skipping")
+
+    def _apply_turbo_sysfs(self) -> bool:
         turbo_info = _detect_turbo_path()
         if turbo_info:
             path, disable_val, enable_val = turbo_info
@@ -160,7 +210,7 @@ class CpuStabilizer:
                         "Failed to disable turbo boost (permission denied?)",
                         path=path,
                     )
-            return
+            return True
 
         client = self._get_docker_client()
         if client is not None:
@@ -184,10 +234,60 @@ class CpuStabilizer:
                             "Failed to disable turbo boost via Docker",
                             path=path,
                         )
-                return
+                return True
 
+        return False
+
+    def _apply_turbo_freq_cap(self) -> bool:
+        """Disable turbo by capping scaling_max_freq to base frequency."""
+        # Try local first
+        base_freq = _get_base_frequency()
+        freq_paths = _get_max_freq_paths()
+        if base_freq and freq_paths:
+            return self._cap_frequencies_local(base_freq, freq_paths)
+
+        # Try via Docker
+        client = self._get_docker_client()
+        if client is not None:
+            base_freq = _docker_get_base_frequency(client)
+            freq_paths = _docker_get_max_freq_paths(client)
+            if base_freq and freq_paths:
+                return self._cap_frequencies_docker(client, base_freq, freq_paths)
+
+        return False
+
+    def _cap_frequencies_local(
+        self, base_freq: str, freq_paths: list[str]
+    ) -> bool:
+        for fpath in freq_paths:
+            original = _read_sys(fpath)
+            if original is not None:
+                self._original_max_freqs[fpath] = original
+            _write_sys(fpath, base_freq)
         if self.log:
-            self.log.warning("Turbo boost sysfs path not found, skipping")
+            self.log.info(
+                "Turbo boost disabled via frequency cap",
+                base_freq_khz=base_freq,
+                cores=len(freq_paths),
+            )
+        return True
+
+    def _cap_frequencies_docker(
+        self, client: DockerClient, base_freq: str, freq_paths: list[str]
+    ) -> bool:
+        self._freq_cap_via_docker = True
+        for fpath in freq_paths:
+            original = _docker_read_sys(client, fpath)
+            if original is not None:
+                self._original_max_freqs[fpath] = original
+            _docker_write_sys(client, fpath, base_freq)
+        if self.log:
+            self.log.info(
+                "Turbo boost disabled via frequency cap (Docker)",
+                base_freq_khz=base_freq,
+                cores=len(freq_paths),
+            )
+        return True
 
     def _apply_governors(self) -> None:
         governor_paths = _get_governor_paths()
@@ -230,6 +330,7 @@ class CpuStabilizer:
 
     def restore(self) -> None:
         self._restore_turbo()
+        self._restore_freq_cap()
         self._restore_governors()
 
     def _restore_turbo(self) -> None:
@@ -254,6 +355,31 @@ class CpuStabilizer:
                         "Turbo boost restored",
                         value=self._original_turbo,
                     )
+
+    def _restore_freq_cap(self) -> None:
+        if not self._original_max_freqs:
+            return
+
+        if self._freq_cap_via_docker:
+            client = self._get_docker_client()
+            if client is not None:
+                for fpath, original in self._original_max_freqs.items():
+                    _docker_write_sys(client, fpath, original)
+                if self.log:
+                    self.log.info(
+                        "Max frequencies restored via Docker",
+                        cores=len(self._original_max_freqs),
+                    )
+            elif self.log:
+                self.log.warning("Docker not available, max frequencies not restored")
+        else:
+            for fpath, original in self._original_max_freqs.items():
+                _write_sys(fpath, original)
+            if self.log:
+                self.log.info(
+                    "Max frequencies restored",
+                    cores=len(self._original_max_freqs),
+                )
 
     def _restore_governors(self) -> None:
         if not self._original_governors:
