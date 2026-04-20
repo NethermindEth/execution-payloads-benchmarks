@@ -1,6 +1,8 @@
 import json
+import os
 import re
 import secrets
+import signal
 import subprocess
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -929,6 +931,14 @@ class Executor:
         options: ExecutorExecuteOptions = ExecutorExecuteOptions(),
     ) -> None:
         cpu_stabilizer: CpuStabilizer | None = None
+        prev_sigterm = None
+        if os.name != "nt":
+
+            def _sigterm_handler(signum: int, frame: object) -> None:
+                raise SystemExit(128 + signum)
+
+            prev_sigterm = signal.getsignal(signal.SIGTERM)
+            signal.signal(signal.SIGTERM, _sigterm_handler)
         try:
             self.log.info(
                 "Preparing scenario",
@@ -1148,6 +1158,8 @@ class Executor:
             )
             if cpu_stabilizer is not None:
                 cpu_stabilizer.restore()
+            if prev_sigterm is not None:
+                signal.signal(signal.SIGTERM, prev_sigterm)
 
     @classmethod
     def from_scenarios(
