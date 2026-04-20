@@ -87,9 +87,10 @@ class CpuStabilizer:
                         "Failed to disable turbo boost (permission denied?)",
                         path=path,
                     )
-        elif self._max_frequency_khz is not None:
+
+        if self._max_frequency_khz is not None:
             self._apply_freq_cap()
-        else:
+        elif turbo_info is None:
             if self.log:
                 self.log.warning(
                     "Turbo boost sysfs path not found and cpu_max_frequency_khz "
@@ -121,23 +122,27 @@ class CpuStabilizer:
                 self.log.warning("No scaling_max_freq paths found, skipping frequency cap")
             return
         cap = str(self._max_frequency_khz)
+        failed = 0
         for fpath in freq_paths:
             original = _read_sys(fpath)
             if original is not None:
                 self._original_max_freqs[fpath] = original
             if not _write_sys(fpath, cap):
-                if self.log:
-                    self.log.warning(
-                        "Failed to set scaling_max_freq (permission denied?)",
-                        path=fpath,
-                    )
-                return
-        if self.log:
-            self.log.info(
-                "Turbo boost disabled via frequency cap",
-                max_freq_khz=self._max_frequency_khz,
-                cores=len(freq_paths),
-            )
+                failed += 1
+        if failed:
+            if self.log:
+                self.log.warning(
+                    "Failed to set scaling_max_freq on some cores (permission denied?)",
+                    failed=failed,
+                    total=len(freq_paths),
+                )
+        if self._original_max_freqs:
+            if self.log:
+                self.log.info(
+                    "CPU frequency capped",
+                    max_freq_khz=self._max_frequency_khz,
+                    cores=len(freq_paths) - failed,
+                )
 
     def restore(self) -> None:
         if self._turbo_path and self._original_turbo is not None:
