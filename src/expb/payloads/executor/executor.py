@@ -31,7 +31,13 @@ from expb.payloads.executor.services.payload_server import (
     get_payload_server_script,
 )
 from expb.payloads.executor.services.snapshots import setup_snapshot_service
-from expb.payloads.utils.cpu import CpuStabilizer, SmtStabilizer, TimerStabilizer
+from expb.payloads.utils.cpu import (
+    CpuStabilizer,
+    IoStabilizer,
+    SmtStabilizer,
+    TimerStabilizer,
+    wait_for_quiescence,
+)
 from expb.payloads.utils.networking import limit_container_bandwidth
 
 PER_PAYLOAD_METRIC_LOG_PATTERN = re.compile(
@@ -1103,6 +1109,7 @@ class Executor:
         cpu_stabilizer: CpuStabilizer | None = None
         timer_stabilizer: TimerStabilizer | None = None
         smt_stabilizer: SmtStabilizer | None = None
+        io_stabilizer: IoStabilizer | None = None
         prev_sigterm = None
         if os.name != "nt":
 
@@ -1141,6 +1148,24 @@ class Executor:
                 self._log_system_diagnostics("System state after stabilizers applied")
 
             self.clean_system_cache()
+
+            # Steady-state controls (env-gated; default off == stock behaviour).
+            # These standardise the system state so every measured run starts from
+            # an identical low-activity baseline, reducing the global per-run offset
+            # that dominates run-to-run variance.
+            if os.name != "nt" and os.environ.get("EXPB_QUIESCE", "1") == "1":
+                wait_for_quiescence(
+                    logger=self.log,
+                    max_wait=float(os.environ.get("EXPB_QUIESCE_MAX_WAIT", "90")),
+                    busy_threshold_pct=float(
+                        os.environ.get("EXPB_QUIESCE_BUSY_PCT", "8")
+                    ),
+                    min_settle=float(os.environ.get("EXPB_QUIESCE_MIN_SETTLE", "5")),
+                )
+            if os.name != "nt" and os.environ.get("EXPB_DEFER_WRITEBACK", "1") == "1":
+                io_stabilizer = IoStabilizer(logger=self.log)
+                io_stabilizer.apply()
+
             self.prepare_directories()
             self.prepare_jwt_secret_file()
             if self.config.pull_images:
@@ -1345,6 +1370,8 @@ class Executor:
                 ),
                 print_per_payload_metrics_table=options.per_payload_metrics_logs,
             )
+            if io_stabilizer is not None:
+                io_stabilizer.restore()
             if smt_stabilizer is not None:
                 smt_stabilizer.restore()
             if cpu_stabilizer is not None:

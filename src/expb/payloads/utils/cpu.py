@@ -3,6 +3,7 @@ from __future__ import annotations
 import glob
 import os
 import subprocess
+import time
 from pathlib import Path
 
 from expb.logging import Logger
@@ -388,6 +389,169 @@ class SmtStabilizer:
         self._offlined_cpus = []
 
     def __enter__(self) -> SmtStabilizer:
+        self.apply()
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.restore()
+
+
+def _read_proc_stat_busy() -> tuple[int, int] | None:
+    """Read aggregate CPU jiffies from /proc/stat.
+
+    Returns (busy, total) where busy excludes idle and iowait. None on failure.
+    """
+    line = _read_sys("/proc/stat")
+    if not line:
+        return None
+    first = line.splitlines()[0]
+    parts = first.split()
+    if len(parts) < 5 or parts[0] != "cpu":
+        return None
+    try:
+        vals = [int(x) for x in parts[1:]]
+    except ValueError:
+        return None
+    # user nice system idle iowait irq softirq steal guest guest_nice
+    idle = vals[3] + (vals[4] if len(vals) > 4 else 0)
+    total = sum(vals)
+    return total - idle, total
+
+
+def measure_cpu_busy_pct(interval: float = 1.0) -> float | None:
+    """Sample system-wide CPU busy percentage over ``interval`` seconds."""
+    a = _read_proc_stat_busy()
+    if a is None:
+        return None
+    time.sleep(interval)
+    b = _read_proc_stat_busy()
+    if b is None:
+        return None
+    dbusy = b[0] - a[0]
+    dtotal = b[1] - a[1]
+    if dtotal <= 0:
+        return None
+    return 100.0 * dbusy / dtotal
+
+
+def wait_for_quiescence(
+    logger: Logger | None = None,
+    max_wait: float = 90.0,
+    busy_threshold_pct: float = 8.0,
+    stable_samples: int = 2,
+    sample_interval: float = 1.0,
+    min_settle: float = 5.0,
+) -> None:
+    """Block until the machine is quiet, so each measured run starts from an
+    identical low-activity baseline.
+
+    Polls system-wide CPU busy% in ``sample_interval`` windows and returns once
+    busy% stays below ``busy_threshold_pct`` for ``stable_samples`` consecutive
+    windows, or once ``max_wait`` seconds elapse. A fixed ``min_settle`` sleep is
+    always applied first to let teardown of the previous run drain. Unlike the
+    1-minute load average, this reacts within seconds, so it does not stall when
+    the load EWMA lags behind actual activity.
+    """
+    if min_settle > 0:
+        time.sleep(min_settle)
+    deadline = time.monotonic() + max_wait
+    consecutive = 0
+    last_busy: float | None = None
+    while time.monotonic() < deadline:
+        busy = measure_cpu_busy_pct(sample_interval)
+        if busy is None:
+            break
+        last_busy = busy
+        if busy <= busy_threshold_pct:
+            consecutive += 1
+            if consecutive >= stable_samples:
+                break
+        else:
+            consecutive = 0
+    if logger:
+        logger.info(
+            "Quiescence wait complete",
+            last_busy_pct=round(last_busy, 2) if last_busy is not None else None,
+            threshold_pct=busy_threshold_pct,
+            min_settle=min_settle,
+        )
+
+
+# vm sysctls controlling dirty-page writeback aggressiveness.
+_DIRTY_SYSCTLS = (
+    "vm.dirty_background_bytes",
+    "vm.dirty_bytes",
+    "vm.dirty_background_ratio",
+    "vm.dirty_ratio",
+    "vm.dirty_expire_centisecs",
+)
+
+
+def _sysctl_path(key: str) -> str:
+    return "/proc/sys/" + key.replace(".", "/")
+
+
+class IoStabilizer:
+    """Defers dirty-page writeback for the duration of a benchmark run.
+
+    The execution client writes hundreds of MB of state/SST data per run. With
+    default ``vm.dirty_*`` settings the kernel writes those pages back mid-run, and
+    the write-back competes for the single memory controller and shared L3 with the
+    client's own (read-heavy) block processing. The exact timing of that write-back
+    varies run-to-run, injecting a global per-run offset into processing times. By
+    raising the dirty thresholds above the per-run write volume, write-back is
+    deferred to the run boundary (the next ``sync`` in ``clean_system_cache``), so it
+    no longer perturbs the measured window. Reversible: restores original sysctls.
+    """
+
+    def __init__(
+        self,
+        logger: Logger | None = None,
+        dirty_bytes: int = 32 * 1024 * 1024 * 1024,
+        dirty_background_bytes: int = 16 * 1024 * 1024 * 1024,
+        dirty_expire_centisecs: int = 60000,
+    ):
+        self.log = logger
+        self._dirty_bytes = dirty_bytes
+        self._dirty_background_bytes = dirty_background_bytes
+        self._dirty_expire_centisecs = dirty_expire_centisecs
+        self._original: dict[str, str] = {}
+
+    def apply(self) -> None:
+        for key in _DIRTY_SYSCTLS:
+            original = _read_sys(_sysctl_path(key))
+            if original is not None:
+                self._original[key] = original
+        # Setting *_bytes to non-zero disables the corresponding *_ratio (kernel
+        # treats whichever was written last as authoritative), so write bytes.
+        desired = {
+            "vm.dirty_bytes": str(self._dirty_bytes),
+            "vm.dirty_background_bytes": str(self._dirty_background_bytes),
+            "vm.dirty_expire_centisecs": str(self._dirty_expire_centisecs),
+        }
+        applied = 0
+        for key, value in desired.items():
+            if _write_sys(_sysctl_path(key), value):
+                applied += 1
+        if self.log:
+            if applied:
+                self.log.info(
+                    "Dirty-page write-back deferred",
+                    dirty_bytes=self._dirty_bytes,
+                    dirty_background_bytes=self._dirty_background_bytes,
+                )
+            else:
+                self.log.warning(
+                    "Failed to defer dirty-page write-back (permission denied?)",
+                )
+
+    def restore(self) -> None:
+        for key, original in self._original.items():
+            _write_sys(_sysctl_path(key), original)
+        if self._original and self.log:
+            self.log.info("Dirty-page write-back settings restored")
+
+    def __enter__(self) -> IoStabilizer:
         self.apply()
         return self
 
