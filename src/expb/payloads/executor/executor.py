@@ -1119,6 +1119,7 @@ class Executor:
         timer_stabilizer: TimerStabilizer | None = None
         smt_stabilizer: SmtStabilizer | None = None
         io_stabilizer: IoStabilizer | None = None
+        aslr_original: str | None = None
         prev_sigterm = None
         if os.name != "nt":
 
@@ -1188,6 +1189,19 @@ class Executor:
             if os.name != "nt" and os.environ.get("EXPB_DEFER_WRITEBACK", "1") == "1":
                 io_stabilizer = IoStabilizer(logger=self.log)
                 io_stabilizer.apply()
+            # EXPB_DISABLE_ASLR removes per-process address-space randomization so the
+            # execution client's heap/code land at identical addresses every run,
+            # giving deterministic cache/TLB behaviour (a per-process variance source
+            # on a dedicated host). Reversible: original value restored in finally.
+            if os.name != "nt" and os.environ.get("EXPB_DISABLE_ASLR", "0") == "1":
+                try:
+                    aslr_path = "/proc/sys/kernel/randomize_va_space"
+                    aslr_original = Path(aslr_path).read_text().strip()
+                    Path(aslr_path).write_text("0")
+                    self.log.info("ASLR disabled", original=aslr_original)
+                except OSError as e:
+                    self.log.warning("Failed to disable ASLR", error=e)
+                    aslr_original = None
 
             self.prepare_directories()
             self.prepare_jwt_secret_file()
@@ -1395,6 +1409,14 @@ class Executor:
             )
             if io_stabilizer is not None:
                 io_stabilizer.restore()
+            if aslr_original is not None:
+                try:
+                    Path("/proc/sys/kernel/randomize_va_space").write_text(
+                        aslr_original
+                    )
+                    self.log.info("ASLR restored", value=aslr_original)
+                except OSError:
+                    pass
             if smt_stabilizer is not None:
                 smt_stabilizer.restore()
             if cpu_stabilizer is not None:
