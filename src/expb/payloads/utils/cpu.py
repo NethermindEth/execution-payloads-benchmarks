@@ -507,8 +507,8 @@ class IoStabilizer:
     def __init__(
         self,
         logger: Logger | None = None,
-        dirty_bytes: int = 32 * 1024 * 1024 * 1024,
-        dirty_background_bytes: int = 16 * 1024 * 1024 * 1024,
+        dirty_bytes: int = 8 * 1024 * 1024 * 1024,
+        dirty_background_bytes: int = 4 * 1024 * 1024 * 1024,
         dirty_expire_centisecs: int = 60000,
     ):
         self.log = logger
