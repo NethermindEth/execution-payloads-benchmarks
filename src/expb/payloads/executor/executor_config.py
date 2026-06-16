@@ -91,6 +91,18 @@ class ExecutorConfig:
         self.k6_warmup_wait: int = scenario.warmup_wait
         self.k6_payloads_skip: int | None = scenario.payloads_skip
         self.k6_payloads_warmup: int | None = scenario.payloads_warmup
+        # EXPB_WARMUP_OVERRIDE forces the number of unmeasured warmup payloads,
+        # without editing the scenario config. A larger warmup lets the OS page
+        # cache and client caches reach a warm steady state (after the per-run
+        # drop_caches) before measurement begins, so measured blocks are served
+        # from RAM rather than cold disk — reducing run-to-run variance driven by
+        # contention on cold-read I/O / memory bandwidth.
+        _warmup_override = os.environ.get("EXPB_WARMUP_OVERRIDE")
+        if _warmup_override:
+            try:
+                self.k6_payloads_warmup = int(_warmup_override)
+            except ValueError:
+                pass
 
         # Executor Directories
         ## Payloads and FCUs
