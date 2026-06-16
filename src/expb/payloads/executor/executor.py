@@ -1129,9 +1129,20 @@ class Executor:
             if options.stable_cpu:
                 timer_stabilizer = TimerStabilizer(logger=self.log)
                 timer_stabilizer.apply()
+                # EXPB_FREQ_CAP_KHZ env overrides the configured frequency cap.
+                # Capping below the sustainable all-core frequency pins the clock
+                # (AMD effective frequency can dip under sustained AVX512/membw load
+                # even with turbo disabled), removing frequency drift from the offset.
+                freq_cap = self.config.cpu_max_frequency_khz
+                _env_cap = os.environ.get("EXPB_FREQ_CAP_KHZ")
+                if _env_cap:
+                    try:
+                        freq_cap = int(_env_cap)
+                    except ValueError:
+                        pass
                 cpu_stabilizer = CpuStabilizer(
                     logger=self.log,
-                    max_frequency_khz=self.config.cpu_max_frequency_khz,
+                    max_frequency_khz=freq_cap,
                 )
                 cpu_stabilizer.apply()
                 smt_stabilizer = SmtStabilizer(
