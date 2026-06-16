@@ -189,6 +189,18 @@ class ExecutorConfig:
     def get_execution_client_env(self) -> dict[str, str]:
         env = self.execution_client.value.default_env.copy()
         env.update(self.execution_client_extra_env)
+        # EXPB_CLIENT_ENV (comma- or newline-separated KEY=VALUE) injects extra
+        # environment into the execution-client container without editing the
+        # scenario config, e.g. EXPB_CLIENT_ENV="DOTNET_gcConcurrent=0" to disable
+        # background GC for benchmark-variance experiments.
+        override = os.environ.get("EXPB_CLIENT_ENV", "")
+        if override:
+            for item in override.replace("\n", ",").split(","):
+                item = item.strip()
+                if not item or "=" not in item:
+                    continue
+                key, _, value = item.partition("=")
+                env[key.strip()] = value.strip()
         return env
 
     def get_execution_client_ports(self) -> dict[str, tuple[str, str]]:
