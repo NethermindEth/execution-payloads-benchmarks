@@ -1167,9 +1167,12 @@ class Executor:
             if os.name != "nt" and os.environ.get("EXPB_QUIESCE", "1") == "1":
                 wait_for_quiescence(
                     logger=self.log,
-                    max_wait=float(os.environ.get("EXPB_QUIESCE_MAX_WAIT", "90")),
+                    max_wait=float(os.environ.get("EXPB_QUIESCE_MAX_WAIT", "120")),
                     busy_threshold_pct=float(
                         os.environ.get("EXPB_QUIESCE_BUSY_PCT", "8")
+                    ),
+                    io_threshold_kb_s=float(
+                        os.environ.get("EXPB_QUIESCE_IO_KB_S", "3000")
                     ),
                     min_settle=float(os.environ.get("EXPB_QUIESCE_MIN_SETTLE", "5")),
                 )

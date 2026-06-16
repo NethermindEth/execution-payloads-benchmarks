@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import glob
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -434,35 +435,75 @@ def measure_cpu_busy_pct(interval: float = 1.0) -> float | None:
     return 100.0 * dbusy / dtotal
 
 
+_WHOLE_DISK_RE = re.compile(r"^(sd[a-z]+|vd[a-z]+|xvd[a-z]+|nvme\d+n\d+|mmcblk\d+)$")
+
+
+def _read_disk_sectors() -> int | None:
+    """Aggregate sectors (read+written) across whole physical block devices from
+    /proc/diskstats. Counts only whole disks (not partitions, loop, ram, dm) so
+    the rate is not inflated by partition double-counting."""
+    text = _read_sys("/proc/diskstats")
+    if not text:
+        return None
+    total = 0
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) < 14:
+            continue
+        if not _WHOLE_DISK_RE.match(parts[2]):
+            continue
+        try:
+            total += int(parts[5]) + int(parts[9])  # sectors read + written
+        except ValueError:
+            continue
+    return total
+
+
 def wait_for_quiescence(
     logger: Logger | None = None,
-    max_wait: float = 90.0,
+    max_wait: float = 120.0,
     busy_threshold_pct: float = 8.0,
+    io_threshold_kb_s: float = 3000.0,
     stable_samples: int = 2,
     sample_interval: float = 1.0,
     min_settle: float = 5.0,
 ) -> None:
-    """Block until the machine is quiet, so each measured run starts from an
-    identical low-activity baseline.
+    """Block until the machine is quiet on BOTH CPU and disk I/O, so each
+    measured run starts from an identical low-activity baseline.
 
-    Polls system-wide CPU busy% in ``sample_interval`` windows and returns once
-    busy% stays below ``busy_threshold_pct`` for ``stable_samples`` consecutive
-    windows, or once ``max_wait`` seconds elapse. A fixed ``min_settle`` sleep is
-    always applied first to let teardown of the previous run drain. Unlike the
-    1-minute load average, this reacts within seconds, so it does not stall when
-    the load EWMA lags behind actual activity.
+    Each window samples system-wide CPU busy% and disk-I/O rate together and
+    returns once both stay below their thresholds for ``stable_samples``
+    consecutive windows, or once ``max_wait`` elapses. The disk-I/O gate is the
+    key addition over a CPU-only check: on a shared host, background backup /
+    snapshot work is I/O-bound and barely registers on CPU, so a CPU-idle gate
+    lets a run start straight into an I/O/memory-bandwidth contention burst.
+    Waiting for disk idle lands each run in a quiet gap between such bursts.
+    A fixed ``min_settle`` sleep is applied first to let the previous run's
+    teardown drain.
     """
     if min_settle > 0:
         time.sleep(min_settle)
     deadline = time.monotonic() + max_wait
     consecutive = 0
     last_busy: float | None = None
+    last_io: float | None = None
     while time.monotonic() < deadline:
-        busy = measure_cpu_busy_pct(sample_interval)
-        if busy is None:
+        cpu_a = _read_proc_stat_busy()
+        io_a = _read_disk_sectors()
+        time.sleep(sample_interval)
+        cpu_b = _read_proc_stat_busy()
+        io_b = _read_disk_sectors()
+        if cpu_a is None or cpu_b is None:
             break
-        last_busy = busy
-        if busy <= busy_threshold_pct:
+        dtotal = cpu_b[1] - cpu_a[1]
+        busy = 100.0 * (cpu_b[0] - cpu_a[0]) / dtotal if dtotal > 0 else 0.0
+        io_kb_s = (
+            (io_b - io_a) * 0.5 / sample_interval
+            if io_a is not None and io_b is not None
+            else 0.0
+        )
+        last_busy, last_io = busy, io_kb_s
+        if busy <= busy_threshold_pct and io_kb_s <= io_threshold_kb_s:
             consecutive += 1
             if consecutive >= stable_samples:
                 break
@@ -472,7 +513,9 @@ def wait_for_quiescence(
         logger.info(
             "Quiescence wait complete",
             last_busy_pct=round(last_busy, 2) if last_busy is not None else None,
-            threshold_pct=busy_threshold_pct,
+            last_io_kb_s=round(last_io, 1) if last_io is not None else None,
+            busy_threshold_pct=busy_threshold_pct,
+            io_threshold_kb_s=io_threshold_kb_s,
             min_settle=min_settle,
         )
 
