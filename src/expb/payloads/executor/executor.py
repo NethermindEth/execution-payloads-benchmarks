@@ -641,8 +641,18 @@ class Executor:
 
         block_state_call = {"calls": calls}
 
+        # The warmup calls carry no `from` (sender recovery is skipped), so
+        # eth_simulateV1 runs them from the zero address, which has zero balance.
+        # Fund it generously so the sender-affordability check (senderBalance >=
+        # gas*price + value) can never fail with -38014 ("Insufficient funds"),
+        # which would otherwise reject the whole block and leave it un-warmed.
+        block_state_call["stateOverrides"] = {
+            "0x0000000000000000000000000000000000000000": {
+                "balance": "0xffffffffffffffffffffffffffffffff"
+            }
+        }
+
         # Only override fields that affect EVM execution, not ordering.
-        base_fee = execution_payload.get("baseFeePerGas")
         fee_recipient = execution_payload.get("feeRecipient")
         prev_randao = execution_payload.get("prevRandao")
 
@@ -650,14 +660,15 @@ class Executor:
         # Use a very high block gas limit so all calls execute even with
         # inflated per-call gas values (warmup doesn't need gas accuracy).
         block_overrides["gasLimit"] = "0xFFFFFFFFFFFF"
-        if base_fee:
-            block_overrides["baseFeePerGas"] = base_fee
+        # Zero the base fee: the zero-address sender has no balance, so any
+        # non-zero gas price makes gas*baseFeePerGas exceed it and fail with
+        # -38014. Warmup only needs the same state reads, not real fees.
+        block_overrides["baseFeePerGas"] = "0x0"
         if fee_recipient:
             block_overrides["feeRecipient"] = fee_recipient
         if prev_randao:
             block_overrides["prevRandao"] = prev_randao
-        if block_overrides:
-            block_state_call["blockOverrides"] = block_overrides
+        block_state_call["blockOverrides"] = block_overrides
 
         simulate_request = {
             "jsonrpc": "2.0",
