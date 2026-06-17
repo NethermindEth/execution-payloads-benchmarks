@@ -91,6 +91,15 @@ class ExecutorConfig:
         self.k6_warmup_wait: int = scenario.warmup_wait
         self.k6_payloads_skip: int | None = scenario.payloads_skip
         self.k6_payloads_warmup: int | None = scenario.payloads_warmup
+        # EXPB_WARMUP_OVERRIDE overrides the number of unmeasured warmup payloads
+        # without editing the scenario config. A larger warmup lets the OS page
+        # cache and client caches reach a warm steady state before measurement.
+        _warmup_override = os.environ.get("EXPB_WARMUP_OVERRIDE")
+        if _warmup_override:
+            try:
+                self.k6_payloads_warmup = int(_warmup_override)
+            except ValueError:
+                pass
 
         # Executor Directories
         ## Payloads and FCUs
@@ -189,6 +198,17 @@ class ExecutorConfig:
     def get_execution_client_env(self) -> dict[str, str]:
         env = self.execution_client.value.default_env.copy()
         env.update(self.execution_client_extra_env)
+        # EXPB_CLIENT_ENV (comma- or newline-separated KEY=VALUE) injects extra
+        # environment into the execution-client container without editing the
+        # scenario config, e.g. EXPB_CLIENT_ENV="DOTNET_gcServer=0".
+        override = os.environ.get("EXPB_CLIENT_ENV", "")
+        if override:
+            for item in override.replace("\n", ",").split(","):
+                item = item.strip()
+                if not item or "=" not in item:
+                    continue
+                key, _, value = item.partition("=")
+                env[key.strip()] = value.strip()
         return env
 
     def get_execution_client_ports(self) -> dict[str, tuple[str, str]]:
