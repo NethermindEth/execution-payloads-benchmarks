@@ -623,14 +623,17 @@ class Executor:
                 call = self._decode_raw_tx(raw_bytes)
                 if call.get("from") or call.get("to"):
                     # Use the tx's own gas limit (always >= intrinsic gas for a
-                    # valid tx), floored so tiny/undecoded values still execute.
-                    # The previous fixed 0x1000000 (16.7M) override UNDER-funded
-                    # large-calldata txs whose intrinsic gas exceeds it, making
-                    # eth_simulateV1 reject the whole block with -38013 and
-                    # leaving that block's reads un-warmed (a residual variance
-                    # source). For warmup we only need EVM state access.
+                    # valid tx), floored at 100M so tiny / undecoded-to-0 values
+                    # (e.g. blob / set-code tx types the decoder may not expose)
+                    # still clear the intrinsic-gas check. The previous fixed
+                    # 0x1000000 (16.7M) override UNDER-funded large-calldata txs
+                    # whose intrinsic gas exceeds it, making eth_simulateV1 reject
+                    # the whole block with -38013 and leaving that block's reads
+                    # un-warmed (a residual variance source). 100M is above any
+                    # single-tx intrinsic (bounded by the block gas limit) yet
+                    # caps runaway gas loops; warmup only needs EVM state access.
                     decoded_gas = int(call.get("gas", "0x0"), 16)
-                    call["gas"] = hex(max(decoded_gas, 0x1000000))
+                    call["gas"] = hex(max(decoded_gas, 0x5F5E100))
                     calls.append(call)
             except Exception:
                 continue
