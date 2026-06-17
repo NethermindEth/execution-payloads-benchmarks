@@ -1,3 +1,4 @@
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -17,11 +18,48 @@ class OverlaySnapshotService(SnapshotService):
         self.overlay_upper_dir = overlay_upper_dir
         self.overlay_merged_dir = overlay_merged_dir
 
+    def _cleanup_stale_mount(self) -> None:
+        """Remove any leftover overlay state before mounting.
+
+        A run that is killed (e.g. CI cancellation) before its delete_snapshot
+        teardown leaves the overlay still mounted and/or its ``volatile`` workdir
+        in a dirty state, which makes the next mount fail with "bad superblock"
+        (exit 32) — bricking the runner for subsequent runs. Unmount any stale
+        mount (lazy as a fallback for a busy mount) and delete the scratch
+        work/upper/merged dirs so create_snapshot is self-healing and idempotent.
+
+        Only the volatile scratch dirs are touched; the read-only lowerdir
+        snapshot is never referenced here, so snapshot data integrity is preserved.
+        """
+        merged = str(self.overlay_merged_dir.resolve())
+        if os.path.ismount(merged):
+            # List form (no shell) so the path is passed as a single argument.
+            for cmd in (["umount", merged], ["umount", "-l", merged]):
+                try:
+                    subprocess.run(cmd, check=True, capture_output=True)
+                    break
+                except subprocess.CalledProcessError:
+                    continue
+        for path in (
+            self.overlay_merged_dir,
+            self.overlay_upper_dir,
+            self.overlay_work_dir,
+        ):
+            if path.exists() and not os.path.ismount(str(path.resolve())):
+                try:
+                    shutil.rmtree(path)
+                except OSError:
+                    pass
+
     def create_snapshot(self, name: str, source: str) -> Path:
         # Convert source to absolute path
         source_path = Path(source).resolve()
         if not source_path.exists():
             raise ValueError(f"Snapshot source does not exist: {source_path}")
+
+        # Heal any leftover overlay state from a previously killed run so the
+        # mount below always starts from a clean slate (see _cleanup_stale_mount).
+        self._cleanup_stale_mount()
 
         # Ensure the overlay directories exist
         self.overlay_merged_dir.mkdir(
