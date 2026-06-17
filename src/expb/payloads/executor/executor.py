@@ -622,18 +622,16 @@ class Executor:
                 )
                 call = self._decode_raw_tx(raw_bytes)
                 if call.get("from") or call.get("to"):
-                    # Use the tx's own gas limit (always >= intrinsic gas for a
-                    # valid tx), floored at 100M so tiny / undecoded-to-0 values
-                    # (e.g. blob / set-code tx types the decoder may not expose)
-                    # still clear the intrinsic-gas check. The previous fixed
-                    # 0x1000000 (16.7M) override UNDER-funded large-calldata txs
-                    # whose intrinsic gas exceeds it, making eth_simulateV1 reject
-                    # the whole block with -38013 and leaving that block's reads
-                    # un-warmed (a residual variance source). 100M is above any
-                    # single-tx intrinsic (bounded by the block gas limit) yet
-                    # caps runaway gas loops; warmup only needs EVM state access.
-                    decoded_gas = int(call.get("gas", "0x0"), 16)
-                    call["gas"] = hex(max(decoded_gas, 0x5F5E100))
+                    # Keep the tx's own gas limit (decoded above). It is >=
+                    # intrinsic gas and affordable by the sender, since the tx was
+                    # valid on-chain. Overriding it to a large constant broke
+                    # warmup two ways: it exhausted eth_simulateV1's shared
+                    # per-request gas budget (JsonRpc.GasCap), starving later txs
+                    # with -38013, and inflated gas*price above the sender balance
+                    # (-38014) — both left blocks un-warmed (a residual variance
+                    # source). Fall back to a small limit only if the decoder did
+                    # not expose one. Dense blocks still need a raised JsonRpc.GasCap.
+                    call.setdefault("gas", "0x100000")
                     calls.append(call)
             except Exception:
                 continue
