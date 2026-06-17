@@ -51,9 +51,9 @@ def execute_scenarios(
         bool,
         typer.Option(
             "--evm-warmup/--no-evm-warmup",
-            help="Per-block EVM warmup via eth_simulateV1 before each measured payload. Warms contract code, state trie, and DB block cache.",
+            help="Per-block EVM warmup via eth_simulateV1 before each measured payload. Warms contract code, state trie, and DB block cache. Defaults ON in this branch.",
         ),
-    ] = False,
+    ] = True,
     drop_caches: Annotated[
         bool,
         typer.Option(
@@ -107,12 +107,14 @@ def execute_scenarios(
     """
     logger = setup_logging(log_level)
 
-    # EXPB_EVM_WARMUP=1 forces per-block eth_simulateV1 warmup without needing the
-    # --evm-warmup CLI flag, so the benchmark workflow can enable it via env. Warms
-    # the client's contract-code / state-trie / DB caches before each measured block
-    # so measured execution is served from warm caches (less DRAM/membw traffic).
-    if os.environ.get("EXPB_EVM_WARMUP", "0") == "1":
+    # Per-block eth_simulateV1 warmup defaults ON in this branch (warm, low-variance
+    # measurements without needing any Nethermind-side env passthrough). EXPB_EVM_WARMUP
+    # still explicitly overrides: "1" forces on, "0" forces off.
+    _evm_warmup_env = os.environ.get("EXPB_EVM_WARMUP")
+    if _evm_warmup_env == "1":
         evm_warmup = True
+    elif _evm_warmup_env == "0":
+        evm_warmup = False
 
     # Use default lock file if not specified
     lock_file_path = lock_file or get_default_lock_file()
