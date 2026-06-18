@@ -31,7 +31,13 @@ from expb.payloads.executor.services.payload_server import (
     get_payload_server_script,
 )
 from expb.payloads.executor.services.snapshots import setup_snapshot_service
-from expb.payloads.utils.cpu import CpuStabilizer, SmtStabilizer, TimerStabilizer
+from expb.payloads.utils.cpu import (
+    CpuStabilizer,
+    IoStabilizer,
+    SmtStabilizer,
+    TimerStabilizer,
+    wait_for_quiescence,
+)
 from expb.payloads.utils.networking import limit_container_bandwidth
 
 PER_PAYLOAD_METRIC_LOG_PATTERN = re.compile(
@@ -88,11 +94,13 @@ class Executor:
             raise e
 
     def clean_system_cache(self) -> None:
-        # EXPB_SKIP_DROP_CACHES keeps the OS page cache warm across runs so the
-        # read-only base-DB snapshot stays resident in RAM between runs instead
-        # of being re-read cold from disk each run. Useful for warm, lower-variance
-        # measurements; dropping all caches every run (the default) exposes
-        # cold-read service-time variance. The sync still runs to flush dirty pages.
+        # EXPB_SKIP_DROP_CACHES keeps the OS page cache warm across runs. The
+        # read-only base-DB snapshot (overlay lowerdir) then stays resident in
+        # RAM between runs instead of being re-read cold from disk each run, so
+        # block reads are served from RAM with deterministic latency. Dropping
+        # all caches every run maximally exposes cold-read service-time variance
+        # (disk scheduling/contention), which shows up as a uniform per-run
+        # offset in processing time — the dominant run-to-run variance term.
         skip_drop = os.environ.get("EXPB_SKIP_DROP_CACHES", "0") == "1"
         self.log.info("Cleaning system cache", drop_caches=not skip_drop)
         try:
@@ -614,10 +622,16 @@ class Executor:
                 )
                 call = self._decode_raw_tx(raw_bytes)
                 if call.get("from") or call.get("to"):
-                    # Force high gas to avoid "gas limit below intrinsic gas"
-                    # errors — for warmup we only need EVM state access, not
-                    # accurate gas accounting.
-                    call["gas"] = "0x1000000"
+                    # Keep the tx's own gas limit (decoded above). It is >=
+                    # intrinsic gas and affordable by the sender, since the tx was
+                    # valid on-chain. Overriding it to a large constant broke
+                    # warmup two ways: it exhausted eth_simulateV1's shared
+                    # per-request gas budget (JsonRpc.GasCap), starving later txs
+                    # with -38013, and inflated gas*price above the sender balance
+                    # (-38014) — both left blocks un-warmed (a residual variance
+                    # source). Fall back to a small limit only if the decoder did
+                    # not expose one. Dense blocks still need a raised JsonRpc.GasCap.
+                    call.setdefault("gas", "0x100000")
                     calls.append(call)
             except Exception:
                 continue
@@ -627,8 +641,18 @@ class Executor:
 
         block_state_call = {"calls": calls}
 
+        # The warmup calls carry no `from` (sender recovery is skipped), so
+        # eth_simulateV1 runs them from the zero address, which has zero balance.
+        # Fund it generously so the sender-affordability check (senderBalance >=
+        # gas*price + value) can never fail with -38014 ("Insufficient funds"),
+        # which would otherwise reject the whole block and leave it un-warmed.
+        block_state_call["stateOverrides"] = {
+            "0x0000000000000000000000000000000000000000": {
+                "balance": "0xffffffffffffffffffffffffffffffff"
+            }
+        }
+
         # Only override fields that affect EVM execution, not ordering.
-        base_fee = execution_payload.get("baseFeePerGas")
         fee_recipient = execution_payload.get("feeRecipient")
         prev_randao = execution_payload.get("prevRandao")
 
@@ -636,14 +660,15 @@ class Executor:
         # Use a very high block gas limit so all calls execute even with
         # inflated per-call gas values (warmup doesn't need gas accuracy).
         block_overrides["gasLimit"] = "0xFFFFFFFFFFFF"
-        if base_fee:
-            block_overrides["baseFeePerGas"] = base_fee
+        # Zero the base fee: the zero-address sender has no balance, so any
+        # non-zero gas price makes gas*baseFeePerGas exceed it and fail with
+        # -38014. Warmup only needs the same state reads, not real fees.
+        block_overrides["baseFeePerGas"] = "0x0"
         if fee_recipient:
             block_overrides["feeRecipient"] = fee_recipient
         if prev_randao:
             block_overrides["prevRandao"] = prev_randao
-        if block_overrides:
-            block_state_call["blockOverrides"] = block_overrides
+        block_state_call["blockOverrides"] = block_overrides
 
         simulate_request = {
             "jsonrpc": "2.0",
@@ -1110,6 +1135,8 @@ class Executor:
         cpu_stabilizer: CpuStabilizer | None = None
         timer_stabilizer: TimerStabilizer | None = None
         smt_stabilizer: SmtStabilizer | None = None
+        io_stabilizer: IoStabilizer | None = None
+        aslr_original: str | None = None
         prev_sigterm = None
         if os.name != "nt":
 
@@ -1129,9 +1156,20 @@ class Executor:
             if options.stable_cpu:
                 timer_stabilizer = TimerStabilizer(logger=self.log)
                 timer_stabilizer.apply()
+                # EXPB_FREQ_CAP_KHZ env overrides the configured frequency cap.
+                # Capping below the sustainable all-core frequency pins the clock
+                # (AMD effective frequency can dip under sustained AVX512/membw load
+                # even with turbo disabled), removing frequency drift from the offset.
+                freq_cap = self.config.cpu_max_frequency_khz
+                _env_cap = os.environ.get("EXPB_FREQ_CAP_KHZ")
+                if _env_cap:
+                    try:
+                        freq_cap = int(_env_cap)
+                    except ValueError:
+                        pass
                 cpu_stabilizer = CpuStabilizer(
                     logger=self.log,
-                    max_frequency_khz=self.config.cpu_max_frequency_khz,
+                    max_frequency_khz=freq_cap,
                 )
                 cpu_stabilizer.apply()
                 smt_stabilizer = SmtStabilizer(
@@ -1148,6 +1186,40 @@ class Executor:
                 self._log_system_diagnostics("System state after stabilizers applied")
 
             self.clean_system_cache()
+
+            # Steady-state controls (env-gated; default off == stock behaviour).
+            # These standardise the system state so every measured run starts from
+            # an identical low-activity baseline, reducing the global per-run offset
+            # that dominates run-to-run variance.
+            if os.name != "nt" and os.environ.get("EXPB_QUIESCE", "1") == "1":
+                wait_for_quiescence(
+                    logger=self.log,
+                    max_wait=float(os.environ.get("EXPB_QUIESCE_MAX_WAIT", "120")),
+                    busy_threshold_pct=float(
+                        os.environ.get("EXPB_QUIESCE_BUSY_PCT", "8")
+                    ),
+                    io_threshold_kb_s=float(
+                        os.environ.get("EXPB_QUIESCE_IO_KB_S", "3000")
+                    ),
+                    min_settle=float(os.environ.get("EXPB_QUIESCE_MIN_SETTLE", "5")),
+                )
+            if os.name != "nt" and os.environ.get("EXPB_DEFER_WRITEBACK", "1") == "1":
+                io_stabilizer = IoStabilizer(logger=self.log)
+                io_stabilizer.apply()
+            # EXPB_DISABLE_ASLR removes per-process address-space randomization so the
+            # execution client's heap/code land at identical addresses every run,
+            # giving deterministic cache/TLB behaviour (a per-process variance source
+            # on a dedicated host). Reversible: original value restored in finally.
+            if os.name != "nt" and os.environ.get("EXPB_DISABLE_ASLR", "0") == "1":
+                try:
+                    aslr_path = "/proc/sys/kernel/randomize_va_space"
+                    aslr_original = Path(aslr_path).read_text().strip()
+                    Path(aslr_path).write_text("0")
+                    self.log.info("ASLR disabled", original=aslr_original)
+                except OSError as e:
+                    self.log.warning("Failed to disable ASLR", error=e)
+                    aslr_original = None
+
             self.prepare_directories()
             self.prepare_jwt_secret_file()
             if self.config.pull_images:
@@ -1352,6 +1424,16 @@ class Executor:
                 ),
                 print_per_payload_metrics_table=options.per_payload_metrics_logs,
             )
+            if io_stabilizer is not None:
+                io_stabilizer.restore()
+            if aslr_original is not None:
+                try:
+                    Path("/proc/sys/kernel/randomize_va_space").write_text(
+                        aslr_original
+                    )
+                    self.log.info("ASLR restored", value=aslr_original)
+                except OSError:
+                    pass
             if smt_stabilizer is not None:
                 smt_stabilizer.restore()
             if cpu_stabilizer is not None:

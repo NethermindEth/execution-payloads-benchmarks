@@ -107,9 +107,10 @@ def execute_scenarios(
     """
     logger = setup_logging(log_level)
 
-    # Allow CI/automation to enable per-block EVM warmup via an environment
-    # variable, without changing the (often fixed) command-line invocation.
-    # Equivalent to passing --evm-warmup.
+    # EXPB_EVM_WARMUP=1 forces per-block eth_simulateV1 warmup without needing the
+    # --evm-warmup CLI flag, so the benchmark workflow can enable it via env. Warms
+    # the client's contract-code / state-trie / DB caches before each measured block
+    # so measured execution is served from warm caches (less DRAM/membw traffic).
     if os.environ.get("EXPB_EVM_WARMUP", "0") == "1":
         evm_warmup = True
 

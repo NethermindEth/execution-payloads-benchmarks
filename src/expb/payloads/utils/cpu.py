@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import glob
 import os
+import re
 import subprocess
+import time
 from pathlib import Path
 
 from expb.logging import Logger
@@ -388,6 +390,211 @@ class SmtStabilizer:
         self._offlined_cpus = []
 
     def __enter__(self) -> SmtStabilizer:
+        self.apply()
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.restore()
+
+
+def _read_proc_stat_busy() -> tuple[int, int] | None:
+    """Read aggregate CPU jiffies from /proc/stat.
+
+    Returns (busy, total) where busy excludes idle and iowait. None on failure.
+    """
+    line = _read_sys("/proc/stat")
+    if not line:
+        return None
+    first = line.splitlines()[0]
+    parts = first.split()
+    if len(parts) < 5 or parts[0] != "cpu":
+        return None
+    try:
+        vals = [int(x) for x in parts[1:]]
+    except ValueError:
+        return None
+    # user nice system idle iowait irq softirq steal guest guest_nice
+    idle = vals[3] + (vals[4] if len(vals) > 4 else 0)
+    total = sum(vals)
+    return total - idle, total
+
+
+def measure_cpu_busy_pct(interval: float = 1.0) -> float | None:
+    """Sample system-wide CPU busy percentage over ``interval`` seconds."""
+    a = _read_proc_stat_busy()
+    if a is None:
+        return None
+    time.sleep(interval)
+    b = _read_proc_stat_busy()
+    if b is None:
+        return None
+    dbusy = b[0] - a[0]
+    dtotal = b[1] - a[1]
+    if dtotal <= 0:
+        return None
+    return 100.0 * dbusy / dtotal
+
+
+_WHOLE_DISK_RE = re.compile(r"^(sd[a-z]+|vd[a-z]+|xvd[a-z]+|nvme\d+n\d+|mmcblk\d+)$")
+
+
+def _read_disk_sectors() -> int | None:
+    """Aggregate sectors (read+written) across whole physical block devices from
+    /proc/diskstats. Counts only whole disks (not partitions, loop, ram, dm) so
+    the rate is not inflated by partition double-counting."""
+    text = _read_sys("/proc/diskstats")
+    if not text:
+        return None
+    total = 0
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) < 14:
+            continue
+        if not _WHOLE_DISK_RE.match(parts[2]):
+            continue
+        try:
+            total += int(parts[5]) + int(parts[9])  # sectors read + written
+        except ValueError:
+            continue
+    return total
+
+
+def wait_for_quiescence(
+    logger: Logger | None = None,
+    max_wait: float = 120.0,
+    busy_threshold_pct: float = 8.0,
+    io_threshold_kb_s: float = 3000.0,
+    stable_samples: int = 2,
+    sample_interval: float = 1.0,
+    min_settle: float = 5.0,
+) -> None:
+    """Block until the machine is quiet on BOTH CPU and disk I/O, so each
+    measured run starts from an identical low-activity baseline.
+
+    Each window samples system-wide CPU busy% and disk-I/O rate together and
+    returns once both stay below their thresholds for ``stable_samples``
+    consecutive windows, or once ``max_wait`` elapses. The disk-I/O gate is the
+    key addition over a CPU-only check: on a shared host, background backup /
+    snapshot work is I/O-bound and barely registers on CPU, so a CPU-idle gate
+    lets a run start straight into an I/O/memory-bandwidth contention burst.
+    Waiting for disk idle lands each run in a quiet gap between such bursts.
+    A fixed ``min_settle`` sleep is applied first to let the previous run's
+    teardown drain.
+    """
+    if min_settle > 0:
+        time.sleep(min_settle)
+    deadline = time.monotonic() + max_wait
+    consecutive = 0
+    last_busy: float | None = None
+    last_io: float | None = None
+    while time.monotonic() < deadline:
+        cpu_a = _read_proc_stat_busy()
+        io_a = _read_disk_sectors()
+        time.sleep(sample_interval)
+        cpu_b = _read_proc_stat_busy()
+        io_b = _read_disk_sectors()
+        if cpu_a is None or cpu_b is None:
+            break
+        dtotal = cpu_b[1] - cpu_a[1]
+        busy = 100.0 * (cpu_b[0] - cpu_a[0]) / dtotal if dtotal > 0 else 0.0
+        io_kb_s = (
+            (io_b - io_a) * 0.5 / sample_interval
+            if io_a is not None and io_b is not None
+            else 0.0
+        )
+        last_busy, last_io = busy, io_kb_s
+        if busy <= busy_threshold_pct and io_kb_s <= io_threshold_kb_s:
+            consecutive += 1
+            if consecutive >= stable_samples:
+                break
+        else:
+            consecutive = 0
+    if logger:
+        logger.info(
+            "Quiescence wait complete",
+            last_busy_pct=round(last_busy, 2) if last_busy is not None else None,
+            last_io_kb_s=round(last_io, 1) if last_io is not None else None,
+            busy_threshold_pct=busy_threshold_pct,
+            io_threshold_kb_s=io_threshold_kb_s,
+            min_settle=min_settle,
+        )
+
+
+# vm sysctls controlling dirty-page writeback aggressiveness.
+_DIRTY_SYSCTLS = (
+    "vm.dirty_background_bytes",
+    "vm.dirty_bytes",
+    "vm.dirty_background_ratio",
+    "vm.dirty_ratio",
+    "vm.dirty_expire_centisecs",
+)
+
+
+def _sysctl_path(key: str) -> str:
+    return "/proc/sys/" + key.replace(".", "/")
+
+
+class IoStabilizer:
+    """Defers dirty-page writeback for the duration of a benchmark run.
+
+    The execution client writes hundreds of MB of state/SST data per run. With
+    default ``vm.dirty_*`` settings the kernel writes those pages back mid-run, and
+    the write-back competes for the single memory controller and shared L3 with the
+    client's own (read-heavy) block processing. The exact timing of that write-back
+    varies run-to-run, injecting a global per-run offset into processing times. By
+    raising the dirty thresholds above the per-run write volume, write-back is
+    deferred to the run boundary (the next ``sync`` in ``clean_system_cache``), so it
+    no longer perturbs the measured window. Reversible: restores original sysctls.
+    """
+
+    def __init__(
+        self,
+        logger: Logger | None = None,
+        dirty_bytes: int = 8 * 1024 * 1024 * 1024,
+        dirty_background_bytes: int = 4 * 1024 * 1024 * 1024,
+        dirty_expire_centisecs: int = 60000,
+    ):
+        self.log = logger
+        self._dirty_bytes = dirty_bytes
+        self._dirty_background_bytes = dirty_background_bytes
+        self._dirty_expire_centisecs = dirty_expire_centisecs
+        self._original: dict[str, str] = {}
+
+    def apply(self) -> None:
+        for key in _DIRTY_SYSCTLS:
+            original = _read_sys(_sysctl_path(key))
+            if original is not None:
+                self._original[key] = original
+        # Setting *_bytes to non-zero disables the corresponding *_ratio (kernel
+        # treats whichever was written last as authoritative), so write bytes.
+        desired = {
+            "vm.dirty_bytes": str(self._dirty_bytes),
+            "vm.dirty_background_bytes": str(self._dirty_background_bytes),
+            "vm.dirty_expire_centisecs": str(self._dirty_expire_centisecs),
+        }
+        applied = 0
+        for key, value in desired.items():
+            if _write_sys(_sysctl_path(key), value):
+                applied += 1
+        if self.log:
+            if applied:
+                self.log.info(
+                    "Dirty-page write-back deferred",
+                    dirty_bytes=self._dirty_bytes,
+                    dirty_background_bytes=self._dirty_background_bytes,
+                )
+            else:
+                self.log.warning(
+                    "Failed to defer dirty-page write-back (permission denied?)",
+                )
+
+    def restore(self) -> None:
+        for key, original in self._original.items():
+            _write_sys(_sysctl_path(key), original)
+        if self._original and self.log:
+            self.log.info("Dirty-page write-back settings restored")
+
+    def __enter__(self) -> IoStabilizer:
         self.apply()
         return self
 
