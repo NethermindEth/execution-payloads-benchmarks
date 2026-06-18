@@ -1,3 +1,4 @@
+import os
 import re
 from pathlib import Path
 
@@ -105,6 +106,12 @@ def execute_scenarios(
     Execute payloads for multiple execution clients using Grafana K6.
     """
     logger = setup_logging(log_level)
+
+    # Allow CI/automation to enable per-block EVM warmup via an environment
+    # variable, without changing the (often fixed) command-line invocation.
+    # Equivalent to passing --evm-warmup.
+    if os.environ.get("EXPB_EVM_WARMUP", "0") == "1":
+        evm_warmup = True
 
     # Use default lock file if not specified
     lock_file_path = lock_file or get_default_lock_file()

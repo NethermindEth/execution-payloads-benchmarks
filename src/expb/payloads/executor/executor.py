@@ -88,12 +88,19 @@ class Executor:
             raise e
 
     def clean_system_cache(self) -> None:
-        self.log.info("Cleaning system cache")
+        # EXPB_SKIP_DROP_CACHES keeps the OS page cache warm across runs so the
+        # read-only base-DB snapshot stays resident in RAM between runs instead
+        # of being re-read cold from disk each run. Useful for warm, lower-variance
+        # measurements; dropping all caches every run (the default) exposes
+        # cold-read service-time variance. The sync still runs to flush dirty pages.
+        skip_drop = os.environ.get("EXPB_SKIP_DROP_CACHES", "0") == "1"
+        self.log.info("Cleaning system cache", drop_caches=not skip_drop)
         try:
             subprocess.run("sync", check=True, shell=True)
-            with open("/proc/sys/vm/drop_caches", "w") as f:
-                f.write("3")
-            self.log.info("System cache cleaned")
+            if not skip_drop:
+                with open("/proc/sys/vm/drop_caches", "w") as f:
+                    f.write("3")
+            self.log.info("System cache cleaned", dropped=not skip_drop)
         except subprocess.CalledProcessError as e:
             self.log.error("Failed to clean system cache", error=e)
             raise e
