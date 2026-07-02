@@ -69,7 +69,7 @@ class Compressor:
         self._output_fcus_file = output_payloads_dir / "fcus.jsonl"
         if self._output_fcus_file.exists():
             raise ValueError(
-                f"Output forkchoice file already exists: {self._output_payloads_file}"
+                f"Output forkchoice file already exists: {self._output_fcus_file}"
             )
 
         # Nethermind docker
