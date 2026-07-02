@@ -37,4 +37,5 @@ packages = ["src/expb"]
 [dependency-groups]
 dev = [
     "hatchling>=1.29.0",
+    "pytest>=8.0.0",
 ]
