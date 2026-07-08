@@ -1,0 +1,24 @@
+{
+  "block_number": 25488822,
+  "slot": 14725117,
+  "requests_hash": "0x3a6e3886487a88df07bd5a33781fef778b6c6825f3d83983ec5dc7c3892e61d5",
+  "parent_beacon_block_root": "0x32f70dae5b4ea5081d08d4449e88753031925d9114588280dbbf715e56bb0cd7",
+  "beacon_parent_root": "0x32f70dae5b4ea5081d08d4449e88753031925d9114588280dbbf715e56bb0cd7",
+  "execution_requests": {
+    "deposits": [],
+    "withdrawals": [
+      {
+        "source_address": "0xa4093d37a8ce69fb156841b531b7b41219e5834c",
+        "validator_pubkey": "0x8a8b6c3820a247106f8fa8af47aaed902d5e939cf3d6d478bc3b1fead9a74326ed98c8b75a49ee12384ba03f7f22794a",
+        "amount": "0"
+      }
+    ],
+    "consolidations": []
+  },
+  "blob_kzg_commitments": [
+    "0x9557827927641f960c67f793cdcd577e1727bb654dd830853328273964e9f18e8dd127dea09d2e126026e76135fca245"
+  ],
+  "expected_blob_versioned_hashes": [
+    "0x019d1a44fc00003977e0bfe7d4590ab2410a1e576e1a2a24dd001158d10f9496"
+  ]
+}

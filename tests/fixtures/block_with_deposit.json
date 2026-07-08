@@ -1,0 +1,30 @@
+{
+  "block_number": 25488796,
+  "slot": 14725091,
+  "requests_hash": "0x9a5a870aadd216c94354e690d224cd3077293f908abb927dc99b4ebc6fe2df63",
+  "parent_beacon_block_root": "0x72a58fe1a2683cf0323a11cd97a07d4d2ace7620b14f8d39575df5fcef6d7b4f",
+  "beacon_parent_root": "0x72a58fe1a2683cf0323a11cd97a07d4d2ace7620b14f8d39575df5fcef6d7b4f",
+  "execution_requests": {
+    "deposits": [
+      {
+        "pubkey": "0xb084ae8321ed266a515b971ab5eaa835e4efbfb78529ac407797a90828fdcd4fb99e9b40421cd118a99a341cba8c0ce4",
+        "withdrawal_credentials": "0x0100000000000000000000009bd494dcf339c599d814e473441d468a3341e998",
+        "amount": "32000000000",
+        "signature": "0xb5a8c66f3fd90079db088bd61153b79c10f1822f01e0d585f4cefcc620ed41ac3f0649fe27d4fb4cda7756760f75f308160373dcf4dc6d7cb5971a00451be56c0c1cba15ffe3318121c7827da8959f752f3548373f4802c54a2ad7ec4014f810",
+        "index": "2511876"
+      }
+    ],
+    "withdrawals": [],
+    "consolidations": []
+  },
+  "blob_kzg_commitments": [
+    "0x9496be285ced033266f5863ec0a8f5072c5c7bfbeee91b07308d3d3bbd4b4fc5f5d22f57670e1d493df5af6d0248bc42",
+    "0xb33ade5fd138762fc3641fdd62aef3ea066bb0ca1d1e042199b1bce8dcb1e36e91ffa2045d2c95a9c59545cf4ecb5262",
+    "0x82b77c3149cae320c40512d56c22731796b2588c831e89997cc2b264e6072dcd2ee345862f98ac3451351b3641936eb8"
+  ],
+  "expected_blob_versioned_hashes": [
+    "0x01dae16130e88d431530049d236a7a8221d5a20d7724564e23c3574a774fa593",
+    "0x01e90af0e3c6a1c2940d876286e383f708cbd22b7e6dba469c3c9da35ff30040",
+    "0x01c8b73acc29afb97fe81d30c255b81e0daadb307796ead17c21532ee08ed3fd"
+  ]
+}

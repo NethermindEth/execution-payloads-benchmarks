@@ -13,7 +13,10 @@ app = typer.Typer()
 
 @app.command()
 def generate_payloads(
-    rpc_url: Annotated[str, typer.Option(help="Ethereum RPC URL")],
+    rpc_url: Annotated[str, typer.Option(help="Ethereum execution RPC URL")],
+    beacon_url: Annotated[
+        str, typer.Option(help="Ethereum consensus (Beacon) API URL")
+    ],
     network: Annotated[Network, typer.Option(help="Network")] = Network.MAINNET,
     start_block: Annotated[int, typer.Option(help="Start block")] = 0,
     end_block: Annotated[int | None, typer.Option(help="End block")] = None,
@@ -32,9 +35,6 @@ def generate_payloads(
     threads: Annotated[
         int, typer.Option(help="Number of threads for parallel processing")
     ] = 10,
-    workers: Annotated[
-        int, typer.Option(help="Number of workers per thread for parallel processing")
-    ] = 30,
 ) -> None:
     """
     Generate execution payloads requests for a given block range.
@@ -49,13 +49,13 @@ def generate_payloads(
 
     generator = Generator(
         rpc_url=rpc_url,
+        beacon_url=beacon_url,
         network=network,
         start_block=start_block,
         end_block=end_block,
         output_dir=output_dir,
         join_payloads=join_payloads,
         threads=threads,
-        workers=workers,
         logger=logger,
     )
 
@@ -63,6 +63,7 @@ def generate_payloads(
         "Starting payloads generation",
         network=network.value,
         rpc_url=rpc_url,
+        beacon_url=beacon_url,
         start_block=start_block,
         end_block=end_block,
     )

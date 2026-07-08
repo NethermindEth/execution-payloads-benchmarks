@@ -55,9 +55,16 @@ class NetworkConfig:
         self,
         name: str,
         forks_timestamps: dict[Fork, int],
+        genesis_time: int,
+        seconds_per_slot: int = 12,
     ):
         self.name = name
         self.forks_timestamps = forks_timestamps
+        self.genesis_time = genesis_time
+        self.seconds_per_slot = seconds_per_slot
+
+    def slot_from_timestamp(self, timestamp: int) -> int:
+        return (timestamp - self.genesis_time) // self.seconds_per_slot
 
     def get_fork_timestamp(self, fork: Fork) -> int:
         return self.forks_timestamps.get(fork, -1)
@@ -86,6 +93,8 @@ class Network(Enum):
             Fork.PRAGUE: 1746612311,
             Fork.OSAKA: 1764798551,
         },
+        genesis_time=1606824023,
+        seconds_per_slot=12,
     )
 
     @classmethod
