@@ -518,6 +518,18 @@ class ExecutorConfig:
             f"--env=EXPB_WARMUP_WAIT={self.k6_warmup_wait}",
             f"--env=testid={self.test_id}",
         ]
+        # Run-general tags: pass as output-level --tag so they attach to EVERY
+        # exported series, including k6's self-emitted engine metrics
+        # (k6_iterations_total, k6_vus, k6_data_*), which do not inherit the
+        # script-side options.tags / scenario tags in the Prometheus
+        # remote-write output.
+        run_tags = {
+            "testid": self.test_id,
+            "tool": "expb",
+            "client_type": self.execution_client.value.name,
+        }
+        for key, value in run_tags.items():
+            command.append(f"--tag={key}={value}")
         if self.exports is not None and self.exports.prometheus_rw is not None:
             command.append("--out=experimental-prometheus-rw")
             for tag in self.exports.prometheus_rw.tags:

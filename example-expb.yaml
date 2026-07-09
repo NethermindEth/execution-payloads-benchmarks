@@ -13,7 +13,7 @@ pull_images: true
 
 # Docker images to use (pin to specific versions for reproducible benchmarks)
 images:
-  k6: grafana/k6:1.6.1
+  k6: grafana/k6:2.1.0
   alloy: grafana/alloy:v1.13.2
   payload_server: python:3.12-slim
 
