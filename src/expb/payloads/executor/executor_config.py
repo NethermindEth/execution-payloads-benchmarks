@@ -517,6 +517,11 @@ class ExecutorConfig:
             f"--env=EXPB_PER_PAYLOAD_METRICS_LOGS={int(per_payload_metrics_logs)}",
             f"--env=EXPB_WARMUP_WAIT={self.k6_warmup_wait}",
             f"--env=testid={self.test_id}",
+            # Output-level tag so testid is attached to every exported series,
+            # including k6's self-emitted engine metrics (k6_iterations_total,
+            # k6_vus, k6_data_*) that do not inherit script-side options.tags in
+            # the Prometheus remote-write output.
+            f"--tag=testid={self.test_id}",
         ]
         if self.exports is not None and self.exports.prometheus_rw is not None:
             command.append("--out=experimental-prometheus-rw")
