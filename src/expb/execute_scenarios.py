@@ -89,6 +89,19 @@ def execute_scenarios(
             help="Enable JetBrains dotTrace profiling. Auto-installs if needed. Snapshot saved to outputs directory.",
         ),
     ] = False,
+    client_restart_retries: Annotated[
+        int,
+        typer.Option(
+            help="Auto-restart the execution client on failure up to N times (0 = never restart). Infrastructure containers (K6, Alloy, payload server) never restart.",
+        ),
+    ] = 0,
+    reap_orphans: Annotated[
+        bool,
+        typer.Option(
+            "--reap-orphans/--no-reap-orphans",
+            help="Before running, force-remove leftover containers/networks from prior runs of this same scenario (e.g. orphaned by a hard-killed run). Scoped to the scenario, so it won't disturb other runs on the machine. Off by default.",
+        ),
+    ] = False,
     use_lock: Annotated[
         bool,
         typer.Option(
@@ -186,6 +199,8 @@ def execute_scenarios(
                                 client_metrics=client_metrics,
                                 stable_cpu=stable_cpu,
                                 dottrace=dottrace,
+                                client_restart_retries=client_restart_retries,
+                                reap_orphans=reap_orphans,
                             ),
                         )
                 if not loop:

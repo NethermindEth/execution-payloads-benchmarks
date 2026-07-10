@@ -6,8 +6,11 @@ import secrets
 import signal
 import subprocess
 import time
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
+from types import FrameType
+from typing import Any
 
 import docker
 import docker.errors
@@ -38,6 +41,17 @@ PER_PAYLOAD_METRIC_LOG_PATTERN = re.compile(
     r'EXPB_PER_PAYLOAD_METRIC idx=(?P<idx>\d+) gas_used=(?P<gas_used>[^"\s]+) processing_ms=(?P<processing_ms>[^"\s]+)'
 )
 
+# Marker label applied to every container and network expb creates, so orphans
+# left behind by a hard-killed run can be found and force-removed regardless of
+# their (deterministic) names.
+EXPB_LABEL = "expb"
+NO_RESTART_POLICY = {"Name": "no"}
+
+# Matches the type signal.getsignal() returns / signal.signal() accepts.
+SignalHandler = (
+    Callable[[int, FrameType | None], Any] | int | signal.Handlers | None
+)
+
 
 class ExecutorExecuteOptions:
     def __init__(
@@ -51,6 +65,8 @@ class ExecutorExecuteOptions:
         client_metrics: bool = True,
         stable_cpu: bool = True,
         dottrace: bool = False,
+        client_restart_retries: int = 0,
+        reap_orphans: bool = False,
     ):
         self.collect_per_payload_metrics: bool = collect_per_payload_metrics
         self.print_logs_to_console: bool = print_logs_to_console
@@ -61,6 +77,8 @@ class ExecutorExecuteOptions:
         self.client_metrics: bool = client_metrics
         self.stable_cpu: bool = stable_cpu
         self.dottrace: bool = dottrace
+        self.client_restart_retries: int = client_restart_retries
+        self.reap_orphans: bool = reap_orphans
 
 
 class Executor:
@@ -323,12 +341,19 @@ class Executor:
         return path
 
 
+    def _container_labels(self) -> dict[str, str]:
+        return {
+            EXPB_LABEL: "true",
+            f"{EXPB_LABEL}.scenario": self.config.executor_name,
+        }
+
     def start_execution_client(
         self,
         container_network: Network | None = None,
         pyroscope: Pyroscope | None = None,
         stop_signal: str | None = None,
         dottrace: bool = False,
+        restart_retries: int = 0,
     ) -> Container:
         # Command
         execution_container_command = self.config.get_execution_client_command()
@@ -393,18 +418,24 @@ class Executor:
             )
 
         # Run execution container
+        restart_policy = (
+            {"Name": "on-failure", "MaximumRetryCount": restart_retries}
+            if restart_retries > 0
+            else NO_RESTART_POLICY
+        )
         cpu_count = self.config.resources.cpu if self.config.resources else None
         mem_limit = self.config.resources.mem if self.config.resources else None
         run_kwargs = dict(
             image=self.config.execution_client_image,
             name=self.config.get_execution_client_container_name(),
+            labels=self._container_labels(),
             volumes=execution_container_volumes,
             ports=execution_container_ports,
             command=execution_container_command,
             environment=execution_container_environment,
             network=container_network.name if container_network else None,
             detach=True,
-            restart_policy={"Name": "unless-stopped"},
+            restart_policy=restart_policy,
             cpu_count=cpu_count,  # Only works for windows
             nano_cpus=cpu_count * 10**9 if cpu_count else None,
             mem_limit=mem_limit,
@@ -513,11 +544,12 @@ class Executor:
         run_kwargs = dict(
             image=self.config.get_alloy_container_image(),
             name=self.config.get_alloy_container_name(),
+            labels=self._container_labels(),
             volumes=self.config.get_alloy_volumes(),
             ports=self.config.get_alloy_ports(),
             command=self.config.get_alloy_command(),
             detach=True,
-            restart_policy={"Name": "unless-stopped"},
+            restart_policy=NO_RESTART_POLICY,
             network=container_network.name if container_network else None,
         )
         if self.config.resources and self.config.resources.infra_cpuset is not None:
@@ -718,6 +750,7 @@ class Executor:
         run_kwargs = dict(
             image=self.config.get_payload_server_container_image(),
             name=self.config.get_payload_server_container_name(),
+            labels=self._container_labels(),
             volumes=self.config.get_payload_server_volumes(
                 drop_caches=drop_caches,
                 evm_warmup=evm_warmup,
@@ -731,7 +764,7 @@ class Executor:
             ),
             command=self.config.get_payload_server_command(),
             detach=True,
-            restart_policy={"Name": "unless-stopped"},
+            restart_policy=NO_RESTART_POLICY,
             network=container_network.name if container_network else None,
         )
         if self.config.resources and self.config.resources.infra_cpuset is not None:
@@ -813,12 +846,13 @@ class Executor:
         run_kwargs = dict(
             image=self.config.get_k6_container_image(),
             name=self.config.get_k6_container_name(),
+            labels=self._container_labels(),
             volumes=k6_container_volumes,
             environment=k6_container_environment,
             command=k6_container_command,
             network=container_network.name if container_network else None,
             detach=False,
-            restart_policy={"Name": "unless-stopped"},
+            restart_policy=NO_RESTART_POLICY,
             user=self.config.docker_user,
             group_add=self.config.docker_group_add,
             stop_signal="SIGINT",
@@ -973,6 +1007,122 @@ class Executor:
             self.log.error("Failed to delete snapshot", error=e)
             raise e
 
+    def _teardown_container(
+        self,
+        name: str,
+        log_file: Path | None = None,
+        stop_timeout: int = 3,
+        print_console: bool = False,
+        console_filter=None,
+        line_callback=None,
+    ) -> list[dict] | None:
+        """Stop, capture logs from, and force-remove a container by name.
+
+        Never raises: each step is isolated so a failure tearing down one
+        container can't leave later containers in the cleanup sequence orphaned.
+        Returns the container's mounts (for volume cleanup) or None.
+        """
+        try:
+            container = self.config.docker_client.containers.get(name)
+        except docker.errors.NotFound:
+            return None
+        except Exception as e:
+            self.log.error("Failed to get container", container=name, error=e)
+            return None
+
+        mounts: list[dict] | None = None
+        try:
+            container.reload()
+            mounts = container.attrs.get("Mounts")
+        except Exception as e:
+            self.log.error("Failed to read container attrs", container=name, error=e)
+
+        try:
+            container.stop(timeout=stop_timeout)
+        except docker.errors.NotFound:
+            return mounts
+        except Exception as e:
+            self.log.error("Failed to stop container", container=name, error=e)
+
+        if log_file is not None:
+            try:
+                self.log.info(
+                    "Saving container logs", container=name, logs_file=log_file
+                )
+                logs_stream = container.logs(
+                    stream=True, follow=False, stdout=True, stderr=True
+                )
+                with open(log_file, "wb") as f:
+                    for line in logs_stream:
+                        f.write(line)
+                        decoded_line = line.decode("utf-8", errors="replace")
+                        if line_callback is not None:
+                            line_callback(decoded_line)
+                        if print_console and (
+                            console_filter is None or not console_filter(decoded_line)
+                        ):
+                            print(decoded_line, end="")
+                logs_stream.close()
+            except Exception as e:
+                self.log.error(
+                    "Failed to save container logs", container=name, error=e
+                )
+
+        try:
+            container.remove(force=True)
+        except docker.errors.NotFound:
+            pass
+        except Exception as e:
+            self.log.error("Failed to remove container", container=name, error=e)
+
+        return mounts
+
+    def reap_orphan_containers(self) -> None:
+        """Force-remove leftover containers and networks from prior runs of *this*
+        scenario.
+
+        Scoped to this scenario's label (not all expb containers) so it never
+        disturbs other benchmark runs sharing the machine. Since container names
+        are deterministic per scenario, this clears exactly the orphans that would
+        otherwise cause name-collision failures when the scenario runs again.
+        """
+        label_filter = {"label": f"{EXPB_LABEL}.scenario={self.config.executor_name}"}
+        try:
+            orphans = self.config.docker_client.containers.list(
+                all=True, filters=label_filter
+            )
+        except Exception as e:
+            self.log.error("Failed to list orphan containers", error=e)
+            orphans = []
+        for container in orphans:
+            try:
+                container.remove(force=True)
+                self.log.info("Reaped orphan container", container=container.name)
+            except docker.errors.NotFound:
+                pass
+            except Exception as e:
+                self.log.error(
+                    "Failed to reap orphan container",
+                    container=container.name,
+                    error=e,
+                )
+
+        try:
+            networks = self.config.docker_client.networks.list(filters=label_filter)
+        except Exception as e:
+            self.log.error("Failed to list orphan networks", error=e)
+            networks = []
+        for network in networks:
+            try:
+                network.remove()
+                self.log.info("Reaped orphan network", network=network.name)
+            except docker.errors.NotFound:
+                pass
+            except Exception as e:
+                self.log.error(
+                    "Failed to reap orphan network", network=network.name, error=e
+                )
+
     def cleanup_scenario(
         self,
         print_logs_to_console: bool = False,
@@ -985,109 +1135,60 @@ class Executor:
 
         per_payload_metrics_rows: list[tuple[int, str, str]] = []
 
-        # Clean k6 container
-        try:
-            k6_container = self.config.docker_client.containers.get(
-                self.config.get_k6_container_name()
-            )
-            k6_container.stop(timeout=3)
-            logs_file = self.config.outputs_dir / "k6.log"
-            self.log.info("Saving k6 logs", logs_file=logs_file)
-            logs_stream = k6_container.logs(
-                stream=True,
-                follow=False,
-                stdout=True,
-                stderr=True,
-            )
-            with open(logs_file, "wb") as f:
-                for line in logs_stream:
-                    f.write(line)
-                    decoded_line = line.decode("utf-8", errors="replace")
-                    metric_row = self._parse_per_payload_metric_row(decoded_line)
-                    if metric_row is not None:
-                        per_payload_metrics_rows.append(metric_row)
-                    if print_logs_to_console:
-                        if not self._should_skip_console_k6_log_line(decoded_line):
-                            print(decoded_line, end="")
-            logs_stream.close()
-            k6_container.remove()
-        except docker.errors.NotFound:
-            pass
+        def _collect_k6_metric(decoded_line: str) -> None:
+            metric_row = self._parse_per_payload_metric_row(decoded_line)
+            if metric_row is not None:
+                per_payload_metrics_rows.append(metric_row)
 
-        # Clean execution client container
-        try:
-            execution_client_container = self.config.docker_client.containers.get(
-                self.config.get_execution_client_container_name()
-            )
-            execution_client_container.reload()
-            execution_client_volumes = execution_client_container.attrs["Mounts"]
-            execution_client_container.stop(
-                timeout=60 if self._dottrace_active else 5
-            )
-            logs_file = (
+        self._teardown_container(
+            self.config.get_k6_container_name(),
+            log_file=self.config.outputs_dir / "k6.log",
+            stop_timeout=3,
+            print_console=print_logs_to_console,
+            console_filter=self._should_skip_console_k6_log_line,
+            line_callback=_collect_k6_metric,
+        )
+
+        execution_client_mounts = self._teardown_container(
+            self.config.get_execution_client_container_name(),
+            log_file=(
                 self.config.outputs_dir
                 / f"{self.config.get_execution_client_name()}.log"
-            )
-            self.log.info("Saving execution client logs", logs_file=logs_file)
-            logs_stream = execution_client_container.logs(
-                stream=True,
-                follow=False,
-                stdout=True,
-                stderr=True,
-            )
-            with open(logs_file, "wb") as f:
-                for line in logs_stream:
-                    f.write(line)
-                    if print_logs_to_console:
-                        print(line.decode("utf-8"), end="")
-            logs_stream.close()
-            execution_client_container.remove()
-            # Clean execution client volumes
-            for volume in execution_client_volumes:
-                if volume["Type"] == "volume":
-                    self.config.docker_client.volumes.get(volume["Name"]).remove()
-                    self.log.debug(
-                        "Cleaned execution client volume", volume=volume["Name"]
-                    )
-        except docker.errors.NotFound:
-            pass
+            ),
+            stop_timeout=60 if self._dottrace_active else 5,
+            print_console=print_logs_to_console,
+        )
+        if execution_client_mounts:
+            for volume in execution_client_mounts:
+                if volume.get("Type") == "volume":
+                    try:
+                        self.config.docker_client.volumes.get(
+                            volume["Name"]
+                        ).remove()
+                        self.log.debug(
+                            "Cleaned execution client volume", volume=volume["Name"]
+                        )
+                    except Exception as e:
+                        self.log.error(
+                            "Failed to remove execution client volume",
+                            volume=volume.get("Name"),
+                            error=e,
+                        )
 
         if print_logs_to_console and print_per_payload_metrics_table:
             self._print_per_payload_metrics_table(per_payload_metrics_rows)
 
-        # Clean payload server container
-        try:
-            payload_server_container = self.config.docker_client.containers.get(
-                self.config.get_payload_server_container_name()
-            )
-            payload_server_container.stop(timeout=3)
-            logs_file = self.config.outputs_dir / "payload-server.log"
-            self.log.info("Saving payload server logs", logs_file=logs_file)
-            logs_stream = payload_server_container.logs(
-                stream=True,
-                follow=False,
-                stdout=True,
-                stderr=True,
-            )
-            with open(logs_file, "wb") as f:
-                for line in logs_stream:
-                    f.write(line)
-                    if print_logs_to_console:
-                        print(line.decode("utf-8", errors="replace"), end="")
-            logs_stream.close()
-            payload_server_container.remove()
-        except docker.errors.NotFound:
-            pass
+        self._teardown_container(
+            self.config.get_payload_server_container_name(),
+            log_file=self.config.outputs_dir / "payload-server.log",
+            stop_timeout=3,
+            print_console=print_logs_to_console,
+        )
 
-        # Clean alloy container
-        try:
-            alloy_container = self.config.docker_client.containers.get(
-                self.config.get_alloy_container_name()
-            )
-            alloy_container.stop(timeout=3)
-            alloy_container.remove()
-        except docker.errors.NotFound:
-            pass
+        self._teardown_container(
+            self.config.get_alloy_container_name(),
+            stop_timeout=3,
+        )
 
         # Clean docker network
         try:
@@ -1097,6 +1198,8 @@ class Executor:
             containers_network.remove()
         except docker.errors.NotFound:
             pass
+        except Exception as e:
+            self.log.error("Failed to remove docker network", error=e)
 
         # Clean overlay directories
         self.remove_directories()
@@ -1110,14 +1213,15 @@ class Executor:
         cpu_stabilizer: CpuStabilizer | None = None
         timer_stabilizer: TimerStabilizer | None = None
         smt_stabilizer: SmtStabilizer | None = None
-        prev_sigterm = None
-        if os.name != "nt":
+        prev_handlers: dict[int, SignalHandler] = {}
+        managed_signals = (signal.SIGTERM, signal.SIGINT) if os.name != "nt" else ()
 
-            def _sigterm_handler(signum: int, frame: object) -> None:
-                raise SystemExit(128 + signum)
+        def _termination_handler(signum: int, frame: FrameType | None) -> None:
+            raise SystemExit(128 + signum)
 
-            prev_sigterm = signal.getsignal(signal.SIGTERM)
-            signal.signal(signal.SIGTERM, _sigterm_handler)
+        for sig in managed_signals:
+            prev_handlers[sig] = signal.getsignal(sig)
+            signal.signal(sig, _termination_handler)
         try:
             self.log.info(
                 "Preparing scenario",
@@ -1147,6 +1251,13 @@ class Executor:
                 smt_stabilizer.apply()
                 self._log_system_diagnostics("System state after stabilizers applied")
 
+            if options.reap_orphans:
+                self.log.info(
+                    "Reaping orphan containers from prior runs of this scenario",
+                    scenario=self.config.executor_name,
+                )
+                self.reap_orphan_containers()
+
             self.clean_system_cache()
             self.prepare_directories()
             self.prepare_jwt_secret_file()
@@ -1157,6 +1268,7 @@ class Executor:
             containers_network = self.config.docker_client.networks.create(
                 name=self.config.get_containers_network_name(),
                 driver="bridge",
+                labels=self._container_labels(),
             )
 
             alloy_pyroscope: Pyroscope | None = None
@@ -1213,6 +1325,7 @@ class Executor:
                 pyroscope=alloy_pyroscope,
                 stop_signal=stop_signal,
                 dottrace=dottrace_enabled,
+                restart_retries=options.client_restart_retries,
             )
 
             # Get execution client RPC URL immediately (container IP is
@@ -1346,20 +1459,27 @@ class Executor:
             self.log.error("Failed to execute scenario", error=e)
             raise e
         finally:
-            self.cleanup_scenario(
-                print_logs_to_console=(
-                    options.print_logs_to_console or options.per_payload_metrics_logs
-                ),
-                print_per_payload_metrics_table=options.per_payload_metrics_logs,
-            )
-            if smt_stabilizer is not None:
-                smt_stabilizer.restore()
-            if cpu_stabilizer is not None:
-                cpu_stabilizer.restore()
-            if timer_stabilizer is not None:
-                timer_stabilizer.restore()
-            if prev_sigterm is not None:
-                signal.signal(signal.SIGTERM, prev_sigterm)
+            # Ignore termination signals while tearing down so a second
+            # cancellation signal can't interrupt cleanup and orphan containers.
+            for sig in managed_signals:
+                signal.signal(sig, signal.SIG_IGN)
+            try:
+                self.cleanup_scenario(
+                    print_logs_to_console=(
+                        options.print_logs_to_console
+                        or options.per_payload_metrics_logs
+                    ),
+                    print_per_payload_metrics_table=options.per_payload_metrics_logs,
+                )
+                if smt_stabilizer is not None:
+                    smt_stabilizer.restore()
+                if cpu_stabilizer is not None:
+                    cpu_stabilizer.restore()
+                if timer_stabilizer is not None:
+                    timer_stabilizer.restore()
+            finally:
+                for sig, handler in prev_handlers.items():
+                    signal.signal(sig, handler)
 
     @classmethod
     def from_scenarios(
