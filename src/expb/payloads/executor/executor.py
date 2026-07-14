@@ -376,12 +376,20 @@ class Executor:
                 raise ValueError(
                     "dotTrace requires entrypoint to be set on the client config"
                 )
+            # Per-block snapshots are driven by MeasureProfiler API calls from inside the
+            # client (NETHERMIND_PROFILE_BLOCKS); dotTrace ignores those calls unless the
+            # session runs in API mode. Whole-run profiling must NOT set --use-api, as API
+            # mode suppresses the automatic collection window.
+            use_api = bool(
+                (execution_container_environment or {}).get("NETHERMIND_PROFILE_BLOCKS")
+            )
             dottrace_entrypoint = [
                 f"{self._DOTTRACE_CONTAINER_PATH}/dottrace",
                 "start",
                 "--framework=NetCore",
                 f"--save-to={snapshot_file}",
                 "--propagate-exit-code",
+                *(["--use-api"] if use_api else []),
                 "--",
                 client_binary,
             ]
