@@ -1,3 +1,4 @@
+import os
 import re
 from pathlib import Path
 
@@ -46,6 +47,48 @@ def execute_scenarios(
             help="Print K6 and Execution Client logs to console.",
         ),
     ] = False,
+    evm_warmup: Annotated[
+        bool,
+        typer.Option(
+            "--evm-warmup/--no-evm-warmup",
+            help="Per-block EVM warmup via eth_simulateV1 before each measured payload. Warms contract code, state trie, and DB block cache.",
+        ),
+    ] = False,
+    drop_caches: Annotated[
+        bool,
+        typer.Option(
+            "--drop-caches/--no-drop-caches",
+            help="Drop OS page cache before each measured payload for cold storage reads.",
+        ),
+    ] = False,
+    drop_caches_sync: Annotated[
+        bool,
+        typer.Option(
+            "--drop-caches-sync/--no-drop-caches-sync",
+            help="Run sync before dropping caches to flush dirty pages. More deterministic but slower.",
+        ),
+    ] = True,
+    client_metrics: Annotated[
+        bool,
+        typer.Option(
+            "--client-metrics/--no-client-metrics",
+            help="Capture server-side processing time between blocks via the client's SSE data feed (e.g. Nethermind /data/events).",
+        ),
+    ] = True,
+    stable_cpu: Annotated[
+        bool,
+        typer.Option(
+            "--stable-cpu/--no-stable-cpu",
+            help="Disable turbo boost and set CPU governor to 'performance' for consistent benchmark results across runs.",
+        ),
+    ] = True,
+    dottrace: Annotated[
+        bool,
+        typer.Option(
+            "--dottrace/--no-dottrace",
+            help="Enable JetBrains dotTrace profiling. Auto-installs if needed. Snapshot saved to outputs directory.",
+        ),
+    ] = False,
     use_lock: Annotated[
         bool,
         typer.Option(
@@ -63,6 +106,12 @@ def execute_scenarios(
     Execute payloads for multiple execution clients using Grafana K6.
     """
     logger = setup_logging(log_level)
+
+    # Allow CI/automation to enable per-block EVM warmup via an environment
+    # variable, without changing the (often fixed) command-line invocation.
+    # Equivalent to passing --evm-warmup.
+    if os.environ.get("EXPB_EVM_WARMUP", "0") == "1":
+        evm_warmup = True
 
     # Use default lock file if not specified
     lock_file_path = lock_file or get_default_lock_file()
@@ -131,6 +180,12 @@ def execute_scenarios(
                                 print_logs_to_console=print_logs,
                                 collect_per_payload_metrics=per_payload_metrics,
                                 per_payload_metrics_logs=per_payload_metrics_logs,
+                                evm_warmup=evm_warmup,
+                                drop_caches=drop_caches,
+                                drop_caches_sync=drop_caches_sync,
+                                client_metrics=client_metrics,
+                                stable_cpu=stable_cpu,
+                                dottrace=dottrace,
                             ),
                         )
                 if not loop:

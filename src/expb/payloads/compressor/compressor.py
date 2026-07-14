@@ -69,7 +69,7 @@ class Compressor:
         self._output_fcus_file = output_payloads_dir / "fcus.jsonl"
         if self._output_fcus_file.exists():
             raise ValueError(
-                f"Output forkchoice file already exists: {self._output_payloads_file}"
+                f"Output forkchoice file already exists: {self._output_fcus_file}"
             )
 
         # Nethermind docker
@@ -154,19 +154,21 @@ class Compressor:
         try:
             subprocess.run(umount_command, check=True, shell=True)
         except subprocess.CalledProcessError as e:
-            self._logger.error("Failed to umount overlay", error=e)
-            raise e
-        try:
-            paths_to_remove = [
-                self._overlay_upper_dir.resolve(),
-                self._overlay_work_dir.resolve(),
-                self._overlay_merged_dir.resolve(),
-            ]
-            for path in paths_to_remove:
-                shutil.rmtree(path)
-        except Exception as e:
-            self._logger.error("Failed to cleanup work directory", error=e)
-            raise e
+            self._logger.error("Failed to umount overlay, continuing cleanup", error=e)
+
+        paths_to_remove = [
+            self._overlay_upper_dir.resolve(),
+            self._overlay_work_dir.resolve(),
+            self._overlay_merged_dir.resolve(),
+        ]
+        for path in paths_to_remove:
+            if path.exists():
+                try:
+                    shutil.rmtree(path)
+                except Exception as e:
+                    self._logger.error(
+                        "Failed to cleanup directory", path=str(path), error=e
+                    )
 
     def pull_docker_images(self) -> None:
         self._logger.info("Pulling Nethermind docker image")

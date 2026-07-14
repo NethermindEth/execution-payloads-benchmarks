@@ -19,6 +19,28 @@ uv tool install --from git+https://github.com/NethermindEth/execution-payloads-b
 2. Edit the configuration file.
 3. Execute one or multiple scenarios.
 
+### Generating Payloads
+
+Benchmarks replay the `engine_newPayload` / `engine_forkchoiceUpdated` requests that a consensus
+client sends to an execution client. Generate them for a block range from a Consensus (Beacon) API
+and an execution RPC:
+
+```bash
+expb generate-payloads \
+  --rpc-url http://localhost:8545 \
+  --beacon-url http://localhost:5052 \
+  --network mainnet \
+  --start-block 21000000 \
+  --end-block 21001000 \
+  --output-dir ./payloads
+```
+
+The requests are sourced from the beacon block, so the generated payloads, execution requests
+(EIP-7685), blob versioned hashes and parent beacon block root match exactly what the consensus
+client sends the execution client — across all forks through Osaka. Both endpoints must serve the
+requested range (an archive node is required for older ranges). This produces `payloads.jsonl` and
+`fcus.jsonl`, consumed by scenario execution and by `send-payloads`.
+
 ### Scenarios Execution
 
 #### Single Scenario

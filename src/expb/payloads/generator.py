@@ -1,12 +1,13 @@
-import asyncio
+import hashlib
 import json
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import requests
 from web3 import Web3
-from web3.types import BlockData, HexBytes, TxData
+from web3.types import BlockData
 
 from expb.configs.networks import Fork, Network
 from expb.logging import Logger
@@ -17,21 +18,22 @@ class Generator:
         self,
         network: Network,
         rpc_url: str,
+        beacon_url: str,
         start_block: int,
         output_dir: Path,
         end_block: int | None = None,  # if None, will use the latest block
         join_payloads: bool = True,
         threads: int = 10,
-        workers: int = 30,
         logger=Logger(),
     ):
         self.w3 = Web3(Web3.HTTPProvider(rpc_url))
+        self.beacon_url = beacon_url.rstrip("/")
+        self.beacon = requests.Session()
         self.network = network.value
         self.start_block = start_block
         self.output_dir = output_dir
         self.join_payloads = join_payloads
         self.threads = threads
-        self.workers = workers
         self.log = logger
         if end_block is None:
             self.end_block = self.w3.eth.get_block("latest")["number"]
@@ -68,169 +70,132 @@ class Generator:
         else:
             raise ValueError(f"Unknown fork: {fork}")
 
-    def compose_payload_v1(
-        self,
-        block: BlockData,
-        transactions: list[str],
-    ) -> dict:
-        return {
-            "parentHash": block["parentHash"].to_0x_hex(),
-            "feeRecipient": block["miner"],
-            "stateRoot": block["stateRoot"].to_0x_hex(),
-            "receiptsRoot": block["receiptsRoot"].to_0x_hex(),
-            "logsBloom": block["logsBloom"].to_0x_hex(),
-            "prevRandao": block["mixHash"].to_0x_hex(),
-            "blockNumber": hex(block["number"]),
-            "gasLimit": hex(block["gasLimit"]),
-            "gasUsed": hex(block["gasUsed"]),
-            "timestamp": hex(block["timestamp"]),
-            "extraData": block["extraData"].to_0x_hex(),
-            "baseFeePerGas": hex(block["baseFeePerGas"]),
-            "blockHash": block["hash"].to_0x_hex(),
-            "transactions": transactions,
-        }
-
-    def compose_payload_v2(
-        self,
-        block: BlockData,
-        transactions: list[str],
-        withdrawals: list[dict],
-    ) -> dict:
-        payload = self.compose_payload_v1(block, transactions)
-        payload.update(
-            {
-                "withdrawals": withdrawals,
-            }
+    def get_beacon_block(self, slot: int) -> dict:
+        resp = self.beacon.get(
+            f"{self.beacon_url}/eth/v2/beacon/blocks/{slot}",
+            timeout=120,
         )
-        return payload
+        if resp.status_code == 404:
+            raise ValueError(f"No beacon block found for slot {slot}")
+        resp.raise_for_status()
+        return resp.json()["data"]["message"]
 
-    def compose_payload_v3(
-        self,
-        block: BlockData,
-        transactions: list[str],
-        withdrawals: list[dict],
-    ) -> dict:
-        payload = self.compose_payload_v2(block, transactions, withdrawals)
-        block["parentBeaconBlockRoot"]
-        payload.update(
+    @staticmethod
+    def _to_hex(dec_str: str | int) -> str:
+        return hex(int(dec_str))
+
+    @staticmethod
+    def _to_bytes(hex_str: str) -> bytes:
+        return bytes.fromhex(hex_str[2:] if hex_str.startswith("0x") else hex_str)
+
+    @staticmethod
+    def _u64_le(dec_str: str | int) -> bytes:
+        return int(dec_str).to_bytes(8, "little")
+
+    def map_withdrawals(self, withdrawals: list[dict]) -> list[dict]:
+        return [
             {
-                "blobGasUsed": (
-                    hex(block["blobGasUsed"])
-                    if hasattr(block, "blobGasUsed")
-                    else "0x0"
-                ),
-                "excessBlobGas": (
-                    hex(block["excessBlobGas"])
-                    if hasattr(block, "excessBlobGas")
-                    else "0x0"
-                ),
+                "index": self._to_hex(wd["index"]),
+                "validatorIndex": self._to_hex(wd["validator_index"]),
+                "address": wd["address"],
+                "amount": self._to_hex(wd["amount"]),
             }
-        )
-        return payload
-
-    def compose_payload_v4(
-        self,
-        block: BlockData,
-        transactions: list[str],
-        withdrawals: list[dict],
-    ) -> dict:
-        payload = self.compose_payload_v3(block, transactions, withdrawals)
-        # payload.update({})
-        return payload
-
-    async def get_raw_tx(
-        self,
-        tx_semaphore: asyncio.Semaphore,
-        tx_hash: str,
-    ) -> str:
-        async with tx_semaphore:
-            raw = self.w3.eth.get_raw_transaction(tx_hash)  # ty:ignore[invalid-argument-type]
-        return self.w3.to_hex(raw)
-
-    async def get_block_transactions(
-        self,
-        block: BlockData,
-    ) -> list[str]:
-        tasks = []
-        tx_semaphore = asyncio.Semaphore(self.workers)
-        tx_hashes = [
-            tx.to_0x_hex() if isinstance(tx, HexBytes) else tx["hash"].to_0x_hex()
-            for tx in block["transactions"]
+            for wd in withdrawals
         ]
-        for tx_hash in tx_hashes:
-            tx_task = self.get_raw_tx(tx_semaphore, tx_hash)
-            tasks.append(tx_task)
-        transactions = await asyncio.gather(*tasks)
-        return transactions
 
-    def get_block_withdrawals(self, block: BlockData) -> list[dict]:
-        if hasattr(block, "withdrawals") and block["withdrawals"] is not None:
-            return [
-                {
-                    "index": hex(wd["index"]),
-                    "validatorIndex": hex(wd["validatorIndex"]),
-                    "address": wd["address"],
-                    "amount": hex(wd["amount"]),
-                }
-                for wd in block["withdrawals"]
-            ]
-        return []
+    def compose_payload(self, ep: dict, version: int) -> dict:
+        payload = {
+            "parentHash": ep["parent_hash"],
+            "feeRecipient": ep["fee_recipient"],
+            "stateRoot": ep["state_root"],
+            "receiptsRoot": ep["receipts_root"],
+            "logsBloom": ep["logs_bloom"],
+            "prevRandao": ep["prev_randao"],
+            "blockNumber": self._to_hex(ep["block_number"]),
+            "gasLimit": self._to_hex(ep["gas_limit"]),
+            "gasUsed": self._to_hex(ep["gas_used"]),
+            "timestamp": self._to_hex(ep["timestamp"]),
+            "extraData": ep["extra_data"],
+            "baseFeePerGas": self._to_hex(ep["base_fee_per_gas"]),
+            "blockHash": ep["block_hash"],
+            "transactions": ep["transactions"],
+        }
+        if version >= 2:
+            payload["withdrawals"] = self.map_withdrawals(ep.get("withdrawals", []))
+        if version >= 3:
+            payload["blobGasUsed"] = self._to_hex(ep["blob_gas_used"])
+            payload["excessBlobGas"] = self._to_hex(ep["excess_blob_gas"])
+        return payload
 
-    def get_blobs_versioned_hashes(self, block: BlockData) -> list[str]:
-        blob_versioned_hashes: list[str] = []
-        for tx in block["transactions"]:
-            tx_data: TxData | None = None
-            if isinstance(tx, HexBytes):
-                tx_data = self.w3.eth.get_transaction(tx)
-            else:
-                tx_data = tx
-            if hasattr(tx_data, "blobVersionedHashes"):
-                for hash in tx_data["blobVersionedHashes"]:
-                    blob_versioned_hashes.append(hash.to_0x_hex())
-        return blob_versioned_hashes
+    def get_blobs_versioned_hashes(self, commitments: list[str]) -> list[str]:
+        versioned_hashes = []
+        for commitment in commitments:
+            digest = hashlib.sha256(self._to_bytes(commitment)).digest()
+            versioned_hashes.append("0x01" + digest[1:].hex())
+        return versioned_hashes
 
-    async def get_execution_requests(self, block: BlockData) -> list[dict]:
-        # TODO: implement this!
-        return []
+    def encode_deposit_request(self, d: dict) -> bytes:
+        return (
+            self._to_bytes(d["pubkey"])
+            + self._to_bytes(d["withdrawal_credentials"])
+            + self._u64_le(d["amount"])
+            + self._to_bytes(d["signature"])
+            + self._u64_le(d["index"])
+        )
 
-    async def get_new_payload_request(self, block: BlockData) -> dict:
-        block_number = block["number"]
-        txs_task = self.get_block_transactions(block)
-        version = self.get_payload_version(block)
-        params = []
-        (
-            payload,
-            blobs_versioned_hashes,
-            parent_beacon_block_root,
-            execution_requests,
-        ) = None, None, None, None
-        # get engine_newPayload params for each version
-        transactions = await txs_task
-        if version == 1:
-            payload = self.compose_payload_v1(block, transactions)
-        elif version == 2:
-            withdrawals = self.get_block_withdrawals(block)
-            payload = self.compose_payload_v2(block, transactions, withdrawals)
-        elif version == 3:
-            withdrawals = self.get_block_withdrawals(block)
-            payload = self.compose_payload_v3(block, transactions, withdrawals)
-            blobs_versioned_hashes = self.get_blobs_versioned_hashes(block)
-            parent_beacon_block_root = block["parentBeaconBlockRoot"].to_0x_hex()
-        elif version == 4:
-            withdrawals = self.get_block_withdrawals(block)
-            payload = self.compose_payload_v4(block, transactions, withdrawals)
-            blobs_versioned_hashes = self.get_blobs_versioned_hashes(block)
-            parent_beacon_block_root = block["parentBeaconBlockRoot"].to_0x_hex()
-            execution_requests = await self.get_execution_requests(block)
-        else:
-            raise ValueError(f"Unknown payload version: {version}")
-        params.append(payload)
-        if blobs_versioned_hashes is not None:
-            params.append(blobs_versioned_hashes)
-        if parent_beacon_block_root is not None:
-            params.append(parent_beacon_block_root)
-        if execution_requests is not None:
-            params.append(execution_requests)
+    def encode_withdrawal_request(self, w: dict) -> bytes:
+        return (
+            self._to_bytes(w["source_address"])
+            + self._to_bytes(w["validator_pubkey"])
+            + self._u64_le(w["amount"])
+        )
+
+    def encode_consolidation_request(self, c: dict) -> bytes:
+        return (
+            self._to_bytes(c["source_address"])
+            + self._to_bytes(c["source_pubkey"])
+            + self._to_bytes(c["target_pubkey"])
+        )
+
+    def get_execution_requests(self, execution_requests: dict) -> list[str]:
+        """EIP-7685 encoding: list of ``request_type ++ request_data`` byte arrays,
+        ordered ascending by type, with empty types excluded. Each request type is a
+        fixed-size SSZ container, so ``request_data`` is the concatenation of its
+        elements."""
+        requests_list: list[str] = []
+        deposits = execution_requests.get("deposits", [])
+        withdrawals = execution_requests.get("withdrawals", [])
+        consolidations = execution_requests.get("consolidations", [])
+        if deposits:
+            data = b"".join(self.encode_deposit_request(d) for d in deposits)
+            requests_list.append("0x00" + data.hex())
+        if withdrawals:
+            data = b"".join(self.encode_withdrawal_request(w) for w in withdrawals)
+            requests_list.append("0x01" + data.hex())
+        if consolidations:
+            data = b"".join(self.encode_consolidation_request(c) for c in consolidations)
+            requests_list.append("0x02" + data.hex())
+        return requests_list
+
+    def get_new_payload_request(
+        self,
+        block_number: int,
+        message: dict,
+        version: int,
+    ) -> dict:
+        body = message["body"]
+        ep = body["execution_payload"]
+        payload = self.compose_payload(ep, version)
+        params: list = [payload]
+        if version >= 3:
+            params.append(
+                self.get_blobs_versioned_hashes(body.get("blob_kzg_commitments", []))
+            )
+            params.append(message["parent_root"])
+        if version >= 4:
+            params.append(
+                self.get_execution_requests(body.get("execution_requests", {}))
+            )
         return {
             "id": block_number,
             "jsonrpc": "2.0",
@@ -238,18 +203,21 @@ class Generator:
             "params": params,
         }
 
-    async def get_fcu_request(self, block: BlockData) -> dict:
-        version = self.get_fcu_version(block)
-        block_number = block["number"]
+    def get_fcu_request(
+        self,
+        block_number: int,
+        ep: dict,
+        version: int,
+    ) -> dict:
         return {
             "id": block_number,
             "jsonrpc": "2.0",
             "method": f"engine_forkchoiceUpdatedV{version}",
             "params": [
                 {
-                    "headBlockHash": block["hash"].to_0x_hex(),
-                    "safeBlockHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
-                    "finalizedBlockHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                    "headBlockHash": ep["block_hash"],
+                    "safeBlockHash": ep["parent_hash"],
+                    "finalizedBlockHash": ep["parent_hash"],
                 }
             ],
         }
@@ -260,15 +228,34 @@ class Generator:
     ) -> None:
         self.log.info("Generating payload", block_number=block_number)
         block = self.w3.eth.get_block(block_number)
+        slot = self.network.slot_from_timestamp(block["timestamp"])
+        self.log.debug(
+            "Fetching beacon block", block_number=block_number, slot=slot
+        )
+        message = self.get_beacon_block(slot)
+        ep = message["body"]["execution_payload"]
+        if int(ep["block_number"]) != block_number:
+            self.log.error(
+                "Beacon block number mismatch, skipping",
+                block_number=block_number,
+                slot=slot,
+                beacon_block_number=int(ep["block_number"]),
+            )
+            return
+
+        payload_version = self.get_payload_version(block)
+        fcu_version = self.get_fcu_version(block)
         self.log.debug(
             "Generating engine_newPayload request", block_number=block_number
         )
-        engine_new_payload_request = asyncio.run(self.get_new_payload_request(block))
+        engine_new_payload_request = self.get_new_payload_request(
+            block_number, message, payload_version
+        )
         self.log.debug(
             "Generating engine_forkChoiceUpdated request", block_number=block_number
         )
-        engine_new_payload_request["gasUsed"] = block["gasUsed"]
-        fcu_request = asyncio.run(self.get_fcu_request(block))
+        fcu_request = self.get_fcu_request(block_number, ep, fcu_version)
+
         enp_req_file_name = os.path.join(
             self.output_dir, f"payload_{block_number}.json"
         )

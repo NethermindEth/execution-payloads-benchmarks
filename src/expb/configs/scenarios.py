@@ -266,6 +266,24 @@ class Scenarios(BaseModel):
         description="Pull the docker images before execution.",
         default=False,
     )
+    cpu_max_frequency_khz: int | None = Field(
+        description="Cap CPU scaling_max_freq to this value (in kHz) during benchmarks to prevent turbo boost. "
+        "Use the CPU's nominal/base frequency (e.g., 3800000 for 3.8 GHz). "
+        "Original frequencies are restored after each scenario.",
+        default=None,
+        ge=100000,
+    )
+    offline_cpus: list[int] = Field(
+        description="Override: explicit list of CPU IDs to offline during benchmarks. "
+        "When empty (default), HT siblings are auto-detected from cpuset and infra_cpuset topology.",
+        default=[],
+    )
+    dottrace: bool = Field(
+        description="Enable dotTrace profiling of the execution client. "
+        "Automatically installs dotTrace CLI tools if not present. "
+        "Snapshot is saved to the outputs directory.",
+        default=False,
+    )
     docker_images: ScenariosImages = Field(
         description="Images configuration for the scenarios.",
         alias="images",

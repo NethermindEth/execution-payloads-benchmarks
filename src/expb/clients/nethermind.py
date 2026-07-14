@@ -32,12 +32,24 @@ class NethermindConfig(ClientConfig):
                 "--Metrics.Enabled=true",
                 f"--Metrics.ExposePort={CLIENT_METRICS_PORT}",
                 "--Metrics.ExposeHost=0.0.0.0",
+                # Required for SSE data feed (/data/events)
+                "--HealthChecks.Enabled=true",
+                "--Init.LogRules=Consensus.Processing.ProcessingStats:Debug",
                 # Disable peering
                 "--Init.DiscoveryEnabled=false",
                 "--Network.MaxActivePeers=0",
+                # Suppress forced GC between blocks for stable benchmarks
+                "--Merge.SweepMemory=NoGC",
+                "--Merge.CompactMemory=No",
+                "--Merge.CollectionsPerDecommit=-1",
             ],
             prometheus_metrics_path="/metrics",
-            default_env={},
+            sse_data_feed_path="/data/events",
+            default_env={
+                "DOTNET_TieredCompilation": "0",
+                "DOTNET_GCLatencyLevel": "0",
+            },
+            entrypoint="/nethermind/nethermind",
         )
 
     def get_command(

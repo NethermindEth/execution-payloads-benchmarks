@@ -22,7 +22,16 @@ expb [OPTIONS] COMMAND [ARGS]...
 
 ## `expb generate-payloads`
 
-Generate execution payloads for a given block range.
+Generate `engine_newPayload` / `engine_forkchoiceUpdated` requests for a given block range.
+
+The requests are sourced from the Consensus client's Beacon API so the generated
+`ExecutionPayload`, `executionRequests` (EIP-7685), blob versioned hashes and parent beacon
+block root exactly match what a consensus client sends the execution client — including
+post-Deneb forks (Prague/Electra, Osaka). The execution RPC is used only to map block numbers
+to beacon slots and to resolve the latest block.
+
+Both endpoints must serve the requested block range (an archive node is required for older
+ranges).
 
 **Usage**:
 
@@ -32,7 +41,8 @@ expb generate-payloads [OPTIONS]
 
 **Options**:
 
-* `--rpc-url TEXT`: Ethereum RPC URL  [required]
+* `--rpc-url TEXT`: Ethereum execution RPC URL  [required]
+* `--beacon-url TEXT`: Ethereum consensus (Beacon) API URL  [required]
 * `--network [mainnet]`: Network  [default: mainnet]
 * `--start-block INTEGER`: Start block  [default: 0]
 * `--end-block INTEGER`: End block
@@ -40,8 +50,19 @@ expb generate-payloads [OPTIONS]
 * `--join-payloads / --no-join-payloads`: Join payloads and FCUs into a single file (payloads.jsonl and fcus.jsonl)  [default: join-payloads]
 * `--log-level TEXT`: Log level (e.g., DEBUG, INFO, WARNING)  [default: INFO]
 * `--threads INTEGER`: Number of threads for parallel processing  [default: 10]
-* `--workers INTEGER`: Number of workers per thread for parallel processing  [default: 30]
 * `--help`: Show this message and exit.
+
+**Example**:
+
+```bash
+expb generate-payloads \
+  --rpc-url http://localhost:8545 \
+  --beacon-url http://localhost:5052 \
+  --network mainnet \
+  --start-block 21000000 \
+  --end-block 21001000 \
+  --output-dir ./payloads
+```
 
 ## `expb execute-scenario`
 

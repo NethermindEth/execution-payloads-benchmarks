@@ -24,14 +24,18 @@ uv pip install -e .
 ### Running Tests
 
 ```bash
-# Run all tests
-pytest
+# Run all unit tests (integration tests are deselected by default)
+uv run pytest
 
-# Run specific test file
-pytest tests/api/test_something.py
+# Run a specific test file
+uv run pytest tests/payloads/test_execution_requests.py
 
 # Run with verbose output
-pytest -v
+uv run pytest -v
+
+# Run the integration tests that hit live EL/Beacon endpoints
+# (override endpoints with EXPB_TEST_RPC_URL / EXPB_TEST_BEACON_URL)
+uv run pytest -m integration
 ```
 
 ## Core Architecture
@@ -40,7 +44,7 @@ pytest -v
 
 The application uses [Typer](https://typer.tiangolo.com/) for the CLI interface. The main entry point is in [src/expb/\_\_init\_\_.py](src/expb/__init__.py), which aggregates sub-commands from:
 
-- `generate_payloads` - Extracts historical payloads from an Ethereum RPC endpoint
+- `generate_payloads` - Reconstructs the exact `engine_newPayload` / `engine_forkchoiceUpdated` requests for a block range by sourcing them from a Consensus client's Beacon API (execution RPC is used only for block→slot mapping)
 - `execute_scenario` - Runs a single benchmark scenario
 - `execute_scenarios` - Runs multiple benchmark scenarios (optionally in a loop)
 - `compress_payloads` - Compresses multiple smaller payloads into larger blocks
@@ -142,17 +146,23 @@ Per-payload metrics can be enabled with `--per-payload-metrics` flag, generating
 
 ### Generate Payloads
 
-Extract historical Ethereum payloads from an RPC endpoint:
+Reconstruct the Engine API requests for a block range from a Consensus (Beacon) API and an
+execution RPC. Both endpoints must serve the requested range (archive node for older ranges):
 
 ```bash
 expb generate-payloads \
-  --rpc-url https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY \
+  --rpc-url http://localhost:8545 \
+  --beacon-url http://localhost:5052 \
   --start-block 19000000 \
   --end-block 19001000 \
   --output-dir ./payloads \
-  --threads 10 \
-  --workers 30
+  --threads 10
 ```
+
+Payloads are sourced from the beacon block, so the generated `ExecutionPayload`,
+`executionRequests` (EIP-7685), blob versioned hashes and parent beacon block root exactly match
+what the consensus client sends the execution client, across all forks through Osaka. The
+`forkchoiceUpdated` requests set `safeBlockHash` and `finalizedBlockHash` to the parent block hash.
 
 ### Run Single Scenario
 

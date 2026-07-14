@@ -1,4 +1,5 @@
 import os
+import re
 import time
 from pathlib import Path
 
@@ -43,10 +44,14 @@ class ExecutorConfig:
         exports: Exports | None = None,
         json_rpc_wait_max_retries: int = 1800,
         limit_bandwidth: bool = False,
+        cpu_max_frequency_khz: int | None = None,
+        offline_cpus: list[int] | None = None,
+        dottrace: bool = False,
     ) -> None:
         # Executor Basic config
         self.scenario_name: str = scenario.name or "default"
-        self.executor_name: str = f"expb-executor-{self.scenario_name}"
+        safe_name = re.sub(r"[^a-zA-Z0-9_-]", "-", self.scenario_name)
+        self.executor_name: str = f"expb-executor-{safe_name}"
         self.test_id: str = f"{self.scenario_name}-{time.strftime('%Y%m%d-%H%M%S')}"
         self.startup_wait = scenario.startup_wait
         # Executor Client config
@@ -75,6 +80,9 @@ class ExecutorConfig:
         self.resources: ScenariosResources | None = resources
         self.limit_bandwidth: bool = limit_bandwidth
         self.json_rpc_wait_max_retries: int = json_rpc_wait_max_retries
+        self.cpu_max_frequency_khz: int | None = cpu_max_frequency_khz
+        self.offline_cpus: list[int] = offline_cpus or []
+        self.dottrace: bool = dottrace
         ## K6 script config
         self.k6_payloads_amount: int = scenario.payloads_amount
         self.k6_payloads_delay: float = scenario.payloads_delay
@@ -84,6 +92,15 @@ class ExecutorConfig:
         self.k6_warmup_wait: int = scenario.warmup_wait
         self.k6_payloads_skip: int | None = scenario.payloads_skip
         self.k6_payloads_warmup: int | None = scenario.payloads_warmup
+        # EXPB_WARMUP_OVERRIDE overrides the number of unmeasured warmup payloads
+        # without editing the scenario config. A larger warmup lets the OS page
+        # cache and client caches reach a warm steady state before measurement.
+        _warmup_override = os.environ.get("EXPB_WARMUP_OVERRIDE")
+        if _warmup_override:
+            try:
+                self.k6_payloads_warmup = int(_warmup_override)
+            except ValueError:
+                pass
 
         # Executor Directories
         ## Payloads and FCUs
@@ -138,6 +155,9 @@ class ExecutorConfig:
         ## Alloy config file
         self.alloy_config_file: Path = self.outputs_dir / "config.alloy"
 
+        ## Pre-built simulate payloads file (only used when evm_warmup is on)
+        self.simulate_payloads_file: Path = self.outputs_dir / "simulate-payloads.jsonl"
+
         ## Payload server config
         self.payload_server_script_file: Path = self.outputs_dir / "payload-server.py"
         self._payload_server_container_port: int = PAYLOAD_SERVER_PORT
@@ -145,11 +165,10 @@ class ExecutorConfig:
         self._payload_server_container_script: str = (
             f"{self._payload_server_container_work_dir}/payload-server.py"
         )
-        self._payload_server_container_payloads_file: str = (
-            f"/payloads/{self.payloads_file.name}"
-        )
-        self._payload_server_container_fcus_file: str = (
-            f"/payloads/{self.fcus_file.name}"
+        self._payload_server_container_payloads_file: str = "/payloads/payloads.jsonl"
+        self._payload_server_container_fcus_file: str = "/payloads/fcus.jsonl"
+        self._payload_server_container_simulate_file: str = (
+            "/payloads/simulate-payloads.jsonl"
         )
 
         # Executor Exports config
@@ -178,7 +197,20 @@ class ExecutorConfig:
         )
 
     def get_execution_client_env(self) -> dict[str, str]:
-        return self.execution_client_extra_env.copy()
+        env = self.execution_client.value.default_env.copy()
+        env.update(self.execution_client_extra_env)
+        # EXPB_CLIENT_ENV (comma- or newline-separated KEY=VALUE) injects extra
+        # environment into the execution-client container without editing the
+        # scenario config, e.g. EXPB_CLIENT_ENV="DOTNET_gcServer=0".
+        override = os.environ.get("EXPB_CLIENT_ENV", "")
+        if override:
+            for item in override.replace("\n", ",").split(","):
+                item = item.strip()
+                if not item or "=" not in item:
+                    continue
+                key, _, value = item.partition("=")
+                env[key.strip()] = value.strip()
+        return env
 
     def get_execution_client_ports(self) -> dict[str, tuple[str, str]]:
         return {
@@ -220,6 +252,22 @@ class ExecutorConfig:
                 "IPAddress"
             ]
             return f"http://{container_ip}:{CLIENT_RPC_PORT}"
+        else:
+            raise ValueError("Container attributes are not available")
+
+    def get_execution_client_sse_url(
+        self,
+        container: Container,
+        network: DockerNetwork,
+    ) -> str:
+        """Build the SSE data feed URL (served on the JSON-RPC HTTP port)."""
+        container.reload()
+        if container.attrs is not None:
+            container_ip = container.attrs["NetworkSettings"]["Networks"][network.name][
+                "IPAddress"
+            ]
+            sse_path = self.execution_client.value.sse_data_feed_path
+            return f"http://{container_ip}:{CLIENT_RPC_PORT}{sse_path}"
         else:
             raise ValueError("Container attributes are not available")
 
@@ -330,8 +378,10 @@ class ExecutorConfig:
     def get_payload_server_container_image(self) -> str:
         return self.docker_images.payload_server
 
-    def get_payload_server_volumes(self) -> dict[str, dict[str, str]]:
-        return {
+    def get_payload_server_volumes(
+        self, drop_caches: bool = False, evm_warmup: bool = False
+    ) -> dict[str, dict[str, str]]:
+        volumes = {
             str(self.payloads_file.resolve()): {
                 "bind": self._payload_server_container_payloads_file,
                 "mode": "ro",
@@ -345,18 +395,52 @@ class ExecutorConfig:
                 "mode": "ro",
             },
         }
+        if evm_warmup:
+            volumes[str(self.simulate_payloads_file.resolve())] = {
+                "bind": self._payload_server_container_simulate_file,
+                "mode": "ro",
+            }
+        if drop_caches:
+            volumes["/proc/sys/vm"] = {
+                "bind": "/host_proc_sys_vm",
+                "mode": "rw",
+            }
+        return volumes
 
     def get_payload_server_command(self) -> list[str]:
         return ["python3", self._payload_server_container_script]
 
-    def get_payload_server_environment(self) -> dict[str, str]:
-        return {
+    def get_payload_server_environment(
+        self,
+        el_rpc_url: str = "",
+        drop_caches: bool = False,
+        drop_caches_sync: bool = True,
+        evm_warmup: bool = False,
+        client_sse_url: str = "",
+    ) -> dict[str, str]:
+        skip = self.k6_payloads_skip or 0
+        warmup = self.k6_payloads_warmup or 0
+        amount = self.k6_payloads_amount
+        env = {
             "EXPB_PAYLOADS_FILE": self._payload_server_container_payloads_file,
             "EXPB_FCUS_FILE": self._payload_server_container_fcus_file,
+            "EXPB_SKIP": str(skip),
+            "EXPB_TOTAL": str(warmup + amount),
             "EXPB_SERVER_PORT": str(self._payload_server_container_port),
-            "EXPB_CACHE_SIZE": "100",
-            "EXPB_SKIP": str(self.k6_payloads_skip or 0),
         }
+        if el_rpc_url:
+            env["EXPB_EL_RPC_URL"] = el_rpc_url
+            env["EXPB_GC_DRAIN_SKIP"] = str(skip + warmup)
+        if evm_warmup and el_rpc_url:
+            env["EXPB_SIMULATE_FILE"] = self._payload_server_container_simulate_file
+        if drop_caches:
+            env["EXPB_DROP_CACHES"] = "1"
+            env["EXPB_DROP_CACHES_SYNC"] = "1" if drop_caches_sync else "0"
+            env["EXPB_DROP_CACHES_SKIP"] = str(skip + warmup)
+        if client_sse_url:
+            env["EXPB_CLIENT_SSE_URL"] = client_sse_url
+            env["EXPB_CLIENT_SSE_SKIP"] = str(skip + warmup)
+        return env
 
     def get_payload_server_url(
         self,
@@ -433,7 +517,20 @@ class ExecutorConfig:
             f"--env=EXPB_ENABLE_LOGGING={int(enable_logging)}",
             f"--env=EXPB_PER_PAYLOAD_METRICS_LOGS={int(per_payload_metrics_logs)}",
             f"--env=EXPB_WARMUP_WAIT={self.k6_warmup_wait}",
+            f"--env=testid={self.test_id}",
         ]
+        # Run-general tags: pass as output-level --tag so they attach to EVERY
+        # exported series, including k6's self-emitted engine metrics
+        # (k6_iterations_total, k6_vus, k6_data_*), which do not inherit the
+        # script-side options.tags / scenario tags in the Prometheus
+        # remote-write output.
+        run_tags = {
+            "testid": self.test_id,
+            "tool": "expb",
+            "client_type": self.execution_client.value.name,
+        }
+        for key, value in run_tags.items():
+            command.append(f"--tag={key}={value}")
         if self.exports is not None and self.exports.prometheus_rw is not None:
             command.append("--out=experimental-prometheus-rw")
             for tag in self.exports.prometheus_rw.tags:
