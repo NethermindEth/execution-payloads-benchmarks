@@ -426,6 +426,8 @@ class Executor:
             run_kwargs["cpuset_cpus"] = self.config.resources.cpuset
         if self.config.resources and self.config.resources.mem_swappiness is not None:
             run_kwargs["mem_swappiness"] = self.config.resources.mem_swappiness
+        if self.config.execution_client_security_opt:
+            run_kwargs["security_opt"] = self.config.execution_client_security_opt
         container = self.config.docker_client.containers.run(**run_kwargs)
         return container
 
@@ -1029,9 +1031,10 @@ class Executor:
             )
             execution_client_container.reload()
             execution_client_volumes = execution_client_container.attrs["Mounts"]
-            execution_client_container.stop(
-                timeout=60 if self._dottrace_active else 5
-            )
+            # Give execution client 120s after SIGTERM to flush data (e.g. PGO
+            # profiles via WritePGOData, RocksDB flush, and dotTrace snapshot
+            # writes) before Docker sends SIGKILL (default 10s)
+            execution_client_container.stop(timeout=120)
             logs_file = (
                 self.config.outputs_dir
                 / f"{self.config.get_execution_client_name()}.log"
