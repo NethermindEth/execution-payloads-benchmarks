@@ -77,6 +77,10 @@ class ExecutorExecuteOptions:
         self.client_metrics: bool = client_metrics
         self.stable_cpu: bool = stable_cpu
         self.dottrace: bool = dottrace
+        if client_restart_retries < 0:
+            raise ValueError(
+                f"client_restart_retries must be >= 0, got {client_restart_retries}"
+            )
         self.client_restart_retries: int = client_restart_retries
         self.reap_orphans: bool = reap_orphans
 
@@ -826,7 +830,7 @@ class Executor:
         collect_per_payload_metrics: bool = False,
         enable_logging: bool = False,
         per_payload_metrics_logs: bool = False,
-    ) -> Container:
+    ) -> bytes:
         # Prepare k6 container volumes
         k6_container_volumes = self.config.get_k6_volumes()
 
@@ -859,8 +863,8 @@ class Executor:
         )
         if self.config.resources and self.config.resources.infra_cpuset is not None:
             run_kwargs["cpuset_cpus"] = self.config.resources.infra_cpuset
-        container = self.config.docker_client.containers.run(**run_kwargs)
-        return container
+        logs = self.config.docker_client.containers.run(**run_kwargs)
+        return logs
 
     # Extra Commands Execution
     def _execute_single_command(

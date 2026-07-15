@@ -86,6 +86,7 @@ def execute_scenario(
     client_restart_retries: Annotated[
         int,
         typer.Option(
+            min=0,
             help="Auto-restart the execution client on failure up to N times (0 = never restart). Infrastructure containers (K6, Alloy, payload server) never restart.",
         ),
     ] = 0,
