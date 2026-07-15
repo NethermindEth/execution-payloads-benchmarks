@@ -1155,7 +1155,10 @@ class Executor:
                 self.config.outputs_dir
                 / f"{self.config.get_execution_client_name()}.log"
             ),
-            stop_timeout=60 if self._dottrace_active else 5,
+            # Give the execution client 120s after SIGTERM to flush data (e.g. PGO
+            # profiles via WritePGOData, RocksDB flush, and dotTrace snapshot writes)
+            # before Docker sends SIGKILL (default 10s).
+            stop_timeout=120,
             print_console=print_logs_to_console,
         )
         if execution_client_mounts:
