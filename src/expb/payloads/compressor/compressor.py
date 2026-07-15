@@ -236,6 +236,8 @@ class Compressor:
         )
 
         container.reload()
+        if container.attrs is None:
+            raise ValueError("Container attributes are not available")
         container_ip = container.attrs["NetworkSettings"]["Networks"][
             container_network.name
         ]["IPAddress"]

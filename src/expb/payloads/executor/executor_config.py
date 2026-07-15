@@ -2,6 +2,7 @@ import os
 import re
 import time
 from pathlib import Path
+from typing import Any
 
 import docker
 from docker.client import DockerClient
@@ -271,7 +272,7 @@ class ExecutorConfig:
         else:
             raise ValueError("Container attributes are not available")
 
-    def get_execution_client_volumes(self) -> list[dict[str, dict]]:
+    def get_execution_client_volumes(self) -> list[dict[str, Any]]:
         execution_container_volumes = []
         container_name = self.get_execution_client_container_name()
         for volume_name, volume_config in self.execution_client_extra_volumes.items():

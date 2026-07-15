@@ -39,6 +39,8 @@ packages = ["src/expb"]
 dev = [
     "hatchling>=1.29.0",
     "pytest>=8.0.0",
+    "ruff>=0.10.0",
+    "ty>=0.0.1a1",
 ]
 
 [tool.pytest.ini_options]
