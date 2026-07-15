@@ -405,12 +405,20 @@ class Executor:
                 raise ValueError(
                     "dotTrace requires entrypoint to be set on the client config"
                 )
+            # Per-block snapshots are driven by MeasureProfiler API calls from inside the
+            # client (NETHERMIND_PROFILE_BLOCKS); dotTrace ignores those calls unless the
+            # session runs in API mode. Whole-run profiling must NOT set --use-api, as API
+            # mode suppresses the automatic collection window.
+            use_api = bool(
+                (execution_container_environment or {}).get("NETHERMIND_PROFILE_BLOCKS")
+            )
             dottrace_entrypoint = [
                 f"{self._DOTTRACE_CONTAINER_PATH}/dottrace",
                 "start",
                 "--framework=NetCore",
                 f"--save-to={snapshot_file}",
                 "--propagate-exit-code",
+                *(["--use-api"] if use_api else []),
                 "--",
                 client_binary,
             ]
@@ -453,6 +461,8 @@ class Executor:
             run_kwargs["cpuset_cpus"] = self.config.resources.cpuset
         if self.config.resources and self.config.resources.mem_swappiness is not None:
             run_kwargs["mem_swappiness"] = self.config.resources.mem_swappiness
+        if self.config.execution_client_security_opt:
+            run_kwargs["security_opt"] = self.config.execution_client_security_opt
         container = self.config.docker_client.containers.run(**run_kwargs)
         return container
 
