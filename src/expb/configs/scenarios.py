@@ -4,7 +4,6 @@ from pydantic import (
     BaseModel,
     Field,
     FilePath,
-    NewPath,
     field_serializer,
     field_validator,
     model_validator,
