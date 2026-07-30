@@ -1031,10 +1031,13 @@ class Executor:
             )
             execution_client_container.reload()
             execution_client_volumes = execution_client_container.attrs["Mounts"]
-            # Give execution client 120s after SIGTERM to flush data (e.g. PGO
+            # Give execution client time after SIGTERM to flush data (e.g. PGO
             # profiles via WritePGOData, RocksDB flush, and dotTrace snapshot
-            # writes) before Docker sends SIGKILL (default 10s)
-            execution_client_container.stop(timeout=120)
+            # writes) before Docker sends SIGKILL (default 10s). WritePGOData in
+            # particular only fires at clean CLR exit, and a warmed node's DB
+            # disposal can exceed 120s — override via EXPB_STOP_TIMEOUT.
+            stop_timeout = int(os.environ.get("EXPB_STOP_TIMEOUT", "120"))
+            execution_client_container.stop(timeout=stop_timeout)
             logs_file = (
                 self.config.outputs_dir
                 / f"{self.config.get_execution_client_name()}.log"
