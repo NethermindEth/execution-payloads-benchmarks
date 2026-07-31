@@ -1058,6 +1058,22 @@ class Executor:
         except Exception as e:
             self.log.error("Failed to stop container", container=name, error=e)
 
+        # Exit state distinguishes a clean shutdown from a SIGKILL after the stop
+        # timeout or an OOM kill - both of which silently discard shutdown-time
+        # output (PGO profiles, dotTrace snapshots) and are otherwise invisible.
+        try:
+            container.reload()
+            state = container.attrs.get("State", {})
+            self.log.info(
+                "Container stopped",
+                container=name,
+                exit_code=state.get("ExitCode"),
+                oom_killed=state.get("OOMKilled"),
+                error=state.get("Error"),
+            )
+        except Exception:
+            pass
+
         if log_file is not None:
             try:
                 self.log.info(
@@ -1169,10 +1185,11 @@ class Executor:
                 self.config.outputs_dir
                 / f"{self.config.get_execution_client_name()}.log"
             ),
-            # Give the execution client 120s after SIGTERM to flush data (e.g. PGO
+            # Give the execution client time after SIGTERM to flush data (e.g. PGO
             # profiles via WritePGOData, RocksDB flush, and dotTrace snapshot writes)
-            # before Docker sends SIGKILL (default 10s).
-            stop_timeout=120,
+            # before Docker sends SIGKILL (default 10s). A warmed client's shutdown
+            # can exceed 120s; raise it with EXPB_STOP_TIMEOUT.
+            stop_timeout=int(os.environ.get("EXPB_STOP_TIMEOUT", "120")),
             print_console=print_logs_to_console,
         )
         if execution_client_mounts:
