@@ -38,17 +38,14 @@ class NethermindConfig(ClientConfig):
                 # Disable peering
                 "--Init.DiscoveryEnabled=false",
                 "--Network.MaxActivePeers=0",
-                # Suppress forced GC between blocks for stable benchmarks
-                "--Merge.SweepMemory=NoGC",
-                "--Merge.CompactMemory=No",
-                "--Merge.CollectionsPerDecommit=-1",
             ],
             prometheus_metrics_path="/metrics",
             sse_data_feed_path="/data/events",
-            default_env={
-                "DOTNET_TieredCompilation": "0",
-                "DOTNET_GCLatencyLevel": "0",
-            },
+            # No GC or code-generation overrides: the client must run the way it
+            # runs in production, or the benchmark measures a configuration nobody
+            # ships. Set them per scenario (extra_flags/extra_env) or per run
+            # (EXPB_CLIENT_ENV) when an experiment genuinely needs them.
+            default_env={},
             entrypoint="/nethermind/nethermind",
         )
 
