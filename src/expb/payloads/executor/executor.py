@@ -1038,6 +1038,18 @@ class Executor:
             # disposal can exceed 120s — override via EXPB_STOP_TIMEOUT.
             stop_timeout = int(os.environ.get("EXPB_STOP_TIMEOUT", "120"))
             execution_client_container.stop(timeout=stop_timeout)
+            try:
+                execution_client_container.reload()
+                state = execution_client_container.attrs.get("State", {})
+                self.log.info(
+                    "Execution client stopped",
+                    exit_code=state.get("ExitCode"),
+                    oom_killed=state.get("OOMKilled"),
+                    error=state.get("Error"),
+                    finished_at=state.get("FinishedAt"),
+                )
+            except Exception:
+                pass
             logs_file = (
                 self.config.outputs_dir
                 / f"{self.config.get_execution_client_name()}.log"
