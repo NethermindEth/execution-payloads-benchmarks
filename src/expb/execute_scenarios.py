@@ -89,6 +89,20 @@ def execute_scenarios(
             help="Enable JetBrains dotTrace profiling. Auto-installs if needed. Snapshot saved to outputs directory.",
         ),
     ] = False,
+    dottrace_mode: Annotated[
+        str,
+        typer.Option(
+            "--dottrace-mode",
+            help="dotTrace profiling type: sampling (default), tracing, or timeline. Timeline snapshots cannot be converted to XML by Reporter.",
+        ),
+    ] = "sampling",
+    dotnet_trace: Annotated[
+        bool,
+        typer.Option(
+            "--dotnet-trace/--no-dotnet-trace",
+            help="Collect an EventPipe .nettrace via a host-side dotnet-trace listener. Standalone: cpu-sampling profile; alongside --dottrace: runtime events only (gc/contention/threading/exception) so the profilers do not double-sample.",
+        ),
+    ] = False,
     client_restart_retries: Annotated[
         int,
         typer.Option(
@@ -200,6 +214,8 @@ def execute_scenarios(
                                 client_metrics=client_metrics,
                                 stable_cpu=stable_cpu,
                                 dottrace=dottrace,
+                                dottrace_mode=dottrace_mode,
+                                dotnet_trace=dotnet_trace,
                                 client_restart_retries=client_restart_retries,
                                 reap_orphans=reap_orphans,
                             ),
