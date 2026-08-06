@@ -48,6 +48,8 @@ class ExecutorConfig:
         cpu_max_frequency_khz: int | None = None,
         offline_cpus: list[int] | None = None,
         dottrace: bool = False,
+        dottrace_mode: str = "sampling",
+        dotnet_trace: bool = False,
     ) -> None:
         # Executor Basic config
         self.scenario_name: str = scenario.name or "default"
@@ -84,6 +86,12 @@ class ExecutorConfig:
         self.cpu_max_frequency_khz: int | None = cpu_max_frequency_khz
         self.offline_cpus: list[int] = offline_cpus or []
         self.dottrace: bool = dottrace
+        if dottrace_mode not in ("sampling", "tracing", "timeline"):
+            raise ValueError(
+                f"dottrace_mode must be sampling, tracing, or timeline, got '{dottrace_mode}'"
+            )
+        self.dottrace_mode: str = dottrace_mode
+        self.dotnet_trace: bool = dotnet_trace
         ## K6 script config
         self.k6_payloads_amount: int = scenario.payloads_amount
         self.k6_payloads_delay: float = scenario.payloads_delay

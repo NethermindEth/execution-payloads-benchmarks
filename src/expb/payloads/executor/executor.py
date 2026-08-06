@@ -4,7 +4,9 @@ import os
 import re
 import secrets
 import signal
+import shutil
 import subprocess
+import tempfile
 import time
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -65,9 +67,15 @@ class ExecutorExecuteOptions:
         client_metrics: bool = True,
         stable_cpu: bool = True,
         dottrace: bool = False,
+        dottrace_mode: str = "sampling",
+        dotnet_trace: bool = False,
         client_restart_retries: int = 0,
         reap_orphans: bool = False,
     ):
+        if dottrace_mode not in ("sampling", "tracing", "timeline"):
+            raise ValueError(
+                f"dottrace_mode must be sampling, tracing, or timeline, got '{dottrace_mode}'"
+            )
         self.collect_per_payload_metrics: bool = collect_per_payload_metrics
         self.print_logs_to_console: bool = print_logs_to_console
         self.per_payload_metrics_logs: bool = per_payload_metrics_logs
@@ -77,6 +85,8 @@ class ExecutorExecuteOptions:
         self.client_metrics: bool = client_metrics
         self.stable_cpu: bool = stable_cpu
         self.dottrace: bool = dottrace
+        self.dottrace_mode: str = dottrace_mode
+        self.dotnet_trace: bool = dotnet_trace
         if client_restart_retries < 0:
             raise ValueError(
                 f"client_restart_retries must be >= 0, got {client_restart_retries}"
@@ -96,6 +106,8 @@ class Executor:
         self.running_command_futures: list[Future] = []
         self.executor_pool: ThreadPoolExecutor | None = None
         self._dottrace_active: bool = False
+        self._dotnet_trace_process: subprocess.Popen | None = None
+        self._dotnet_trace_diag_dir: Path | None = None
 
     # Scenario Setup
     def prepare_directories(self) -> None:
@@ -307,6 +319,26 @@ class Executor:
     _DOTTRACE_CONTAINER_PATH = "/opt/dottrace"
     _DOTTRACE_OUTPUT_PATH = "/dottrace-output"
     _DOTTRACE_DEFAULT_INSTALL_PATH = "/opt/dottrace"
+    _DOTNET_TRACE_DEFAULT_INSTALL_PATH = "/opt/dotnet-trace"
+    _DOTNET_TRACE_OUTPUT_PATH = "/dotnet-trace-output"
+    _DOTNET_TRACE_DIAG_PATH = "/dotnet-trace-diag"
+
+    def _ensure_dotnet_trace_installed(self) -> str:
+        """Ensure the dotnet-trace global tool is installed, return the host path."""
+        path = self._DOTNET_TRACE_DEFAULT_INSTALL_PATH
+        binary = Path(path) / "dotnet-trace"
+        if binary.exists():
+            self.log.info("dotnet-trace found", path=path)
+            return path
+        self.log.info("dotnet-trace not found, installing", path=path)
+        subprocess.run(
+            ["dotnet", "tool", "install", "--tool-path", path, "dotnet-trace"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        return path
 
     def _ensure_dottrace_installed(self) -> str:
         """Ensure dotTrace CLI tools are installed, return the host path."""
@@ -357,6 +389,8 @@ class Executor:
         pyroscope: Pyroscope | None = None,
         stop_signal: str | None = None,
         dottrace: bool = False,
+        dottrace_mode: str = "sampling",
+        dotnet_trace: bool = False,
         restart_retries: int = 0,
     ) -> Container:
         # Command
@@ -416,6 +450,7 @@ class Executor:
                 f"{self._DOTTRACE_CONTAINER_PATH}/dottrace",
                 "start",
                 "--framework=NetCore",
+                f"--profiling-type={dottrace_mode.capitalize()}",
                 f"--save-to={snapshot_file}",
                 "--propagate-exit-code",
                 *(["--use-api"] if use_api else []),
@@ -427,6 +462,72 @@ class Executor:
             self.log.info(
                 "dotTrace profiling enabled",
                 snapshot_output=str(dottrace_output_dir / trace_name),
+            )
+
+        # dotnet-trace (EventPipe) collection: a host-side listener the container's runtime
+        # connects to via DOTNET_DiagnosticPorts over a shared bind mount. Coexists with
+        # dotTrace (different channel: EventPipe vs the CLR profiling API). Alongside
+        # dotTrace it records runtime events only (gc/contention/threading/exception) so
+        # the two profilers do not double-sample CPU; standalone it captures cpu-sampling.
+        if dotnet_trace:
+            dotnet_trace_bin = (
+                Path(self._ensure_dotnet_trace_installed()) / "dotnet-trace"
+            )
+            dotnet_trace_dir = self.config.outputs_dir / "dotnet-trace"
+            dotnet_trace_dir.mkdir(parents=True, exist_ok=True)
+            # The socket must live at a SHORT path: unix domain socket paths are
+            # capped at ~107 chars and expb output dirs routinely exceed that.
+            self._dotnet_trace_diag_dir = Path(
+                tempfile.mkdtemp(prefix="expb-dt-", dir="/tmp")
+            )
+            diag_socket = self._dotnet_trace_diag_dir / "diag.sock"
+            nettrace_file = dotnet_trace_dir / f"{self.config.test_id}.nettrace"
+            capture_args = (
+                ["--clrevents", "gc+contention+threading+exception",
+                 "--clreventlevel", "informational"]
+                if dottrace
+                else ["--profile", "cpu-sampling"]
+            )
+            collect_log = (dotnet_trace_dir / "dotnet-trace-collect.log").open("ab")
+            # The listener must be up before the runtime starts: a connect-type
+            # nosuspend port that finds nobody listening records nothing.
+            self._dotnet_trace_process = subprocess.Popen(
+                [
+                    str(dotnet_trace_bin),
+                    "collect",
+                    "--diagnostic-port",
+                    str(diag_socket),
+                    "-o",
+                    str(nettrace_file),
+                    *capture_args,
+                ],
+                stdout=collect_log,
+                stderr=collect_log,
+            )
+            execution_container_volumes.append(
+                f"{self._dotnet_trace_diag_dir}:{self._DOTNET_TRACE_DIAG_PATH}:rw"
+            )
+            diag_ports_value = f"{self._DOTNET_TRACE_DIAG_PATH}/diag.sock,nosuspend"
+            if dottrace and dottrace_entrypoint is not None:
+                # Container-wide env would be inherited by the dotTrace CLI launcher —
+                # itself a .NET process — which then grabs the diagnostic-port connection
+                # and gets traced instead of the client. Scope the variable to the
+                # client only via an env(1) wrapper inside the launch chain.
+                separator = dottrace_entrypoint.index("--")
+                dottrace_entrypoint[separator + 1:separator + 1] = [
+                    "/usr/bin/env",
+                    f"DOTNET_DiagnosticPorts={diag_ports_value}",
+                ]
+            else:
+                if execution_container_environment is None:
+                    execution_container_environment = {}
+                execution_container_environment["DOTNET_DiagnosticPorts"] = (
+                    diag_ports_value
+                )
+            self.log.info(
+                "dotnet-trace collection enabled",
+                trace_output=str(nettrace_file),
+                capture=("clrevents" if dottrace else "cpu-sampling"),
             )
 
         # Run execution container
@@ -1209,6 +1310,22 @@ class Executor:
                             error=e,
                         )
 
+        if self._dotnet_trace_process is not None:
+            collector = self._dotnet_trace_process
+            self._dotnet_trace_process = None
+            try:
+                # SIGINT finalizes the .nettrace; the session usually ends on its own
+                # once the client runtime disconnects.
+                collector.send_signal(signal.SIGINT)
+                collector.wait(timeout=120)
+                self.log.info("dotnet-trace collection stopped")
+            except Exception as e:
+                collector.kill()
+                self.log.error("dotnet-trace collector did not stop cleanly", error=e)
+            if self._dotnet_trace_diag_dir is not None:
+                shutil.rmtree(self._dotnet_trace_diag_dir, ignore_errors=True)
+                self._dotnet_trace_diag_dir = None
+
         if print_logs_to_console and print_per_payload_metrics_table:
             self._print_per_payload_metrics_table(per_payload_metrics_rows)
 
@@ -1349,6 +1466,10 @@ class Executor:
                 else None,
             )
             dottrace_enabled = options.dottrace or self.config.dottrace
+            dottrace_mode = (
+                options.dottrace_mode if options.dottrace else self.config.dottrace_mode
+            )
+            dotnet_trace_enabled = options.dotnet_trace or self.config.dotnet_trace
             stop_signal = (
                 "SIGINT"
                 if self.config.execution_client_extra_commands or dottrace_enabled
@@ -1359,6 +1480,8 @@ class Executor:
                 pyroscope=alloy_pyroscope,
                 stop_signal=stop_signal,
                 dottrace=dottrace_enabled,
+                dottrace_mode=dottrace_mode,
+                dotnet_trace=dotnet_trace_enabled,
                 restart_retries=options.client_restart_retries,
             )
 
