@@ -97,6 +97,20 @@ def execute_scenario(
             help="Collect an EventPipe .nettrace via a host-side dotnet-trace listener. Standalone: cpu-sampling profile; alongside --dottrace: runtime events only (gc/contention/threading/exception) so the profilers do not double-sample.",
         ),
     ] = False,
+    perf: Annotated[
+        bool,
+        typer.Option(
+            "--perf/--no-perf",
+            help="Record a host-side Linux perf profile of the client and fold it to perf.folded. Resolves managed frames via the runtime perf map and native frames from the container's shared objects, so time inside RocksDB, the allocator and the GC is attributed rather than lumped together.",
+        ),
+    ] = False,
+    perf_frequency: Annotated[
+        int,
+        typer.Option(
+            "--perf-frequency",
+            help="perf sampling frequency in Hz (default 99, chosen off-round to avoid lock-step with periodic work).",
+        ),
+    ] = 99,
     client_restart_retries: Annotated[
         int,
         typer.Option(
@@ -180,6 +194,8 @@ def execute_scenario(
                         dottrace=dottrace,
                         dottrace_mode=dottrace_mode,
                         dotnet_trace=dotnet_trace,
+                        perf=perf,
+                        perf_frequency=perf_frequency,
                         client_restart_retries=client_restart_retries,
                         reap_orphans=reap_orphans,
                     ),
