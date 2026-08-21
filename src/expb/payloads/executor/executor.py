@@ -108,6 +108,7 @@ class Executor:
         self._dottrace_active: bool = False
         self._dotnet_trace_process: subprocess.Popen | None = None
         self._dotnet_trace_diag_dir: Path | None = None
+        self._dotnet_root_cache: str | None = None
 
     # Scenario Setup
     def prepare_directories(self) -> None:
@@ -323,12 +324,70 @@ class Executor:
     _DOTNET_TRACE_OUTPUT_PATH = "/dotnet-trace-output"
     _DOTNET_TRACE_DIAG_PATH = "/dotnet-trace-diag"
 
+    @staticmethod
+    def _is_dotnet_root(candidate: Path) -> bool:
+        """A DOTNET_ROOT is only usable if the apphost can find hostfxr under it."""
+        return (candidate / "host" / "fxr").is_dir()
+
+    def _dotnet_root(self) -> str | None:
+        """Locate a DOTNET_ROOT for the diagnostics tools, asking the muxer first.
+
+        The directory holding the `dotnet` on PATH is not the root: a distro's
+        dotnet-host package installs a real binary under /usr/bin while the runtime
+        lives elsewhere, so deriving the root from the executable yields one without
+        host/fxr and the apphost aborts with ".NET location: Not found".
+        """
+        if self._dotnet_root_cache is not None:
+            return self._dotnet_root_cache or None
+        self._dotnet_root_cache = ""
+        dotnet = shutil.which("dotnet")
+        if dotnet is not None:
+            try:
+                listing = subprocess.run(
+                    [dotnet, "--list-runtimes"],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+            except (OSError, subprocess.SubprocessError):
+                listing = None
+            if listing is not None and listing.returncode == 0:
+                for line in listing.stdout.splitlines():
+                    start = line.find("[")
+                    if start == -1 or not line.endswith("]"):
+                        continue
+                    # ".../shared/Microsoft.NETCore.App" -> the root above "shared"
+                    root = Path(line[start + 1:-1]).parent.parent
+                    if self._is_dotnet_root(root):
+                        self._dotnet_root_cache = str(root)
+                        return self._dotnet_root_cache
+        return None
+
+    def _dotnet_tool_env(self) -> dict[str, str]:
+        """Environment for launching a framework-dependent dotnet global tool.
+
+        `dotnet tool install` produces an apphost that resolves a shared runtime on
+        every start, so it needs DOTNET_ROOT wherever the default probe paths do not
+        cover the install, plus a major roll-forward when the host carries only a
+        runtime newer than the tool's target framework. The dotTrace CLI needs none of
+        this because its package ships native binaries.
+        """
+        env = os.environ.copy()
+        env.setdefault("DOTNET_ROLL_FORWARD", "Major")
+        if "DOTNET_ROOT" not in env:
+            root = self._dotnet_root()
+            if root is not None:
+                env["DOTNET_ROOT"] = root
+        return env
+
     def _ensure_dotnet_trace_installed(self) -> str:
         """Ensure the dotnet-trace global tool is installed, return the host path."""
         path = self._DOTNET_TRACE_DEFAULT_INSTALL_PATH
         binary = Path(path) / "dotnet-trace"
         if binary.exists():
-            self.log.info("dotnet-trace found", path=path)
+            self.log.info(
+                "dotnet-trace found", path=path, dotnet_root=self._dotnet_root()
+            )
             return path
         self.log.info("dotnet-trace not found, installing", path=path)
         subprocess.run(
@@ -503,7 +562,24 @@ class Executor:
                 ],
                 stdout=collect_log,
                 stderr=collect_log,
+                env=self._dotnet_tool_env(),
             )
+            # A collector that cannot start dies at once, leaving no .nettrace and no
+            # signal until somebody opens the artifact.
+            time.sleep(0.5)
+            if self._dotnet_trace_process.poll() is not None:
+                tail = (
+                    (dotnet_trace_dir / "dotnet-trace-collect.log")
+                    .read_text(errors="replace")
+                    .strip()
+                )
+                self.log.error(
+                    "dotnet-trace collector exited immediately, "
+                    "no .nettrace will be produced",
+                    returncode=self._dotnet_trace_process.returncode,
+                    collect_log=tail[-2000:],
+                )
+                self._dotnet_trace_process = None
             execution_container_volumes.append(
                 f"{self._dotnet_trace_diag_dir}:{self._DOTNET_TRACE_DIAG_PATH}:rw"
             )
