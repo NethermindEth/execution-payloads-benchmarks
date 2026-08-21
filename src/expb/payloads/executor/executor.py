@@ -25,6 +25,7 @@ from expb.configs.scenarios import Scenarios
 from expb.logging import Logger
 from expb.payloads.executor.executor_config import ExecutorConfig
 from expb.payloads.executor.exports_utils import add_pyroscope_config
+from expb.payloads.executor.perf import fold_perf_script, summarize_folded
 from expb.payloads.executor.services.alloy import (
     get_alloy_config,
 )
@@ -69,6 +70,8 @@ class ExecutorExecuteOptions:
         dottrace: bool = False,
         dottrace_mode: str = "sampling",
         dotnet_trace: bool = False,
+        perf: bool = False,
+        perf_frequency: int = 99,
         client_restart_retries: int = 0,
         reap_orphans: bool = False,
     ):
@@ -86,6 +89,8 @@ class ExecutorExecuteOptions:
         self.stable_cpu: bool = stable_cpu
         self.dottrace: bool = dottrace
         self.dottrace_mode: str = dottrace_mode
+        self.perf: bool = perf
+        self.perf_frequency: int = perf_frequency
         self.dotnet_trace: bool = dotnet_trace
         if client_restart_retries < 0:
             raise ValueError(
@@ -323,6 +328,17 @@ class Executor:
     _DOTNET_TRACE_DEFAULT_INSTALL_PATH = "/opt/dotnet-trace"
     _DOTNET_TRACE_OUTPUT_PATH = "/dotnet-trace-output"
     _DOTNET_TRACE_DIAG_PATH = "/dotnet-trace-diag"
+    # Frame pointers keep the capture small and the unwind cheap; DWARF unwinding
+    # multiplies the data volume and perturbs the timings being measured.
+    _PERF_CALL_GRAPH = "fp"
+    _PERF_CLIENT_ENV = {
+        # Emit /tmp/perf-<pid>.map so perf can name JIT-compiled frames. Without it
+        # every managed frame in the profile is a bare address.
+        "DOTNET_PerfMapEnabled": "1",
+        "DOTNET_PerfMapShowOptimizationTiers": "1",
+        # W^X relocates generated code away from the addresses written to the map.
+        "DOTNET_EnableWriteXorExecute": "0",
+    }
 
     @staticmethod
     def _is_dotnet_root(candidate: Path) -> bool:
@@ -450,6 +466,8 @@ class Executor:
         dottrace: bool = False,
         dottrace_mode: str = "sampling",
         dotnet_trace: bool = False,
+        perf: bool = False,
+        perf_frequency: int = 99,
         restart_retries: int = 0,
     ) -> Container:
         # Command
@@ -606,6 +624,21 @@ class Executor:
                 capture=("clrevents" if dottrace else "cpu-sampling"),
             )
 
+        if perf:
+            # Scope the perf-map variables to the client. Container-wide they would
+            # also apply to the dotTrace launcher, whose own map would then be merged
+            # into the client's symbolization.
+            if dottrace_entrypoint is not None:
+                separator = dottrace_entrypoint.index("--")
+                dottrace_entrypoint[separator + 1:separator + 1] = [
+                    "/usr/bin/env",
+                    *(f"{k}={v}" for k, v in self._PERF_CLIENT_ENV.items()),
+                ]
+            else:
+                if execution_container_environment is None:
+                    execution_container_environment = {}
+                execution_container_environment.update(self._PERF_CLIENT_ENV)
+
         # Run execution container
         restart_policy = (
             {"Name": "on-failure", "MaximumRetryCount": restart_retries}
@@ -641,7 +674,150 @@ class Executor:
         if self.config.execution_client_security_opt:
             run_kwargs["security_opt"] = self.config.execution_client_security_opt
         container = self.config.docker_client.containers.run(**run_kwargs)
+        if perf:
+            self._start_perf(container, perf_frequency)
         return container
+
+    def _client_host_pid(self, container: Container, timeout: int = 60) -> int | None:
+        """Host-side PID of the client process inside the container.
+
+        `docker top` reports host PIDs, which is what perf needs. The client is not
+        necessarily the container's main process: under dotTrace it is a child of the
+        profiler launcher, and profiling the launcher would sample the wrong process.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                listing = container.top(ps_args="-eo pid,args")
+            except (docker.errors.APIError, KeyError):
+                listing = None
+            for row in (listing or {}).get("Processes") or []:
+                args = " ".join(row[1:]).lower()
+                if "nethermind" in args and "dottrace" not in args:
+                    return int(row[0])
+            time.sleep(1)
+        return None
+
+    def _start_perf(self, container: Container, frequency: int) -> None:
+        pid = self._client_host_pid(container)
+        if pid is None:
+            self.log.error(
+                "could not find the client process, perf will not record",
+                container=container.name,
+            )
+            return
+        perf_dir = self.config.outputs_dir / "perf"
+        perf_dir.mkdir(parents=True, exist_ok=True)
+        self._perf_dir = perf_dir
+        self._perf_host_pid = pid
+        record_log = (perf_dir / "perf-record.log").open("ab")
+        self._perf_process = subprocess.Popen(
+            [
+                "perf",
+                "record",
+                "--freq",
+                str(frequency),
+                "--call-graph",
+                self._PERF_CALL_GRAPH,
+                "--pid",
+                str(pid),
+                "--output",
+                str(perf_dir / "perf.data"),
+            ],
+            stdout=record_log,
+            stderr=record_log,
+        )
+        # perf exits at once when perf_event access is denied, leaving an empty
+        # perf.data nobody notices until the artifact is opened.
+        time.sleep(0.5)
+        if self._perf_process.poll() is not None:
+            self.log.error(
+                "perf exited immediately, no profile will be recorded",
+                returncode=self._perf_process.returncode,
+                record_log=(perf_dir / "perf-record.log")
+                .read_text(errors="replace")
+                .strip()[-2000:],
+            )
+            self._perf_process = None
+            return
+        self.log.info("perf recording started", pid=pid, frequency=frequency)
+
+    def _finalize_perf(self, container: Container | None) -> None:
+        """Stop perf and fold the profile while the container is still alive.
+
+        Symbolization needs the container's filesystem: managed frames come from the
+        runtime's perf map under its /tmp and native frames from the DSOs it mapped.
+        Once the container is gone /proc/<pid>/root disappears and every frame becomes
+        an unresolved address, so this must run before teardown.
+        """
+        recorder, self._perf_process = self._perf_process, None
+        perf_dir, self._perf_dir = self._perf_dir, None
+        pid, self._perf_host_pid = self._perf_host_pid, None
+        if recorder is None or perf_dir is None or pid is None:
+            return
+        try:
+            recorder.send_signal(signal.SIGINT)
+            recorder.wait(timeout=120)
+            self.log.info("perf recording stopped")
+        except Exception as error:
+            recorder.kill()
+            self.log.error("perf did not stop cleanly", error=str(error))
+
+        data_file = perf_dir / "perf.data"
+        if not data_file.exists() or data_file.stat().st_size == 0:
+            self.log.error("perf produced no data", path=str(data_file))
+            return
+
+        # perf resolves JIT frames from <symfs>/tmp/perf-<pid>.map using the PID it
+        # recorded, but the runtime named that file after its PID inside the
+        # container. Materialize the expected name there so a single --symfs pass
+        # resolves managed and native frames together.
+        if container is not None:
+            try:
+                probe = container.exec_run(
+                    [
+                        "sh",
+                        "-c",
+                        "ls /tmp/perf-*.map 2>/dev/null | wc -l; "
+                        f"cat /tmp/perf-*.map > /tmp/perf-{pid}.map 2>/dev/null; "
+                        f"wc -l < /tmp/perf-{pid}.map 2>/dev/null || echo 0",
+                    ]
+                )
+                report = probe.output.decode(errors="replace").split()
+                self.log.info("perf map prepared", pid=pid, detail=report)
+            except docker.errors.APIError as error:
+                self.log.warning("could not prepare the perf map", error=str(error))
+
+        try:
+            script = subprocess.run(
+                [
+                    "perf",
+                    "script",
+                    "--symfs",
+                    f"/proc/{pid}/root",
+                    "--input",
+                    str(data_file),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=1800,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            self.log.error("perf script failed", error=str(error))
+            return
+        if script.returncode != 0:
+            self.log.error(
+                "perf script failed",
+                returncode=script.returncode,
+                stderr=script.stderr.strip()[-2000:],
+            )
+            return
+
+        folded = fold_perf_script(script.stdout)
+        (perf_dir / "perf.folded").write_text(
+            "\n".join(folded) + "\n", encoding="utf-8"
+        )
+        self.log.info("perf profile folded", **summarize_folded(folded))
 
     def wait_for_client_json_rpc(
         self,
@@ -1340,6 +1516,16 @@ class Executor:
         # Stop all running extra commands first
         self.stop_extra_commands()
 
+        # Before any teardown: perf symbolization reads the live container's rootfs.
+        try:
+            self._finalize_perf(
+                self.config.docker_client.containers.get(
+                    self.config.get_execution_client_container_name()
+                )
+            )
+        except docker.errors.NotFound:
+            self._finalize_perf(None)
+
         per_payload_metrics_rows: list[tuple[int, str, str]] = []
 
         def _collect_k6_metric(decoded_line: str) -> None:
@@ -1558,6 +1744,8 @@ class Executor:
                 dottrace=dottrace_enabled,
                 dottrace_mode=dottrace_mode,
                 dotnet_trace=dotnet_trace_enabled,
+                perf=options.perf,
+                perf_frequency=options.perf_frequency,
                 restart_retries=options.client_restart_retries,
             )
 
