@@ -1,4 +1,5 @@
 import glob
+import io
 import json
 import os
 import re
@@ -6,6 +7,7 @@ import secrets
 import signal
 import shutil
 import subprocess
+import tarfile
 import tempfile
 import time
 from collections.abc import Callable
@@ -748,8 +750,10 @@ class Executor:
 
         The shipped runtime libraries are stripped, so their frames aggregate into one
         opaque `[unknown] (libcoreclr.so)` entry. perf resolves a separate debug file
-        via the DSO's build id under /usr/lib/debug/.build-id, which is inside the
-        container because symbolization runs with --symfs pointed at its root.
+        through the DSO's build id under /usr/lib/debug/.build-id, which has to be
+        inside the container because symbolization runs with --symfs pointed at its
+        root. Downloading happens here rather than in the container, which carries
+        neither curl nor wget.
         """
         try:
             listing = subprocess.run(
@@ -776,30 +780,58 @@ class Executor:
             name = dso.rsplit("/", 1)[-1]
             if name not in self._SYMBOLIZE_DSOS or len(build_id) < 4:
                 continue
-            url = f"{self._SYMBOL_SERVER}/{name}/elf-buildid-sym-{build_id}/{name}.debug"
+            # The symbol server keys ELF debug files by build id; the name inside the
+            # key has varied between forms, so try the documented one first.
+            payload = None
+            for key in (
+                f"_.debug/elf-buildid-sym-{build_id}/_.debug",
+                f"{name}.debug/elf-buildid-sym-{build_id}/{name}.debug",
+                f"{name}/elf-buildid-sym-{build_id}/{name}.debug",
+            ):
+                url = f"{self._SYMBOL_SERVER}/{key}"
+                try:
+                    response = requests.get(url, timeout=300)
+                except requests.RequestException as error:
+                    self.log.warning("symbol fetch failed", url=key, error=str(error))
+                    continue
+                if response.status_code == 200 and response.content:
+                    payload = response.content
+                    self.log.info(
+                        "runtime symbols fetched",
+                        dso=name,
+                        build_id=build_id,
+                        bytes=len(payload),
+                        key=key,
+                    )
+                    break
+                self.log.info(
+                    "runtime symbols not at key",
+                    dso=name,
+                    status=response.status_code,
+                    key=key,
+                )
+            if payload is None:
+                continue
+
             target_dir = f"/usr/lib/debug/.build-id/{build_id[:2]}"
-            target = f"{target_dir}/{build_id[2:]}.debug"
-            fetch = container.exec_run(
-                [
-                    "sh",
-                    "-c",
-                    f"mkdir -p {target_dir} && "
-                    f"(command -v curl >/dev/null && curl -sfL -o {target} '{url}' || "
-                    f"wget -qO {target} '{url}') && "
-                    f"[ -s {target} ] && echo OK $(stat -c%s {target}) || echo MISS",
-                ]
-            )
-            verdict = fetch.output.decode(errors="replace").strip().splitlines()[-1:]
-            self.log.info(
-                "runtime symbols",
-                dso=name,
-                build_id=build_id[:16],
-                result=verdict[0] if verdict else "?",
-            )
-            if verdict and verdict[0].startswith("OK"):
-                placed.append(name)
-        if placed:
-            self.log.info("runtime symbols placed", dsos=placed)
+            member = f"{build_id[2:]}.debug"
+            try:
+                container.exec_run(["mkdir", "-p", target_dir])
+                archive = io.BytesIO()
+                with tarfile.open(fileobj=archive, mode="w") as tar:
+                    info = tarfile.TarInfo(member)
+                    info.size = len(payload)
+                    info.mode = 0o644
+                    tar.addfile(info, io.BytesIO(payload))
+                archive.seek(0)
+                container.put_archive(target_dir, archive.read())
+            except (docker.errors.APIError, OSError, tarfile.TarError) as error:
+                self.log.warning(
+                    "could not place symbols", dso=name, error=str(error)
+                )
+                continue
+            placed.append(name)
+        self.log.info("runtime symbols placed", dsos=placed)
 
     def _finalize_perf(self, container: Container | None) -> None:
         """Stop perf and fold the profile while the container is still alive.
