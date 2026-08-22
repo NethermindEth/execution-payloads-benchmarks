@@ -408,7 +408,6 @@ class Executor:
         dottrace_mode: str = "sampling",
         dotnet_trace: bool = False,
         perf: bool = False,
-        perf_frequency: int = 99,
         restart_retries: int = 0,
     ) -> Container:
         # Command
@@ -598,8 +597,6 @@ class Executor:
         if self.config.execution_client_security_opt:
             run_kwargs["security_opt"] = self.config.execution_client_security_opt
         container = self.config.docker_client.containers.run(**run_kwargs)
-        if perf:
-            self._start_perf(container, perf_frequency)
         return container
 
     def _client_host_pid(self, container: Container, timeout: int = 60) -> int | None:
@@ -1669,7 +1666,6 @@ class Executor:
                 dottrace_mode=dottrace_mode,
                 dotnet_trace=dotnet_trace_enabled,
                 perf=options.perf,
-                perf_frequency=options.perf_frequency,
                 restart_retries=options.client_restart_retries,
             )
 
@@ -1755,6 +1751,9 @@ class Executor:
             except Exception as e:
                 self.log.error("Failed to wait for client json rpc", error=e)
                 raise e
+
+            if options.perf:
+                self._start_perf(execution_client_container, options.perf_frequency)
 
             # Start extra commands in parallel
             self.start_extra_commands(execution_client_container)
