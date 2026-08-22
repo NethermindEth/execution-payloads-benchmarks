@@ -330,6 +330,10 @@ class Executor:
     # Frame pointers keep the capture small and the unwind cheap; DWARF unwinding
     # multiplies the data volume and perturbs the timings being measured.
     _PERF_CALL_GRAPH = "fp"
+    # Microsoft publishes ELF debug files for the runtime keyed by build id. Without
+    # them libcoreclr is the single largest unresolved block in every profile.
+    _SYMBOL_SERVER = "https://msdl.microsoft.com/download/symbols"
+    _SYMBOLIZE_DSOS = ("libcoreclr.so", "libclrjit.so", "libSystem.Native.so")
     _PERF_CLIENT_ENV = {
         # Emit /tmp/perf-<pid>.map so perf can name JIT-compiled frames. Without it
         # every managed frame in the profile is a bare address.
@@ -663,6 +667,64 @@ class Executor:
             return
         self.log.info("perf recording started", pid=pid, frequency=frequency)
 
+    def _fetch_runtime_symbols(self, container: Container, data_file: Path) -> None:
+        """Place debug files for the .NET runtime where perf will look for them.
+
+        The shipped runtime libraries are stripped, so their frames aggregate into one
+        opaque `[unknown] (libcoreclr.so)` entry. perf resolves a separate debug file
+        via the DSO's build id under /usr/lib/debug/.build-id, which is inside the
+        container because symbolization runs with --symfs pointed at its root.
+        """
+        try:
+            listing = subprocess.run(
+                ["perf", "buildid-list", "--input", str(data_file)],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            self.log.warning("perf buildid-list failed", error=str(error))
+            return
+        if listing.returncode != 0:
+            self.log.warning(
+                "perf buildid-list failed", stderr=listing.stderr.strip()[-500:]
+            )
+            return
+
+        placed = []
+        for line in listing.stdout.splitlines():
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            build_id, dso = parts[0], parts[-1]
+            name = dso.rsplit("/", 1)[-1]
+            if name not in self._SYMBOLIZE_DSOS or len(build_id) < 4:
+                continue
+            url = f"{self._SYMBOL_SERVER}/{name}/elf-buildid-sym-{build_id}/{name}.debug"
+            target_dir = f"/usr/lib/debug/.build-id/{build_id[:2]}"
+            target = f"{target_dir}/{build_id[2:]}.debug"
+            fetch = container.exec_run(
+                [
+                    "sh",
+                    "-c",
+                    f"mkdir -p {target_dir} && "
+                    f"(command -v curl >/dev/null && curl -sfL -o {target} '{url}' || "
+                    f"wget -qO {target} '{url}') && "
+                    f"[ -s {target} ] && echo OK $(stat -c%s {target}) || echo MISS",
+                ]
+            )
+            verdict = fetch.output.decode(errors="replace").strip().splitlines()[-1:]
+            self.log.info(
+                "runtime symbols",
+                dso=name,
+                build_id=build_id[:16],
+                result=verdict[0] if verdict else "?",
+            )
+            if verdict and verdict[0].startswith("OK"):
+                placed.append(name)
+        if placed:
+            self.log.info("runtime symbols placed", dsos=placed)
+
     def _finalize_perf(self, container: Container | None) -> None:
         """Stop perf and fold the profile while the container is still alive.
 
@@ -708,6 +770,9 @@ class Executor:
                 self.log.info("perf map prepared", pid=pid, detail=report)
             except docker.errors.APIError as error:
                 self.log.warning("could not prepare the perf map", error=str(error))
+
+        if container is not None:
+            self._fetch_runtime_symbols(container, data_file)
 
         try:
             script = subprocess.run(
