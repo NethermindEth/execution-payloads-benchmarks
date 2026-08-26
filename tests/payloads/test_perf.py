@@ -1,3 +1,8 @@
+from unittest.mock import Mock, patch
+
+import pytest
+
+from expb.payloads.executor.executor import Executor
 from expb.payloads.executor.perf import fold_perf_script, summarize_folded
 
 # Two samples sharing a prefix, one native leaf and one managed leaf, plus a sample
@@ -25,6 +30,40 @@ nethermind 12345/12350 1234.867890:  10101010 cycles:
 \tffffb1c2d100 Nethermind.Db.Rocks.DbOnTheRocks.Get+0x2c (/tmp/perf-1.map)
 \tffffb1c2d000 Nethermind.Blockchain.BlockProcessor.Process+0x88 (/tmp/perf-1.map)
 """
+
+
+def test_finalize_perf_before_start_is_a_noop():
+    executor = Executor(config=Mock(), logger=Mock())
+
+    executor._finalize_perf(None)
+
+    assert executor._perf_process is None
+    assert executor._perf_dir is None
+    assert executor._perf_host_pid is None
+
+
+def test_finalize_perf_after_start_failure_is_a_noop(tmp_path):
+    executor = Executor(config=Mock(outputs_dir=tmp_path), logger=Mock())
+
+    with (
+        patch.object(executor, "_client_host_pid", return_value=12345),
+        patch(
+            "expb.payloads.executor.executor.subprocess.Popen",
+            side_effect=OSError("perf unavailable"),
+        ),
+        pytest.raises(OSError, match="perf unavailable"),
+    ):
+        executor._start_perf(Mock(), frequency=99)
+
+    assert executor._perf_process is None
+    assert executor._perf_dir == tmp_path / "perf"
+    assert executor._perf_host_pid == 12345
+
+    executor._finalize_perf(None)
+
+    assert executor._perf_process is None
+    assert executor._perf_dir is None
+    assert executor._perf_host_pid is None
 
 
 def test_fold_orders_frames_root_first_and_counts_duplicates():

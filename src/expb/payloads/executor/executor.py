@@ -116,6 +116,9 @@ class Executor:
         self._dotnet_trace_process: subprocess.Popen | None = None
         self._dotnet_trace_diag_dir: Path | None = None
         self._dotnet_root_cache: str | None = None
+        self._perf_process: subprocess.Popen | None = None
+        self._perf_dir: Path | None = None
+        self._perf_host_pid: int | None = None
 
     # Scenario Setup
     def prepare_directories(self) -> None:
