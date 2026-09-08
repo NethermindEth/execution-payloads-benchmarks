@@ -314,7 +314,9 @@ Each scenario creates an isolated Docker bridge network:
 
 - Execution client container joins the network
 - K6 and Alloy containers join the same network
-- Enables service discovery by container name
+- Enables service discovery by container name; the execution client is also reachable as
+  `execution-client` (Alloy scrapes that alias, because container names longer than 63
+  characters do not resolve)
 - Network is removed during cleanup
 
 ### Resource Limiting

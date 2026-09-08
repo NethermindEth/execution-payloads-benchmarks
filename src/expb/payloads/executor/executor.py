@@ -681,7 +681,26 @@ class Executor:
             run_kwargs["mem_swappiness"] = self.config.resources.mem_swappiness
         if self.config.execution_client_security_opt:
             run_kwargs["security_opt"] = self.config.execution_client_security_opt
-        container = self.config.docker_client.containers.run(**run_kwargs)
+        if container_network is None:
+            return self.config.docker_client.containers.run(**run_kwargs)
+        # Attach the client under its short aliases as well: the container name exceeds the
+        # 63-character DNS label limit for long scenario names, and a name that does not resolve
+        # silently leaves the client unscraped, which shows up as a spurious CPU saving.
+        name = run_kwargs["name"]
+        if len(name) > 63:
+            self.log.warning(
+                "Execution client container name exceeds the DNS label limit; use its network alias",
+                container=name,
+                aliases=self.config.get_execution_client_aliases(),
+            )
+        run_kwargs.pop("detach")
+        container = self.config.docker_client.containers.create(**run_kwargs)
+        container_network.disconnect(container)
+        container_network.connect(
+            container, aliases=self.config.get_execution_client_aliases()
+        )
+        container.start()
+        container.reload()
         return container
 
     def _client_host_pid(self, container: Container, timeout: int = 60) -> int | None:
