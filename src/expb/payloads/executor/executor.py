@@ -567,9 +567,17 @@ class Executor:
             )
             diag_socket = self._dotnet_trace_diag_dir / "diag.sock"
             nettrace_file = dotnet_trace_dir / f"{self.config.test_id}.nettrace"
+            # EXPB_DOTNET_TRACE_CLREVENTS / EXPB_DOTNET_TRACE_CLREVENTLEVEL override the
+            # runtime-event capture, e.g. "gc" at "verbose" adds GCAllocationTick for an
+            # allocation-by-type profile of the whole run.
+            clrevents = os.environ.get(
+                "EXPB_DOTNET_TRACE_CLREVENTS", "gc+contention+threading+exception"
+            )
+            clreventlevel = os.environ.get(
+                "EXPB_DOTNET_TRACE_CLREVENTLEVEL", "informational"
+            )
             capture_args = (
-                ["--clrevents", "gc+contention+threading+exception",
-                 "--clreventlevel", "informational"]
+                ["--clrevents", clrevents, "--clreventlevel", clreventlevel]
                 if dottrace
                 else ["--profile", "cpu-sampling"]
             )
