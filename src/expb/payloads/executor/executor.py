@@ -1611,6 +1611,24 @@ class Executor:
                     "Failed to reap orphan network", network=network.name, error=e
                 )
 
+    def _stop_dotnet_trace_collector(self) -> None:
+        if self._dotnet_trace_process is None:
+            return
+        collector = self._dotnet_trace_process
+        self._dotnet_trace_process = None
+        try:
+            # SIGINT finalizes the .nettrace; the session usually ends on its own
+            # once the client runtime disconnects.
+            collector.send_signal(signal.SIGINT)
+            collector.wait(timeout=120)
+            self.log.info("dotnet-trace collection stopped")
+        except Exception as e:
+            collector.kill()
+            self.log.error("dotnet-trace collector did not stop cleanly", error=e)
+        if self._dotnet_trace_diag_dir is not None:
+            shutil.rmtree(self._dotnet_trace_diag_dir, ignore_errors=True)
+            self._dotnet_trace_diag_dir = None
+
     def cleanup_scenario(
         self,
         print_logs_to_console: bool = False,
@@ -1647,6 +1665,10 @@ class Executor:
             line_callback=_collect_k6_metric,
         )
 
+        # Stop the collector while the client runtime is still alive: the stop request makes
+        # the runtime emit its method rundown, without which the .nettrace stacks do not resolve.
+        self._stop_dotnet_trace_collector()
+
         execution_client_mounts = self._teardown_container(
             self.config.get_execution_client_container_name(),
             log_file=(
@@ -1677,21 +1699,6 @@ class Executor:
                             error=e,
                         )
 
-        if self._dotnet_trace_process is not None:
-            collector = self._dotnet_trace_process
-            self._dotnet_trace_process = None
-            try:
-                # SIGINT finalizes the .nettrace; the session usually ends on its own
-                # once the client runtime disconnects.
-                collector.send_signal(signal.SIGINT)
-                collector.wait(timeout=120)
-                self.log.info("dotnet-trace collection stopped")
-            except Exception as e:
-                collector.kill()
-                self.log.error("dotnet-trace collector did not stop cleanly", error=e)
-            if self._dotnet_trace_diag_dir is not None:
-                shutil.rmtree(self._dotnet_trace_diag_dir, ignore_errors=True)
-                self._dotnet_trace_diag_dir = None
 
         if print_logs_to_console and print_per_payload_metrics_table:
             self._print_per_payload_metrics_table(per_payload_metrics_rows)
