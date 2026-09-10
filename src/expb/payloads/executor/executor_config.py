@@ -32,6 +32,9 @@ from expb.payloads.executor.services.payload_server import PAYLOAD_SERVER_PORT
 from expb.payloads.executor.services.snapshots import SnapshotService
 
 
+EXECUTION_CLIENT_ALIAS = "execution-client"
+
+
 # ExecutorConfig class is a collection of helper functions and configuration options for the Executor class
 class ExecutorConfig:
     def __init__(
@@ -232,9 +235,15 @@ class ExecutorConfig:
             # f"{CLIENT_P2P_PORT}/udp": ("127.0.0.1", f"{CLIENT_P2P_PORT}"),
         }
 
+    def get_execution_client_aliases(self) -> list[str]:
+        # Docker's embedded DNS resolves a name only if it fits a 63-character DNS label. Scenario
+        # names push the client's container name past that, so the client also gets a short alias
+        # on the scenario network and everything that addresses it by name uses the alias.
+        return [EXECUTION_CLIENT_ALIAS]
+
     def get_execution_metrics_address(self) -> str:
-        # Metrics endpoint is required before the actual execution container is started
-        return f"{self.get_execution_client_container_name()}:{CLIENT_METRICS_PORT}"
+        # Rendered into the Alloy config before the execution container exists, so it cannot be an IP.
+        return f"{EXECUTION_CLIENT_ALIAS}:{CLIENT_METRICS_PORT}"
 
     def get_execution_client_engine_url(
         self,
