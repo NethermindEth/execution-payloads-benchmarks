@@ -1929,6 +1929,7 @@ class Executor:
                         execution_client_container,
                         self.config.resources.download_speed,
                         self.config.resources.upload_speed,
+                        logger=self.log,
                     )
                 except Exception as e:
                     self.log.error("Failed to limit container bandwidth", error=e)
