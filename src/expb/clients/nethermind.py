@@ -40,7 +40,10 @@ class NethermindConfig(ClientConfig):
                 "--Network.MaxActivePeers=0",
             ],
             prometheus_metrics_path="/metrics",
-            sse_data_feed_path="/data/events",
+            # Only the processing statistics: without the filter Nethermind also builds the
+            # forkChoice payload (the whole head block with every transaction, receipt and log)
+            # for the benchmark's own subscription, perturbing what is being measured.
+            sse_data_feed_path="/data/events?events=processed",
             # No GC or code-generation overrides: the client must run the way it
             # runs in production, or the benchmark measures a configuration nobody
             # ships. Set them per scenario (extra_flags/extra_env) or per run
