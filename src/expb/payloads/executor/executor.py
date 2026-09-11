@@ -51,6 +51,9 @@ PER_PAYLOAD_METRIC_LOG_PATTERN = re.compile(
 # their (deterministic) names.
 EXPB_LABEL = "expb"
 NO_RESTART_POLICY = {"Name": "no"}
+NETHERMIND_PRIORITY_MODE_ENV = "EXPB_NETHERMIND_PRIORITY_MODE"
+NETHERMIND_PRIORITY_CONTAINER_ENV = "NETHERMIND_EXPB_PRIORITY_MODE"
+NETHERMIND_PRIORITY_MODES = frozenset(("off", "observe", "nice"))
 
 # Matches the type signal.getsignal() returns / signal.signal() accepts.
 SignalHandler = (
@@ -110,6 +113,7 @@ class Executor:
     ):
         self.config: ExecutorConfig = config
         self.log: Logger = logger
+        self.nethermind_priority_mode = self._resolve_nethermind_priority_mode()
         self.running_command_futures: list[Future] = []
         self.executor_pool: ThreadPoolExecutor | None = None
         self._dottrace_active: bool = False
@@ -119,6 +123,20 @@ class Executor:
         self._perf_process: subprocess.Popen | None = None
         self._perf_dir: Path | None = None
         self._perf_host_pid: int | None = None
+
+    def _resolve_nethermind_priority_mode(self) -> str:
+        """Validate and normalize the opt-in Linux priority experiment mode."""
+        mode = os.environ.get(NETHERMIND_PRIORITY_MODE_ENV, "off").strip().lower()
+        if mode not in NETHERMIND_PRIORITY_MODES:
+            allowed = ", ".join(sorted(NETHERMIND_PRIORITY_MODES))
+            raise ValueError(
+                f"{NETHERMIND_PRIORITY_MODE_ENV} must be one of {allowed}, got '{mode}'"
+            )
+        if mode != "off" and self.config.get_execution_client_name() != "nethermind":
+            raise ValueError(
+                f"{NETHERMIND_PRIORITY_MODE_ENV}={mode} is only supported for the nethermind client"
+            )
+        return mode
 
     # Scenario Setup
     def prepare_directories(self) -> None:
@@ -655,6 +673,17 @@ class Executor:
                     execution_container_environment = {}
                 execution_container_environment.update(self._PERF_CLIENT_ENV)
 
+        if self.nethermind_priority_mode != "off":
+            if execution_container_environment is None:
+                execution_container_environment = {}
+            execution_container_environment[NETHERMIND_PRIORITY_CONTAINER_ENV] = (
+                self.nethermind_priority_mode
+            )
+            self.log.info(
+                "Nethermind Linux priority experiment enabled",
+                mode=self.nethermind_priority_mode,
+            )
+
         # Run execution container
         restart_policy = (
             {"Name": "on-failure", "MaximumRetryCount": restart_retries}
@@ -689,6 +718,8 @@ class Executor:
             run_kwargs["mem_swappiness"] = self.config.resources.mem_swappiness
         if self.config.execution_client_security_opt:
             run_kwargs["security_opt"] = self.config.execution_client_security_opt
+        if self.nethermind_priority_mode != "off":
+            run_kwargs["cap_add"] = ["SYS_NICE"]
         container = self.config.docker_client.containers.run(**run_kwargs)
         return container
 

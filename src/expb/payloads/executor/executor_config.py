@@ -111,6 +111,20 @@ class ExecutorConfig:
             except ValueError:
                 pass
 
+        # EXPB_SKIP_OVERRIDE overrides the number of payloads skipped before warmup.
+        _skip_override = os.environ.get("EXPB_SKIP_OVERRIDE")
+        if _skip_override is not None:
+            if not re.fullmatch(r"[0-9]+", _skip_override):
+                raise ValueError(
+                    "EXPB_SKIP_OVERRIDE must be a non-negative integer"
+                )
+            try:
+                self.k6_payloads_skip = int(_skip_override)
+            except ValueError as error:
+                raise ValueError(
+                    "EXPB_SKIP_OVERRIDE must be a non-negative integer"
+                ) from error
+
         # Executor Directories
         ## Payloads and FCUs
         self.payloads_file: Path = scenario.payloads_file
