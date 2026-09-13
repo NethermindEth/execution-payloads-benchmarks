@@ -22,7 +22,7 @@ def make_config(client: str = "nethermind") -> Mock:
     return config
 
 
-@pytest.mark.parametrize("mode", ["observe", "nice"])
+@pytest.mark.parametrize("mode", ["observe", "nice", "reth"])
 def test_priority_mode_forwards_mode_and_sys_nice_capability(monkeypatch, mode):
     monkeypatch.setenv("EXPB_NETHERMIND_PRIORITY_MODE", mode)
     config = make_config()
@@ -55,7 +55,24 @@ def test_priority_mode_off_is_an_explicit_noop(monkeypatch):
     executor.start_execution_client()
 
     kwargs = config.docker_client.containers.run.call_args.kwargs
-    assert "NETHERMIND_EXPB_PRIORITY_MODE" not in kwargs["environment"]
+    assert kwargs["environment"] == {
+        "EXISTING": "value",
+        "NETHERMIND_EXPB_PRIORITY_MODE": "off",
+    }
+    assert "cap_add" not in kwargs
+
+
+def test_priority_mode_off_for_other_client_preserves_default_container_arguments(
+    monkeypatch,
+):
+    monkeypatch.setenv("EXPB_NETHERMIND_PRIORITY_MODE", "off")
+    config = make_config("reth")
+    executor = Executor(config=config, logger=Mock())
+
+    executor.start_execution_client()
+
+    kwargs = config.docker_client.containers.run.call_args.kwargs
+    assert kwargs["environment"] == {"EXISTING": "value"}
     assert "cap_add" not in kwargs
 
 

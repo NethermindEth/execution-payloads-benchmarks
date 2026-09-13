@@ -53,7 +53,7 @@ EXPB_LABEL = "expb"
 NO_RESTART_POLICY = {"Name": "no"}
 NETHERMIND_PRIORITY_MODE_ENV = "EXPB_NETHERMIND_PRIORITY_MODE"
 NETHERMIND_PRIORITY_CONTAINER_ENV = "NETHERMIND_EXPB_PRIORITY_MODE"
-NETHERMIND_PRIORITY_MODES = frozenset(("off", "observe", "nice"))
+NETHERMIND_PRIORITY_MODES = frozenset(("off", "observe", "nice", "reth"))
 
 # Matches the type signal.getsignal() returns / signal.signal() accepts.
 SignalHandler = (
@@ -113,6 +113,9 @@ class Executor:
     ):
         self.config: ExecutorConfig = config
         self.log: Logger = logger
+        self.nethermind_priority_mode_explicit = (
+            NETHERMIND_PRIORITY_MODE_ENV in os.environ
+        )
         self.nethermind_priority_mode = self._resolve_nethermind_priority_mode()
         self.running_command_futures: list[Future] = []
         self.executor_pool: ThreadPoolExecutor | None = None
@@ -673,7 +676,13 @@ class Executor:
                     execution_container_environment = {}
                 execution_container_environment.update(self._PERF_CLIENT_ENV)
 
-        if self.nethermind_priority_mode != "off":
+        if (
+            self.config.get_execution_client_name() == "nethermind"
+            and (
+                self.nethermind_priority_mode != "off"
+                or self.nethermind_priority_mode_explicit
+            )
+        ):
             if execution_container_environment is None:
                 execution_container_environment = {}
             execution_container_environment[NETHERMIND_PRIORITY_CONTAINER_ENV] = (
