@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 from pydantic import (
     BaseModel,
@@ -138,6 +139,10 @@ class Scenario(BaseModel):
     snapshot_backend: SnapshotBackend = Field(
         description="Snapshot backend to use.",
         default=SnapshotBackend.OVERLAY,
+    )
+    snapshot_mount_path: Literal["/execution-data", "/execution-data/geth"] = Field(
+        description="Path where the snapshot is mounted in the execution client container.",
+        default="/execution-data",
     )
     snapshot_path: Path | None = Field(
         description="Path to the snapshot directory for copy backend (overrides work_dir).",

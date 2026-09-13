@@ -14,7 +14,6 @@ from expb.clients import (
     CLIENT_METRICS_PORT,
     CLIENT_RPC_PORT,
     CLIENT_RPC_WS_PORT,
-    CLIENTS_DATA_DIR,
     CLIENTS_JWT_SECRET_DIR,
     Client,
 )
@@ -124,6 +123,7 @@ class ExecutorConfig:
 
         ## Snapshot config
         self.snapshot_source: str = scenario.snapshot_source
+        self.snapshot_mount_path: str = scenario.snapshot_mount_path
         self.snapshot_service: SnapshotService = snapshot_service
 
         ## Outputs directory
@@ -315,7 +315,7 @@ class ExecutorConfig:
         )
         execution_container_volumes.append(
             {
-                "bind": CLIENTS_DATA_DIR,
+                "bind": self.snapshot_mount_path,
                 "config": {
                     "name": f"{container_name}-overlay-merged",
                     "driver": "local",
