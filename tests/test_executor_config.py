@@ -6,9 +6,10 @@ from expb.clients import Client
 from expb.configs.scenarios import Scenario, ScenariosPaths
 from expb.payloads.executor import executor_config as executor_config_module
 from expb.payloads.executor.executor_config import ExecutorConfig
+from expb.payloads.executor.services.snapshots import SnapshotService
 
 
-class StubSnapshotService:
+class StubSnapshotService(SnapshotService):
     def __init__(self, snapshot_path: Path):
         self.snapshot_path = snapshot_path
 
@@ -28,7 +29,7 @@ def make_scenario(tmp_path: Path, **overrides) -> Scenario:
         "snapshot_source": "snapshot",
     }
     values.update(overrides)
-    return Scenario(**values)
+    return Scenario.model_validate(values)
 
 
 @pytest.mark.parametrize(
