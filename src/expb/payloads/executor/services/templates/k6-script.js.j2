@@ -15,10 +15,10 @@ const abortOnEOF = (__ENV.EXPB_ABORT_ON_EOF || '0') === '1';
 const addCorrelationHeader = (__ENV.EXPB_ADD_CID || '1') === '1';
 const engineEndpoint = __ENV.EXPB_ENGINE_ENDPOINT;
 const perPayloadMetrics = (__ENV.EXPB_PER_PAYLOAD_METRICS || '0') === '1';
-const discardResponses = (__ENV.EXPB_DISCARD_RESPONSES || '1') === '1';
 const enableLogging = (__ENV.EXPB_ENABLE_LOGGING || '0') === '1';
 const perPayloadMetricsLogs = (__ENV.EXPB_PER_PAYLOAD_METRICS_LOGS || '0') === '1';
 const verbosePostLogs = (__ENV.EXPB_VERBOSE_POST_LOGS || '0') === '1';
+const maxDiagnosticBodyLength = 512;
 
 // Load k6 options JSON
 const config = JSON.parse(open(__ENV.EXPB_CONFIG_FILE_PATH));
@@ -74,6 +74,62 @@ function emitPerPayloadMetricsRow(idx, gasUsed, processingMs) {
   console.log(
     `EXPB_PER_PAYLOAD_METRIC idx=${idx} gas_used=${gas} processing_ms=${processing}`
   );
+}
+
+function boundedResponseBody(response) {
+  const body = typeof response.body === 'string' ? response.body : '';
+  const compactBody = body.replace(/\s+/g, ' ');
+  if (compactBody.length <= maxDiagnosticBodyLength) return compactBody;
+  return compactBody.slice(0, maxDiagnosticBodyLength) + '...';
+}
+
+function checkEngineResponse(response, kind, idx, tags) {
+  let payloadStatus = null;
+  let valid = response.status === 200;
+  let diagnostic = response.status === 200 ? '' : `HTTP status ${response.status}`;
+
+  if (valid) {
+    let body;
+    try {
+      body = JSON.parse(response.body || '');
+    } catch (error) {
+      valid = false;
+      diagnostic = 'response body is not valid JSON';
+    }
+
+    if (valid && (!body || body.error !== undefined)) {
+      valid = false;
+      diagnostic = 'JSON-RPC error';
+    }
+
+    if (valid && (!body || body.result === undefined)) {
+      valid = false;
+      diagnostic = 'response has no JSON-RPC result';
+    }
+
+    if (valid) {
+      // engine_newPayload returns the payloadStatus object directly, while
+      // engine_forkchoiceUpdated wraps it in result.payloadStatus.
+      payloadStatus = kind === 'newPayload'
+        ? body.result && body.result.status
+        : body.result && body.result.payloadStatus && body.result.payloadStatus.status;
+      if (payloadStatus !== 'VALID') {
+        valid = false;
+        diagnostic = `payload status ${payloadStatus || 'missing'}`;
+      }
+    }
+  }
+
+  if (!valid) {
+    console.error(
+      `[engine] ${kind} idx=${idx} ${diagnostic}; response=${boundedResponseBody(response)}`
+    );
+  }
+
+  check(response, {
+    'status_200': (x) => x.status === 200,
+    'payload_status_valid': () => valid,
+  }, tags);
 }
 
 // --- Fetch next pair from payload server ---
@@ -170,9 +226,9 @@ function processNextPayload(base_tags = {}, warmup = false) {
     const r = http.post(engineEndpoint, pair.rawPayload, {
       headers: headers,
       tags: tags,
-      responseType: discardResponses ? 'none' : 'text',
+      responseType: 'text',
     });
-    check(r, { 'status_200': (x) => x.status === 200 }, tags);
+    checkEngineResponse(r, 'newPayload', idx, tags);
 
     if (!warmup) {
       emitPerPayloadMetricsRow(idx, pair.gasUsed, r.timings.waiting);
@@ -213,9 +269,9 @@ function processNextPayload(base_tags = {}, warmup = false) {
     const r = http.post(engineEndpoint, pair.rawFcu, {
       headers: headers,
       tags: tags,
-      responseType: discardResponses ? 'none' : 'text',
+      responseType: 'text',
     });
-    check(r, { 'status_200': (x) => x.status === 200 }, tags);
+    checkEngineResponse(r, 'forkchoiceUpdated', idx, tags);
   });
 
   // Emit client-side processing metric for the PREVIOUS block.
