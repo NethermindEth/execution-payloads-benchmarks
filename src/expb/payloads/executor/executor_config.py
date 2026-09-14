@@ -100,6 +100,17 @@ class ExecutorConfig:
         self.k6_warmup_wait: int = scenario.warmup_wait
         self.k6_payloads_skip: int | None = scenario.payloads_skip
         self.k6_payloads_warmup: int | None = scenario.payloads_warmup
+        # EXPB_SKIP_OVERRIDE changes the number of payloads skipped before the
+        # configured warmup and measured payloads, without editing the scenario.
+        _skip_override = os.environ.get("EXPB_SKIP_OVERRIDE")
+        if _skip_override is not None:
+            if not _skip_override.isdecimal():
+                raise ValueError(
+                    "EXPB_SKIP_OVERRIDE must be a nonnegative integer, "
+                    f"got '{_skip_override}'"
+                )
+            self.k6_payloads_skip = int(_skip_override)
+
         # EXPB_WARMUP_OVERRIDE overrides the number of unmeasured warmup payloads
         # without editing the scenario config. A larger warmup lets the OS page
         # cache and client caches reach a warm steady state before measurement.

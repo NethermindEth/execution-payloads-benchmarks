@@ -1665,6 +1665,20 @@ class Executor:
             line_callback=_collect_k6_metric,
         )
 
+        # Stop RPC-consuming infrastructure before the client so its connections do not
+        # delay the client's graceful shutdown (the payload server also owns the SSE stream).
+        self._teardown_container(
+            self.config.get_payload_server_container_name(),
+            log_file=self.config.outputs_dir / "payload-server.log",
+            stop_timeout=3,
+            print_console=print_logs_to_console,
+        )
+
+        self._teardown_container(
+            self.config.get_alloy_container_name(),
+            stop_timeout=3,
+        )
+
         # Stop the collector while the client runtime is still alive: the stop request makes
         # the runtime emit its method rundown, without which the .nettrace stacks do not resolve.
         self._stop_dotnet_trace_collector()
@@ -1702,18 +1716,6 @@ class Executor:
 
         if print_logs_to_console and print_per_payload_metrics_table:
             self._print_per_payload_metrics_table(per_payload_metrics_rows)
-
-        self._teardown_container(
-            self.config.get_payload_server_container_name(),
-            log_file=self.config.outputs_dir / "payload-server.log",
-            stop_timeout=3,
-            print_console=print_logs_to_console,
-        )
-
-        self._teardown_container(
-            self.config.get_alloy_container_name(),
-            stop_timeout=3,
-        )
 
         # Clean docker network
         try:
