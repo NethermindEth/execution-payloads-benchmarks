@@ -22,7 +22,7 @@ def make_config(client: str = "nethermind") -> Mock:
     return config
 
 
-@pytest.mark.parametrize("mode", ["observe", "nice", "reth"])
+@pytest.mark.parametrize("mode", ["observe", "nice", "boost"])
 def test_priority_mode_forwards_mode_and_sys_nice_capability(monkeypatch, mode):
     monkeypatch.setenv("EXPB_NETHERMIND_PRIORITY_MODE", mode)
     config = make_config()
@@ -66,7 +66,7 @@ def test_priority_mode_off_for_other_client_preserves_default_container_argument
     monkeypatch,
 ):
     monkeypatch.setenv("EXPB_NETHERMIND_PRIORITY_MODE", "off")
-    config = make_config("reth")
+    config = make_config("geth")
     executor = Executor(config=config, logger=Mock())
 
     executor.start_execution_client()
@@ -87,4 +87,4 @@ def test_priority_mode_rejects_non_nethermind_client(monkeypatch):
     monkeypatch.setenv("EXPB_NETHERMIND_PRIORITY_MODE", "observe")
 
     with pytest.raises(ValueError, match="only supported for the nethermind client"):
-        Executor(config=make_config("reth"), logger=Mock())
+        Executor(config=make_config("geth"), logger=Mock())

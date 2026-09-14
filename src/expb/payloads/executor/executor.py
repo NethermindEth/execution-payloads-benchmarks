@@ -53,7 +53,7 @@ EXPB_LABEL = "expb"
 NO_RESTART_POLICY = {"Name": "no"}
 NETHERMIND_PRIORITY_MODE_ENV = "EXPB_NETHERMIND_PRIORITY_MODE"
 NETHERMIND_PRIORITY_CONTAINER_ENV = "NETHERMIND_EXPB_PRIORITY_MODE"
-NETHERMIND_PRIORITY_MODES = frozenset(("off", "observe", "nice", "reth"))
+NETHERMIND_PRIORITY_MODES = frozenset(("off", "observe", "nice", "boost"))
 
 # Matches the type signal.getsignal() returns / signal.signal() accepts.
 SignalHandler = (
