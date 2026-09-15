@@ -231,7 +231,9 @@ function processNextPayload(base_tags = {}, warmup = false) {
     checkEngineResponse(r, 'newPayload', idx, tags);
 
     if (!warmup) {
-      emitPerPayloadMetricsRow(idx, pair.gasUsed, r.timings.waiting);
+      // Full request time: the body upload counts for the consensus client too, and the
+      // response is a few hundred bytes, so this differs from time to first byte by the upload.
+      emitPerPayloadMetricsRow(idx, pair.gasUsed, r.timings.duration);
     }
 
     if (!warmup && perPayloadMetrics) {
