@@ -168,6 +168,7 @@ class Executor:
         self.executor_pool: ThreadPoolExecutor | None = None
         self._dottrace_active: bool = False
         self._dotmemory_active: bool = False
+        self._dotnet_dump_active: bool = False
         self._dotnet_trace_process: subprocess.Popen | None = None
         self._dotnet_trace_diag_dir: Path | None = None
         self._dotnet_root_cache: str | None = None
@@ -391,6 +392,22 @@ class Executor:
     # have gone, so the existing dottrace artifact collection uploads it.
     _DOTMEMORY_CONTAINER_PATH = "/opt/dotmemory"
     _DOTMEMORY_DEFAULT_VERSION = "2026.1.1"
+    # EXPB_DOTNET_DUMP=final writes a heap dump of the client after the last payload and turns
+    # it into dotnet-dump analyze text reports under dottrace/dotnet-dump, which the profiling
+    # artifact collection uploads. The dump itself stays out of the artifact unless
+    # EXPB_DOTNET_DUMP_KEEP=1.
+    _DOTNET_DUMP_DEFAULT_INSTALL_PATH = "/opt/dotnet-dump"
+    _DOTNET_DUMP_CONTAINER_PATH = "/opt/dotnet-dump"
+    _DOTNET_DUMP_OUTPUT_PATH = "/expb-dotnet-dump"
+    _DOTNET_DUMP_REPORTS = (
+        ("gcheapstat", "gcheapstat"),
+        ("eeheap-gc", "eeheap -gc"),
+        ("dumpheap-stat", "dumpheap -stat"),
+        ("dumpheap-stat-live", "dumpheap -stat -live"),
+        ("dumpheap-stat-dead", "dumpheap -stat -dead"),
+        ("dumpheap-stat-loh", "dumpheap -stat -min 85000"),
+        ("sizestats", "sizestats"),
+    )
     _DOTNET_TRACE_DEFAULT_INSTALL_PATH = "/opt/dotnet-trace"
     _DOTNET_TRACE_OUTPUT_PATH = "/dotnet-trace-output"
     _DOTNET_TRACE_DIAG_PATH = "/dotnet-trace-diag"
@@ -484,6 +501,171 @@ class Executor:
             timeout=120,
         )
         return path
+
+    @staticmethod
+    def _dotnet_dump_mode() -> str:
+        return os.environ.get("EXPB_DOTNET_DUMP", "").strip().lower()
+
+    def _ensure_dotnet_dump_installed(self) -> str:
+        """Ensure the dotnet-dump global tool is installed, return the host path.
+
+        The tool runs inside the client image, on the image's own runtime: the collect
+        request must reach the client's diagnostic socket in the container's /tmp, and the
+        analysis needs the DAC that matches the client's runtime.
+        """
+        path = self._DOTNET_DUMP_DEFAULT_INSTALL_PATH
+        if (Path(path) / "dotnet-dump").exists():
+            self.log.info("dotnet-dump found", path=path)
+            return path
+        self.log.info("dotnet-dump not found, installing", path=path)
+        subprocess.run(
+            ["dotnet", "tool", "install", "--tool-path", path, "dotnet-dump"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        return path
+
+    def _dotnet_dump_host_dir(self) -> Path:
+        # Outside the dottrace/dotnet-trace/perf directories the artifact step zips.
+        return self.config.outputs_dir / "dotnet-dump"
+
+    def _dotnet_dump_file(self) -> str:
+        return f"{self._DOTNET_DUMP_OUTPUT_PATH}/{self.config.test_id}.dmp"
+
+    def _dotnet_dump_tool_command(self, *args: str) -> list[str]:
+        # The tool targets an older framework than the client image carries.
+        return [
+            "/usr/bin/env",
+            "DOTNET_ROLL_FORWARD=Major",
+            f"{self._DOTNET_DUMP_CONTAINER_PATH}/dotnet-dump",
+            *args,
+        ]
+
+    def _collect_dotnet_dump(self, timeout: int) -> bool:
+        """Write a heap dump of the running client into the dump directory.
+
+        The runtime writes the dump itself (createdump), so the path is the container's view
+        of the bind-mounted dump directory. The client is paused while the dump is written.
+        """
+        container_name = self.config.get_execution_client_container_name()
+        try:
+            container = self.config.docker_client.containers.get(container_name)
+            container.reload()
+        except Exception as e:
+            self.log.error("Client container unavailable; no heap dump", container=container_name, error=e)
+            return False
+        if container.attrs.get("State", {}).get("Running") is not True:
+            self.log.error("Client is not running; no heap dump", container=container_name)
+            return False
+
+        client_name = Path(self.config.execution_client.value.entrypoint or "nethermind").name
+        dump_file = self._dotnet_dump_file()
+        started = time.monotonic()
+        self.log.info("Collecting heap dump of the client", process=client_name, dump=dump_file)
+        # docker exec has no timeout of its own; a hung collect must not hang the cleanup, and
+        # the client teardown that follows ends the exec'd process.
+        pool = ThreadPoolExecutor(max_workers=1)
+        future = pool.submit(
+            container.exec_run,
+            self._dotnet_dump_tool_command(
+                "collect", "--name", client_name, "--type", "Heap", "--output", dump_file
+            ),
+        )
+        try:
+            result = future.result(timeout=timeout)
+        except Exception as e:
+            self.log.error("Heap dump collection failed", error=e, timeout=timeout)
+            return False
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
+        # The dump is written 0600 by the client's user; the analysis reads it as that user
+        # too, but the artifact step (EXPB_DOTNET_DUMP_KEEP=1) reads it as the runner's.
+        container.exec_run(["chmod", "0644", dump_file])
+        output = (result.output or b"").decode(errors="replace").strip()
+        if result.exit_code != 0:
+            self.log.error("dotnet-dump collect failed", exit_code=result.exit_code, output=output[-2000:])
+            return False
+        self.log.info(
+            "Heap dump written",
+            seconds=round(time.monotonic() - started, 1),
+            bytes=self._file_size(self._dotnet_dump_host_dir() / f"{self.config.test_id}.dmp"),
+        )
+        return True
+
+    @staticmethod
+    def _file_size(path: Path) -> int | None:
+        try:
+            return path.stat().st_size
+        except OSError:
+            return None
+
+    @classmethod
+    def _dotnet_dump_reports(cls) -> list[tuple[str, str]]:
+        """Report name and analyze command pairs; EXPB_DOTNET_DUMP_COMMANDS=cmd;cmd replaces them."""
+        override = os.environ.get("EXPB_DOTNET_DUMP_COMMANDS", "").strip()
+        if not override:
+            return list(cls._DOTNET_DUMP_REPORTS)
+        commands = [c.strip() for c in override.split(";") if c.strip()]
+        return [(re.sub(r"[^a-z0-9]+", "-", c.lower()).strip("-"), c) for c in commands]
+
+    def _analyze_dotnet_dump(self, timeout: int) -> None:
+        """Turn the heap dump into text reports, then drop the dump unless asked to keep it.
+
+        Runs after the client container is gone, in a throwaway container of the client image:
+        dotnet-dump analyze needs the DAC of the exact runtime the dump came from, and the
+        client image is the one place that is guaranteed to have it. Each report runs in its own
+        analyze session because one failing command ends the session.
+        """
+        dump_dir = self._dotnet_dump_host_dir()
+        dump_host_file = dump_dir / f"{self.config.test_id}.dmp"
+        if not dump_host_file.exists():
+            return
+        report_dir = self.config.outputs_dir / "dottrace" / "dotnet-dump"
+        report_dir.mkdir(parents=True, exist_ok=True)
+        tool_path = self._ensure_dotnet_dump_installed()
+        for name, command in self._dotnet_dump_reports():
+            started = time.monotonic()
+            container = None
+            try:
+                container = self.config.docker_client.containers.run(
+                    image=self.config.execution_client_image,
+                    entrypoint=self._dotnet_dump_tool_command(
+                        "analyze", self._dotnet_dump_file(), "--command", command, "--command", "exit"
+                    ),
+                    volumes=[
+                        f"{tool_path}:{self._DOTNET_DUMP_CONTAINER_PATH}:ro",
+                        f"{dump_dir}:{self._DOTNET_DUMP_OUTPUT_PATH}:ro",
+                    ],
+                    labels=self._container_labels(),
+                    user=self.config.docker_user,
+                    group_add=self.config.docker_group_add,
+                    network_mode="none",
+                    detach=True,
+                )
+                status = container.wait(timeout=timeout)
+                output = container.logs(stdout=True, stderr=True)
+                (report_dir / f"{name}.txt").write_bytes(output)
+                self.log.info(
+                    "Heap dump report written",
+                    report=name,
+                    exit_code=status.get("StatusCode"),
+                    seconds=round(time.monotonic() - started, 1),
+                )
+            except Exception as e:
+                self.log.error("Heap dump report failed", report=name, error=e)
+            finally:
+                if container is not None:
+                    try:
+                        container.remove(force=True)
+                    except Exception:
+                        pass
+        if os.environ.get("EXPB_DOTNET_DUMP_KEEP", "0") == "1":
+            dump_host_file.rename(report_dir / dump_host_file.name)
+            self.log.info("Heap dump kept with the reports", dump=str(report_dir / dump_host_file.name))
+        else:
+            dump_host_file.unlink(missing_ok=True)
 
     def _ensure_dottrace_installed(self) -> str:
         """Ensure dotTrace CLI tools are installed, return the host path."""
@@ -861,6 +1043,18 @@ class Executor:
                 trace_output=str(nettrace_file),
                 capture=("clrevents" if dottrace else "cpu-sampling"),
             )
+
+        if self._dotnet_dump_mode() == "final":
+            dump_dir = self._dotnet_dump_host_dir()
+            dump_dir.mkdir(parents=True, exist_ok=True)
+            execution_container_volumes.append(
+                f"{self._ensure_dotnet_dump_installed()}:{self._DOTNET_DUMP_CONTAINER_PATH}:ro"
+            )
+            execution_container_volumes.append(
+                f"{dump_dir}:{self._DOTNET_DUMP_OUTPUT_PATH}:rw"
+            )
+            self._dotnet_dump_active = True
+            self.log.info("Heap dump after the last payload enabled", dump_dir=str(dump_dir))
 
         if perf:
             # Scope the perf-map variables to the client. Container-wide they would
@@ -2022,6 +2216,13 @@ class Executor:
         # the runtime emit its method rundown, without which the .nettrace stacks do not resolve.
         self._stop_dotnet_trace_collector()
 
+        # Before the dotMemory snapshot, whose full GC would clear the garbage the dump keeps.
+        dump_timeout = int(os.environ.get("EXPB_DOTNET_DUMP_TIMEOUT", "1200"))
+        dump_collected = False
+        if self._dotnet_dump_active:
+            self._dotnet_dump_active = False
+            dump_collected = self._collect_dotnet_dump(timeout=dump_timeout)
+
         if self._dotmemory_active:
             self._dotmemory_active = False
             self._request_dotmemory_snapshot(
@@ -2080,6 +2281,9 @@ class Executor:
                             error=e,
                         )
 
+        # With the client gone, so the analysis does not compete with it for memory.
+        if dump_collected:
+            self._analyze_dotnet_dump(timeout=dump_timeout)
 
         if print_logs_to_console and print_per_payload_metrics_table:
             self._print_per_payload_metrics_table(per_payload_metrics_rows)
