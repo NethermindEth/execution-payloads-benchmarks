@@ -385,9 +385,10 @@ class Executor:
     _DOTTRACE_CONTAINER_PATH = "/opt/dottrace"
     _DOTTRACE_OUTPUT_PATH = "/dottrace-output"
     _DOTTRACE_DEFAULT_INSTALL_PATH = "/opt/dottrace"
-    # EXPB_DOTMEMORY=final swaps the dotTrace wrapper for one dotMemory snapshot of the
-    # client after the last payload, written next to where the .dtp would have gone so
-    # the existing dottrace artifact collection picks it up.
+    # EXPB_DOTMEMORY=final swaps the dotTrace wrapper for a dotMemory one: the client runs under
+    # `dotmemory start`, one snapshot is requested over stdin after the last payload, and the
+    # graceful child shutdown lets the wrapper save the workspace next to where the .dtp would
+    # have gone, so the existing dottrace artifact collection uploads it.
     _DOTMEMORY_CONTAINER_PATH = "/opt/dotmemory"
     _DOTMEMORY_DEFAULT_VERSION = "2026.1.1"
     _DOTNET_TRACE_DEFAULT_INSTALL_PATH = "/opt/dotnet-trace"
@@ -570,72 +571,76 @@ class Executor:
             shutil.rmtree(staging, ignore_errors=True)
         return str(path)
 
-    def _take_dotmemory_snapshot(self, timeout: int) -> bool:
-        """Snapshot the live client once and wait until the workspace is saved."""
+    _DOTMEMORY_CONNECTED = re.compile(r'##dotMemory\["connected",\{"pid":(\d+)')
+    _DOTMEMORY_SNAPSHOT_SAVED = '##dotMemory["snapshot-saved"'
+
+    @staticmethod
+    def _dotmemory_trigger_args() -> list[str]:
+        """Optional extra snapshots during the run (EXPB_DOTMEMORY_PERIOD=hh:mm:ss) and
+        allocation data (EXPB_DOTMEMORY_COLLECT_ALLOC=1). Each snapshot pauses the client."""
+        args = []
+        period = os.environ.get("EXPB_DOTMEMORY_PERIOD", "").strip()
+        if period:
+            args.append(f"--trigger-timer={period}")
+            args.append(f"--trigger-max-snapshots={os.environ.get('EXPB_DOTMEMORY_MAX_SNAPSHOTS', '3')}")
+            delay = os.environ.get("EXPB_DOTMEMORY_DELAY", "").strip()
+            if delay:
+                args.append(f"--trigger-delay={delay}")
+        if os.environ.get("EXPB_DOTMEMORY_COLLECT_ALLOC", "0") == "1":
+            args.append("--collect-alloc")
+        return args
+
+    @staticmethod
+    def _container_logs(container: Container) -> str:
+        try:
+            return container.logs().decode(errors="replace")
+        except Exception:
+            return ""
+
+    def _request_dotmemory_snapshot(self, timeout: int) -> bool:
+        """Ask the dotMemory wrapper for one snapshot over its stdin and wait until it is saved.
+
+        The wrapper profiles the client from its start, so nothing attaches or detaches at the
+        end: attaching `dotmemory get-snapshot` to a running .NET 10 client and detaching made
+        the client segfault before the workspace was written.
+        """
         container_name = self.config.get_execution_client_container_name()
         try:
             container = self.config.docker_client.containers.get(container_name)
             container.reload()
         except Exception as e:
-            self.log.error(
-                "dotMemory client container unavailable; no snapshot",
-                container=container_name,
-                error=e,
-            )
+            self.log.error("dotMemory client container unavailable; no snapshot", container=container_name, error=e)
             return False
         if container.attrs.get("State", {}).get("Running") is not True:
             self.log.error("dotMemory client is not running; no snapshot", container=container_name)
             return False
 
-        workspace_name = f"{self.config.test_id}.dmw"
-        output_dir = self.config.outputs_dir / "dottrace"
-        command = [
-            # The console is itself a .NET process: keep it off the client's EventPipe
-            # port, and give it a writable home whatever user the container runs as.
-            "/usr/bin/env",
-            "-u",
-            "DOTNET_DiagnosticPorts",
-            "HOME=/tmp",
-            f"{self._DOTMEMORY_CONTAINER_PATH}/dotmemory",
-            "get-snapshot",
-            "nethermind",
-            "--with-max-mem",
-            f"--save-to-file={self._DOTTRACE_OUTPUT_PATH}/{workspace_name}",
-            "--overwrite",
-            "--service-output",
-        ]
-        self.log.info("Taking final dotMemory snapshot", workspace=str(output_dir / workspace_name))
-        started = time.monotonic()
-        pool = ThreadPoolExecutor(max_workers=1)
-        future = pool.submit(container.exec_run, command)
-        try:
-            result = future.result(timeout=timeout)
-        except TimeoutError:
-            self.log.error("dotMemory snapshot timed out; tearing down without it", timeout=timeout)
+        logs = self._container_logs(container)
+        match = self._DOTMEMORY_CONNECTED.search(logs)
+        if match is None:
+            self.log.error("dotMemory wrapper has not reported the client PID; no snapshot")
             return False
-        except Exception as e:
-            self.log.error("dotMemory snapshot could not run", error=e)
-            return False
-        finally:
-            # A timed-out exec keeps running until the container stops; do not wait for it.
-            pool.shutdown(wait=False)
+        pid = int(match.group(1))
+        saved_before = logs.count(self._DOTMEMORY_SNAPSHOT_SAVED)
 
-        output = (result.output or b"").decode(errors="replace")
-        (output_dir / "dotmemory-get-snapshot.log").write_text(output)
-        saved = result.exit_code == 0 and (output_dir / workspace_name).exists()
-        if saved:
-            self.log.info(
-                "dotMemory snapshot saved",
-                workspace=str(output_dir / workspace_name),
-                seconds=round(time.monotonic() - started, 1),
-            )
-        else:
-            self.log.error(
-                "dotMemory snapshot failed",
-                exit_code=result.exit_code,
-                output=output[-2000:],
-            )
-        return saved
+        message = f'##dotMemory["get-snapshot", {{pid:{pid}}}]\n'.encode()
+        self.log.info("Requesting final dotMemory snapshot", pid=pid)
+        started = time.monotonic()
+        try:
+            sock = container.attach_socket(params={"stdin": 1, "stream": 1})
+            getattr(sock, "_sock", sock).sendall(message)
+            sock.close()
+        except Exception as e:
+            self.log.error("Could not write to the dotMemory wrapper's stdin", error=e)
+            return False
+
+        while time.monotonic() - started < timeout:
+            if self._container_logs(container).count(self._DOTMEMORY_SNAPSHOT_SAVED) > saved_before:
+                self.log.info("dotMemory snapshot saved", seconds=round(time.monotonic() - started, 1))
+                return True
+            time.sleep(1)
+        self.log.error("dotMemory snapshot not confirmed before the timeout", timeout=timeout)
+        return False
 
 
     def _container_labels(self) -> dict[str, str]:
@@ -685,8 +690,9 @@ class Executor:
         # dotTrace profiling
         dottrace_entrypoint = None
         if dottrace and self._dotmemory_mode() == "final":
-            # The client runs unprofiled; cleanup attaches dotMemory once after the last
-            # payload, so the heap it captures is the post-run state.
+            # The client runs under `dotmemory start` from its first instruction: attaching to a
+            # running client and detaching made it segfault. Cleanup requests one snapshot over
+            # stdin after the last payload; the graceful child shutdown then saves the workspace.
             dotmemory_host_path = self._ensure_dotmemory_installed()
             dottrace_output_dir = self.config.outputs_dir / "dottrace"
             dottrace_output_dir.mkdir(parents=True, exist_ok=True)
@@ -696,9 +702,31 @@ class Executor:
             execution_container_volumes.append(
                 f"{dottrace_output_dir}:{self._DOTTRACE_OUTPUT_PATH}:rw"
             )
+            client_binary = self.config.execution_client.value.entrypoint
+            if client_binary is None:
+                raise ValueError(
+                    "dotMemory requires entrypoint to be set on the client config"
+                )
+            workspace = f"{self._DOTTRACE_OUTPUT_PATH}/{self.config.test_id}.dmw"
+            dottrace_entrypoint = [
+                f"{self._DOTMEMORY_CONTAINER_PATH}/dotmemory",
+                "start",
+                "--service-output",
+                "--service-input=stdin",
+                f"--save-to-file={workspace}",
+                "--overwrite",
+                *self._dotmemory_trigger_args(),
+                # env execs the client in place, so the EventPipe and perf variables the code
+                # below scopes after "--" reach the client and not the dotMemory console.
+                "/usr/bin/env",
+                "--",
+                client_binary,
+            ]
             self._dotmemory_active = True
+            # Reuse the dotTrace child-SIGTERM shutdown: the wrapper saves on the client's exit.
+            self._dottrace_active = True
             self.log.info(
-                "dotMemory final snapshot enabled instead of dotTrace",
+                "dotMemory profiling enabled instead of dotTrace",
                 workspace_output=str(dottrace_output_dir / f"{self.config.test_id}.dmw"),
             )
         elif dottrace:
@@ -877,6 +905,8 @@ class Executor:
         )
         if dottrace_entrypoint:
             run_kwargs["entrypoint"] = dottrace_entrypoint
+        if self._dotmemory_active:
+            run_kwargs["stdin_open"] = True  # service messages ("get-snapshot") go to the wrapper's stdin
         if self.config.resources and self.config.resources.cpuset is not None:
             run_kwargs["cpuset_cpus"] = self.config.resources.cpuset
         if self.config.resources and self.config.resources.mem_swappiness is not None:
@@ -901,7 +931,7 @@ class Executor:
                 listing = None
             for row in (listing or {}).get("Processes") or []:
                 args = " ".join(row[1:]).lower()
-                if "nethermind" in args and "dottrace" not in args:
+                if "nethermind" in args and "dottrace" not in args and "dotmemory" not in args:
                     return int(row[0])
             time.sleep(1)
         return None
@@ -990,7 +1020,7 @@ class Executor:
             row = next((row for row in rows if int(row[0]) == pid), None)
             if row is not None:
                 args = " ".join(row[1:]).lower()
-                if "nethermind" not in args or "dottrace" in args:
+                if "nethermind" not in args or "dottrace" in args or "dotmemory" in args:
                     self.log.error(
                         "Could not confirm dotTrace client PID ownership; "
                         "using container stop fallback", process=args
@@ -1994,7 +2024,7 @@ class Executor:
 
         if self._dotmemory_active:
             self._dotmemory_active = False
-            self._take_dotmemory_snapshot(
+            self._request_dotmemory_snapshot(
                 timeout=int(os.environ.get("EXPB_DOTMEMORY_TIMEOUT", "1800"))
             )
 
