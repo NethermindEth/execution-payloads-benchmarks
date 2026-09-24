@@ -154,6 +154,150 @@ def test_dottrace_shutdown_waits_or_falls_back_when_client_pid_is_unavailable(
         close_pidfd.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    ("client_pid", "pidfd_open"),
+    [(321, None), (321, PermissionError("not allowed")), (1, 91)],
+    ids=["pidfd-unavailable", "pidfd-permission-denied", "unsafe-pid"],
+)
+def test_dottrace_shutdown_falls_back_when_child_cannot_be_signaled(
+    client_pid: int,
+    pidfd_open: int | Exception | None,
+):
+    executor = _dottrace_executor()
+    container = _FakeContainer(
+        processes=[[str(client_pid), "/usr/bin/dotnet Nethermind.Runner.dll"]],
+        exit_on_reload=100,
+    )
+    pidfd_effect = (
+        {"side_effect": pidfd_open}
+        if isinstance(pidfd_open, Exception)
+        else {"return_value": pidfd_open}
+    )
+    pidfd_open_patch = (
+        patch.object(executor_module.os, "pidfd_open", None, create=True)
+        if pidfd_open is None
+        else patch.object(
+            executor_module.os, "pidfd_open", create=True, **pidfd_effect
+        )
+    )
+
+    with (
+        patch.object(executor, "_client_host_pid", return_value=client_pid),
+        pidfd_open_patch as open_pidfd,
+        patch.object(
+            executor_module.signal,
+            "pidfd_send_signal",
+            create=True,
+        ) as send_signal,
+    ):
+        assert not executor._request_dottrace_client_shutdown(container, timeout=1)
+
+    if pidfd_open is None:
+        assert open_pidfd is None
+    elif client_pid <= 1:
+        open_pidfd.assert_not_called()
+    elif isinstance(pidfd_open, Exception):
+        open_pidfd.assert_called_once_with(321, 0)
+    send_signal.assert_not_called()
+
+
+@pytest.mark.parametrize("container_gone", [False, True], ids=["exited", "missing"])
+def test_dottrace_shutdown_skips_signal_for_exited_or_missing_container(
+    container_gone: bool,
+):
+    executor = _dottrace_executor()
+    container = _FakeContainer(processes=[], exit_on_reload=1)
+    with (
+        patch.object(executor, "_client_host_pid") as client_pid,
+        patch.object(executor_module.os, "pidfd_open", create=True) as open_pidfd,
+    ):
+        if container_gone:
+            with patch.object(
+                container,
+                "reload",
+                side_effect=executor_module.docker.errors.NotFound("gone"),
+            ):
+                assert executor._request_dottrace_client_shutdown(container, timeout=1)
+        else:
+            assert executor._request_dottrace_client_shutdown(container, timeout=1)
+        client_pid.assert_not_called()
+        open_pidfd.assert_not_called()
+
+
+def test_cleanup_waits_for_dottrace_before_tearing_down_client(tmp_path: Path, monkeypatch):
+    config = Mock(
+        executor_name="scenario",
+        outputs_dir=tmp_path,
+        docker_client=Mock(),
+    )
+    config.get_k6_container_name.return_value = "k6"
+    config.get_payload_server_container_name.return_value = "payload-server"
+    config.get_alloy_container_name.return_value = "alloy"
+    config.get_execution_client_container_name.return_value = "nethermind"
+    config.get_execution_client_name.return_value = "nethermind"
+    config.get_containers_network_name.return_value = "scenario-network"
+    config.docker_client.networks.get.return_value = Mock()
+
+    executor = Executor(config=config, logger=Mock())
+    executor._dottrace_active = True
+    container = _FakeContainer(
+        processes=[["321", "/usr/bin/dotnet Nethermind.Runner.dll"]],
+        exit_on_reload=2,
+    )
+    config.docker_client.containers.get.return_value = container
+    monkeypatch.setenv("EXPB_STOP_TIMEOUT", "1")
+
+    lifecycle: list[str] = []
+    wait_for_exit = executor._wait_for_container_exit
+
+    def wait_for_wrapper(container, timeout):
+        lifecycle.append("wrapper-wait")
+        return wait_for_exit(container, timeout)
+
+    with (
+        patch.object(executor, "stop_extra_commands"),
+        patch.object(
+            executor, "_finalize_perf", side_effect=lambda _container: lifecycle.append("perf")
+        ),
+        patch.object(
+            executor,
+            "_teardown_container",
+            side_effect=lambda name, **kwargs: lifecycle.append(name) or [],
+        ),
+        patch.object(
+            executor,
+            "_stop_dotnet_trace_collector",
+            side_effect=lambda: lifecycle.append("eventpipe"),
+        ),
+        patch.object(
+            executor,
+            "_wait_for_container_exit",
+            side_effect=wait_for_wrapper,
+        ),
+        patch.object(executor_module.os, "pidfd_open", return_value=91, create=True),
+        patch.object(
+            executor_module.signal,
+            "pidfd_send_signal",
+            side_effect=lambda *_args: lifecycle.append("client-sigterm"),
+            create=True,
+        ),
+        patch.object(executor_module.os, "close"),
+        patch.object(executor, "remove_directories"),
+    ):
+        executor.cleanup_scenario()
+
+    assert lifecycle == [
+        "perf",
+        "k6",
+        "payload-server",
+        "alloy",
+        "eventpipe",
+        "client-sigterm",
+        "wrapper-wait",
+        "nethermind",
+    ]
+
+
 def test_dottrace_shutdown_timeout_uses_existing_container_fallback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
