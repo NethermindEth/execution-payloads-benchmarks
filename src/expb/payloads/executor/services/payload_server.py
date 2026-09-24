@@ -10,7 +10,7 @@ extracts lightweight metadata on the fly, and returns tab-separated lines:
     {metadata_json}\t{raw_NP}\t{raw_FCU}
 
 Supports per-block modes controlled by environment variables:
-- GC drain (EXPB_EL_RPC_URL): sends eth_blockNumber before each measured block
+- GC drain (EXPB_GC_DRAIN, enabled by default): sends eth_blockNumber before each measured block
   to absorb any pending .NET GC from the previous block's processing, preventing
   GC pauses from inflating the k6 request-time measurements.
 - Client metrics via SSE (EXPB_CLIENT_SSE_URL): connects to the client's
@@ -37,6 +37,7 @@ SKIP = int(os.environ.get("EXPB_SKIP", "0"))
 TOTAL = int(os.environ["EXPB_TOTAL"])
 PORT = int(os.environ.get("EXPB_SERVER_PORT", "8080"))
 EL_RPC_URL = os.environ.get("EXPB_EL_RPC_URL", "")
+GC_DRAIN_ENABLED = os.environ.get("EXPB_GC_DRAIN", "1") == "1"
 SIMULATE_FILE = os.environ.get("EXPB_SIMULATE_FILE", "")
 DROP_CACHES = os.environ.get("EXPB_DROP_CACHES", "") == "1"
 DROP_CACHES_SYNC = os.environ.get("EXPB_DROP_CACHES_SYNC", "1") == "1"
@@ -270,7 +271,7 @@ def drain_gc(idx):
     Skips warmup blocks (same pattern as drop_caches).
     Returns (success: bool, elapsed_ms: float, error: str|None).
     """
-    if not EL_RPC_URL:
+    if not GC_DRAIN_ENABLED or not EL_RPC_URL:
         return None, 0.0, None
     if isinstance(idx, int) and idx < GC_DRAIN_SKIP:
         return None, 0.0, None
@@ -450,8 +451,9 @@ def main():
     print(f"[payload-server] Skip: {SKIP}, Total: {TOTAL}", flush=True)
     print(f"[payload-server] EL RPC URL: {EL_RPC_URL or '(disabled)'}", flush=True)
     print(f"[payload-server] Simulate file: {SIMULATE_FILE or '(none)'}", flush=True)
-    print(f"[payload-server] GC drain: {'enabled' if EL_RPC_URL else 'disabled'}"
-          f"{f' (skip first {GC_DRAIN_SKIP} blocks)' if EL_RPC_URL and GC_DRAIN_SKIP else ''}", flush=True)
+    gc_drain_enabled = GC_DRAIN_ENABLED and bool(EL_RPC_URL)
+    print(f"[payload-server] GC drain: {'enabled' if gc_drain_enabled else 'disabled'}"
+          f"{f' (skip first {GC_DRAIN_SKIP} blocks)' if gc_drain_enabled and GC_DRAIN_SKIP else ''}", flush=True)
     print(f"[payload-server] Client metrics (SSE): {'enabled' if CLIENT_SSE_URL else 'disabled'}"
           f"{f' url={CLIENT_SSE_URL}' if CLIENT_SSE_URL else ''}"
           f"{f' (skip first {CLIENT_SSE_SKIP} blocks)' if CLIENT_SSE_URL and CLIENT_SSE_SKIP else ''}", flush=True)

@@ -88,3 +88,34 @@ def test_skip_override_rejects_invalid_values(
         match="EXPB_SKIP_OVERRIDE must be a nonnegative integer",
     ):
         create_config(monkeypatch, scenario_inputs)
+
+
+def test_gc_drain_opt_out_preserves_evm_warmup_and_other_payload_modes(
+    monkeypatch: pytest.MonkeyPatch,
+    scenario_inputs: tuple[Scenario, ScenariosPaths],
+):
+    monkeypatch.setenv("EXPB_GC_DRAIN", "0")
+    config = create_config(monkeypatch, scenario_inputs)
+
+    environment = config.get_payload_server_environment(
+        el_rpc_url="http://client:8545",
+        drop_caches=True,
+        evm_warmup=True,
+        client_sse_url="http://client:8545/data/events",
+    )
+
+    assert environment["EXPB_GC_DRAIN"] == "0"
+    assert environment["EXPB_EL_RPC_URL"] == "http://client:8545"
+    assert environment["EXPB_SIMULATE_FILE"] == config._payload_server_container_simulate_file
+    assert environment["EXPB_DROP_CACHES"] == "1"
+    assert environment["EXPB_CLIENT_SSE_URL"] == "http://client:8545/data/events"
+
+
+def test_gc_drain_is_enabled_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+    scenario_inputs: tuple[Scenario, ScenariosPaths],
+):
+    monkeypatch.delenv("EXPB_GC_DRAIN", raising=False)
+    config = create_config(monkeypatch, scenario_inputs)
+
+    assert config.get_payload_server_environment()["EXPB_GC_DRAIN"] == "1"

@@ -447,6 +447,7 @@ class ExecutorConfig:
             "EXPB_SKIP": str(skip),
             "EXPB_TOTAL": str(warmup + amount),
             "EXPB_SERVER_PORT": str(self._payload_server_container_port),
+            "EXPB_GC_DRAIN": os.environ.get("EXPB_GC_DRAIN", "1"),
         }
         if el_rpc_url:
             env["EXPB_EL_RPC_URL"] = el_rpc_url
