@@ -1,12 +1,15 @@
+import ctypes
 import glob
 import io
 import json
 import os
+import platform
 import re
 import secrets
 import signal
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import time
@@ -56,6 +59,56 @@ NO_RESTART_POLICY = {"Name": "no"}
 SignalHandler = (
     Callable[[int, FrameType | None], Any] | int | signal.Handlers | None
 )
+
+
+def _pidfd_signaling_functions() -> (
+    tuple[Callable[..., Any], Callable[..., Any]] | None
+):
+    """Return pidfd open/send functions, using Linux syscalls if Python omitted wrappers."""
+    pidfd_open = getattr(os, "pidfd_open", None)
+    pidfd_send_signal = getattr(signal, "pidfd_send_signal", None)
+    if callable(pidfd_open) and callable(pidfd_send_signal):
+        return pidfd_open, pidfd_send_signal
+
+    if sys.platform != "linux" or ctypes.sizeof(ctypes.c_void_p) != 8:
+        return None
+
+    syscalls = {
+        "x86_64": (434, 424),
+        "aarch64": (434, 424),
+    }.get(platform.machine().lower())
+    if syscalls is None:
+        return None
+
+    try:
+        syscall = ctypes.CDLL(None, use_errno=True).syscall
+    except (AttributeError, OSError):
+        return None
+    syscall.restype = ctypes.c_long
+
+    def invoke(number: int, *args: Any) -> int:
+        ctypes.set_errno(0)
+        result = syscall(ctypes.c_long(number), *args)
+        if result == -1:
+            error = ctypes.get_errno()
+            raise OSError(error, os.strerror(error))
+        return int(result)
+
+    pidfd_open_syscall, pidfd_send_signal_syscall = syscalls
+
+    def open_pidfd(pid: int, flags: int = 0) -> int:
+        return invoke(pidfd_open_syscall, ctypes.c_int(pid), ctypes.c_uint(flags))
+
+    def send_pidfd_signal(pidfd: int, sig: int) -> None:
+        invoke(
+            pidfd_send_signal_syscall,
+            ctypes.c_int(pidfd),
+            ctypes.c_int(sig),
+            ctypes.c_void_p(),
+            ctypes.c_uint(0),
+        )
+
+    return open_pidfd, send_pidfd_signal
 
 
 class ExecutorExecuteOptions:
@@ -771,11 +824,11 @@ class Executor:
             self.log.error("Refusing unsafe dotTrace client PID", pid=pid)
             return False
 
-        pidfd_open = getattr(os, "pidfd_open", None)
-        pidfd_send_signal = getattr(signal, "pidfd_send_signal", None)
-        if not callable(pidfd_open) or not callable(pidfd_send_signal):
+        pidfd_functions = _pidfd_signaling_functions()
+        if pidfd_functions is None:
             self.log.error("pidfd signaling is unavailable; using container stop fallback")
             return False
+        pidfd_open, pidfd_send_signal = pidfd_functions
 
         try:
             pidfd = pidfd_open(pid, 0)
