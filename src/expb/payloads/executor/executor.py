@@ -712,6 +712,121 @@ class Executor:
             time.sleep(1)
         return None
 
+    def _wait_for_container_exit(self, container: Container, timeout: int) -> bool:
+        deadline = time.monotonic() + max(0, timeout)
+        while True:
+            try:
+                container.reload()
+            except docker.errors.NotFound:
+                return True
+            except Exception as e:
+                self.log.error("Failed to inspect dotTrace client shutdown", error=e)
+                return False
+
+            state = container.attrs.get("State", {})
+            if state.get("Running") is False or state.get("Status") in ("exited", "dead"):
+                return True
+            if state.get("Running") is not True:
+                self.log.error(
+                    "Could not determine dotTrace client container state", state=state
+                )
+                return False
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                self.log.error(
+                    "Timed out waiting for dotTrace snapshot shutdown",
+                    timeout=timeout,
+                )
+                return False
+            time.sleep(min(1, remaining))
+
+    def _request_dottrace_client_shutdown(
+        self, container: Container, timeout: int
+    ) -> bool:
+        """Signal the client child so dotTrace can save its snapshot before exit."""
+        try:
+            container.reload()
+        except docker.errors.NotFound:
+            return True
+        except Exception as e:
+            self.log.error("Failed to inspect dotTrace client container", error=e)
+            return False
+
+        state = container.attrs.get("State", {})
+        if state.get("Running") is False or state.get("Status") in ("exited", "dead"):
+            return True
+        if state.get("Running") is not True:
+            self.log.error("Could not determine dotTrace client container state")
+            return False
+
+        try:
+            pid = self._client_host_pid(container, timeout=1)
+        except Exception as e:
+            self.log.error("Could not find dotTrace client PID", error=e)
+            return False
+        if pid is None:
+            return self._wait_for_container_exit(container, timeout)
+        if pid <= 1:
+            self.log.error("Refusing unsafe dotTrace client PID", pid=pid)
+            return False
+
+        pidfd_open = getattr(os, "pidfd_open", None)
+        pidfd_send_signal = getattr(signal, "pidfd_send_signal", None)
+        if not callable(pidfd_open) or not callable(pidfd_send_signal):
+            self.log.error("pidfd signaling is unavailable; using container stop fallback")
+            return False
+
+        try:
+            pidfd = pidfd_open(pid, 0)
+        except ProcessLookupError:
+            return self._wait_for_container_exit(container, timeout)
+        except OSError as e:
+            self.log.error(
+                "Could not open dotTrace client pidfd; using container stop fallback", error=e
+            )
+            return False
+        except Exception as e:
+            self.log.error("Could not open dotTrace client pidfd", error=e)
+            return False
+
+        try:
+            listing = container.top(ps_args="-eo pid,args")
+            rows = (listing or {}).get("Processes") or []
+            row = next((row for row in rows if int(row[0]) == pid), None)
+            if row is not None:
+                args = " ".join(row[1:]).lower()
+                if "nethermind" not in args or "dottrace" in args:
+                    self.log.error(
+                        "Could not confirm dotTrace client PID ownership; "
+                        "using container stop fallback", process=args
+                    )
+                    return False
+
+                try:
+                    pidfd_send_signal(pidfd, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                except OSError as e:
+                    self.log.error(
+                        "Could not signal dotTrace client; using container stop fallback",
+                        error=e,
+                    )
+                    return False
+        except Exception as e:
+            self.log.error(
+                "Could not verify dotTrace client PID; using container stop fallback",
+                error=e,
+            )
+            return False
+        finally:
+            try:
+                os.close(pidfd)
+            except OSError as e:
+                self.log.warning("Failed to close dotTrace client pidfd", error=e)
+
+        return self._wait_for_container_exit(container, timeout)
+
     def _start_perf(self, container: Container, frequency: int) -> None:
         pid = self._client_host_pid(container)
         if pid is None:
@@ -1683,17 +1798,39 @@ class Executor:
         # the runtime emit its method rundown, without which the .nettrace stacks do not resolve.
         self._stop_dotnet_trace_collector()
 
+        execution_client_name = self.config.get_execution_client_container_name()
+        stop_timeout = int(os.environ.get("EXPB_STOP_TIMEOUT", "120"))
+        if self._dottrace_active:
+            try:
+                execution_client = self.config.docker_client.containers.get(
+                    execution_client_name
+                )
+            except docker.errors.NotFound:
+                execution_client = None
+            except Exception as e:
+                execution_client = None
+                self.log.error(
+                    "Failed to get dotTrace client container; using stop fallback",
+                    container=execution_client_name,
+                    error=e,
+                )
+            if execution_client is not None and not self._request_dottrace_client_shutdown(
+                execution_client, timeout=stop_timeout
+            ):
+                self.log.warning(
+                    "dotTrace client did not exit gracefully; using container stop fallback",
+                    container=execution_client_name,
+                )
+
         execution_client_mounts = self._teardown_container(
-            self.config.get_execution_client_container_name(),
+            execution_client_name,
             log_file=(
                 self.config.outputs_dir
                 / f"{self.config.get_execution_client_name()}.log"
             ),
-            # Give the execution client time after SIGTERM to flush data (e.g. PGO
-            # profiles via WritePGOData, RocksDB flush, and dotTrace snapshot writes)
-            # before Docker sends SIGKILL (default 10s). A warmed client's shutdown
-            # can exceed 120s; raise it with EXPB_STOP_TIMEOUT.
-            stop_timeout=int(os.environ.get("EXPB_STOP_TIMEOUT", "120")),
+            # Keep the existing stop deadline for the fallback path. A successful
+            # dotTrace child signal gets this deadline first to finish its snapshot.
+            stop_timeout=stop_timeout,
             print_console=print_logs_to_console,
         )
         if execution_client_mounts:
