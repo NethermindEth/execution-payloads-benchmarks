@@ -13,6 +13,7 @@ import sys
 import tarfile
 import tempfile
 import time
+import zipfile
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
@@ -166,6 +167,7 @@ class Executor:
         self.running_command_futures: list[Future] = []
         self.executor_pool: ThreadPoolExecutor | None = None
         self._dottrace_active: bool = False
+        self._dotmemory_active: bool = False
         self._dotnet_trace_process: subprocess.Popen | None = None
         self._dotnet_trace_diag_dir: Path | None = None
         self._dotnet_root_cache: str | None = None
@@ -383,6 +385,11 @@ class Executor:
     _DOTTRACE_CONTAINER_PATH = "/opt/dottrace"
     _DOTTRACE_OUTPUT_PATH = "/dottrace-output"
     _DOTTRACE_DEFAULT_INSTALL_PATH = "/opt/dottrace"
+    # EXPB_DOTMEMORY=final swaps the dotTrace wrapper for one dotMemory snapshot of the
+    # client after the last payload, written next to where the .dtp would have gone so
+    # the existing dottrace artifact collection picks it up.
+    _DOTMEMORY_CONTAINER_PATH = "/opt/dotmemory"
+    _DOTMEMORY_DEFAULT_VERSION = "2026.1.1"
     _DOTNET_TRACE_DEFAULT_INSTALL_PATH = "/opt/dotnet-trace"
     _DOTNET_TRACE_OUTPUT_PATH = "/dotnet-trace-output"
     _DOTNET_TRACE_DIAG_PATH = "/dotnet-trace-diag"
@@ -513,6 +520,123 @@ class Executor:
             raise
         return path
 
+    @staticmethod
+    def _dotmemory_mode() -> str:
+        return os.environ.get("EXPB_DOTMEMORY", "").strip().lower()
+
+    def _ensure_dotmemory_installed(self) -> str:
+        """Ensure the self-contained dotMemory console is unpacked on the host, return its path.
+
+        The linux package bundles its own .NET runtime, so the client image needs only a
+        POSIX shell. The version defaults to one a matching dotMemory UI can open.
+        """
+        version = os.environ.get("EXPB_DOTMEMORY_VERSION", self._DOTMEMORY_DEFAULT_VERSION)
+        arch = "arm64" if platform.machine().lower() in ("aarch64", "arm64") else "x64"
+        path = Path(f"/opt/dotmemory-{version}-linux-{arch}")
+        if (path / "dotmemory").exists():
+            self.log.info("dotMemory console found", path=str(path))
+            return str(path)
+
+        package = f"JetBrains.dotMemory.Console.linux-{arch}"
+        self.log.info(
+            "dotMemory console not found, installing",
+            path=str(path),
+            package=package,
+            version=version,
+        )
+        staging = Path(tempfile.mkdtemp(prefix="expb-dotmemory-", dir=str(path.parent)))
+        try:
+            nupkg = staging / "console.nupkg"
+            with requests.get(
+                f"https://www.nuget.org/api/v2/package/{package}/{version}",
+                stream=True,
+                timeout=300,
+            ) as response:
+                response.raise_for_status()
+                with nupkg.open("wb") as f:
+                    shutil.copyfileobj(response.raw, f)
+            unpacked = staging / "unpacked"
+            with zipfile.ZipFile(nupkg) as archive:
+                archive.extractall(
+                    unpacked, [m for m in archive.namelist() if m.startswith("tools/")]
+                )
+            # Zip entries carry no Unix mode; the launcher scripts and the bundled
+            # runtime need the execute bit.
+            for file in (unpacked / "tools").rglob("*"):
+                if file.is_file():
+                    file.chmod(0o755)
+            (unpacked / "tools").rename(path)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+        return str(path)
+
+    def _take_dotmemory_snapshot(self, timeout: int) -> bool:
+        """Snapshot the live client once and wait until the workspace is saved."""
+        container_name = self.config.get_execution_client_container_name()
+        try:
+            container = self.config.docker_client.containers.get(container_name)
+            container.reload()
+        except Exception as e:
+            self.log.error(
+                "dotMemory client container unavailable; no snapshot",
+                container=container_name,
+                error=e,
+            )
+            return False
+        if container.attrs.get("State", {}).get("Running") is not True:
+            self.log.error("dotMemory client is not running; no snapshot", container=container_name)
+            return False
+
+        workspace_name = f"{self.config.test_id}.dmw"
+        output_dir = self.config.outputs_dir / "dottrace"
+        command = [
+            # The console is itself a .NET process: keep it off the client's EventPipe
+            # port, and give it a writable home whatever user the container runs as.
+            "/usr/bin/env",
+            "-u",
+            "DOTNET_DiagnosticPorts",
+            "HOME=/tmp",
+            f"{self._DOTMEMORY_CONTAINER_PATH}/dotmemory",
+            "get-snapshot",
+            "nethermind",
+            "--with-max-mem",
+            f"--save-to-file={self._DOTTRACE_OUTPUT_PATH}/{workspace_name}",
+            "--overwrite",
+            "--service-output",
+        ]
+        self.log.info("Taking final dotMemory snapshot", workspace=str(output_dir / workspace_name))
+        started = time.monotonic()
+        pool = ThreadPoolExecutor(max_workers=1)
+        future = pool.submit(container.exec_run, command)
+        try:
+            result = future.result(timeout=timeout)
+        except TimeoutError:
+            self.log.error("dotMemory snapshot timed out; tearing down without it", timeout=timeout)
+            return False
+        except Exception as e:
+            self.log.error("dotMemory snapshot could not run", error=e)
+            return False
+        finally:
+            # A timed-out exec keeps running until the container stops; do not wait for it.
+            pool.shutdown(wait=False)
+
+        output = (result.output or b"").decode(errors="replace")
+        (output_dir / "dotmemory-get-snapshot.log").write_text(output)
+        saved = result.exit_code == 0 and (output_dir / workspace_name).exists()
+        if saved:
+            self.log.info(
+                "dotMemory snapshot saved",
+                workspace=str(output_dir / workspace_name),
+                seconds=round(time.monotonic() - started, 1),
+            )
+        else:
+            self.log.error(
+                "dotMemory snapshot failed",
+                exit_code=result.exit_code,
+                output=output[-2000:],
+            )
+        return saved
+
 
     def _container_labels(self) -> dict[str, str]:
         return {
@@ -560,7 +684,24 @@ class Executor:
 
         # dotTrace profiling
         dottrace_entrypoint = None
-        if dottrace:
+        if dottrace and self._dotmemory_mode() == "final":
+            # The client runs unprofiled; cleanup attaches dotMemory once after the last
+            # payload, so the heap it captures is the post-run state.
+            dotmemory_host_path = self._ensure_dotmemory_installed()
+            dottrace_output_dir = self.config.outputs_dir / "dottrace"
+            dottrace_output_dir.mkdir(parents=True, exist_ok=True)
+            execution_container_volumes.append(
+                f"{dotmemory_host_path}:{self._DOTMEMORY_CONTAINER_PATH}:ro"
+            )
+            execution_container_volumes.append(
+                f"{dottrace_output_dir}:{self._DOTTRACE_OUTPUT_PATH}:rw"
+            )
+            self._dotmemory_active = True
+            self.log.info(
+                "dotMemory final snapshot enabled instead of dotTrace",
+                workspace_output=str(dottrace_output_dir / f"{self.config.test_id}.dmw"),
+            )
+        elif dottrace:
             dottrace_host_path = self._ensure_dottrace_installed()
             dottrace_output_dir = self.config.outputs_dir / "dottrace"
             dottrace_output_dir.mkdir(parents=True, exist_ok=True)
@@ -1850,6 +1991,12 @@ class Executor:
         # Stop the collector while the client runtime is still alive: the stop request makes
         # the runtime emit its method rundown, without which the .nettrace stacks do not resolve.
         self._stop_dotnet_trace_collector()
+
+        if self._dotmemory_active:
+            self._dotmemory_active = False
+            self._take_dotmemory_snapshot(
+                timeout=int(os.environ.get("EXPB_DOTMEMORY_TIMEOUT", "1800"))
+            )
 
         execution_client_name = self.config.get_execution_client_container_name()
         stop_timeout = int(os.environ.get("EXPB_STOP_TIMEOUT", "120"))
