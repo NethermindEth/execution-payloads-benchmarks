@@ -169,6 +169,10 @@ class Scenario(BaseModel):
         description="Docker security options for the execution client container (e.g., seccomp=unconfined).",
         default=[],
     )
+    cap_add: list[str] = Field(
+        description="Linux capabilities to add to the execution client container (e.g., PERFMON for in-process perf counters).",
+        default=[],
+    )
 
     @field_validator("client", mode="before")
     @classmethod

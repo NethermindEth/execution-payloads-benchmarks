@@ -689,6 +689,8 @@ class Executor:
             run_kwargs["mem_swappiness"] = self.config.resources.mem_swappiness
         if self.config.execution_client_security_opt:
             run_kwargs["security_opt"] = self.config.execution_client_security_opt
+        if self.config.execution_client_cap_add:
+            run_kwargs["cap_add"] = self.config.execution_client_cap_add
         container = self.config.docker_client.containers.run(**run_kwargs)
         return container
 
