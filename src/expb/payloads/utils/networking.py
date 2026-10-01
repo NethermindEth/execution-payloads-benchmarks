@@ -2,6 +2,8 @@ import subprocess
 
 from docker.models.containers import Container
 
+from expb.logging import Logger
+
 
 def get_veth_name(pid: int) -> str:
     # This command finds the veth interface on the host for the container's eth0
@@ -17,8 +19,18 @@ def apply_tc_limits(
     veth_name: str,
     download_speed: str,
     upload_speed: str,
+    logger: Logger | None = None,
 ):
-    # FIXME: current implementation only limits egress speed (uploading)
+    # only the root (egress) qdisc is set below, not ingress (needs an IFB
+    # device, #15), so shaping is one-directional. warn about it.
+    if logger is not None:
+        logger.warning(
+            "bandwidth is shaped on the veth egress only, not ingress (needs an "
+            "IFB device), so download_speed/upload_speed are not enforced in both "
+            "directions (#15)",
+            download_speed=download_speed,
+            upload_speed=upload_speed,
+        )
     device_name = veth_name.split("@")[0]
     # Remove any existing qdisc
     subprocess.run(
@@ -50,11 +62,12 @@ def limit_container_bandwidth(
     container: Container,
     download_speed: str,
     upload_speed: str,
+    logger: Logger | None = None,
 ) -> None:
     container.reload()
     if container.attrs is not None:
         container_pid = container.attrs["State"]["Pid"]
         veth_name = get_veth_name(container_pid)
-        apply_tc_limits(veth_name, download_speed, upload_speed)
+        apply_tc_limits(veth_name, download_speed, upload_speed, logger)
     else:
         raise ValueError("Container attributes are not available")
