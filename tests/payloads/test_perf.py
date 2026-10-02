@@ -66,6 +66,61 @@ def test_finalize_perf_after_start_failure_is_a_noop(tmp_path):
     assert executor._perf_host_pid is None
 
 
+@pytest.mark.parametrize(
+    "process_args", ["reth node --authrpc.port=8551", "/usr/local/bin/reth node"]
+)
+def test_client_host_pid_finds_reth_executable(process_args):
+    config = Mock()
+    config.get_execution_client_name.return_value = "reth"
+    container = Mock()
+    container.top.return_value = {"Processes": [["421", process_args]]}
+
+    executor = Executor(config=config, logger=Mock())
+
+    assert executor._client_host_pid(container) == 421
+    container.top.assert_called_once_with(ps_args="-eo pid,args")
+
+
+@pytest.mark.parametrize(
+    "process",
+    [
+        ["501", "/bin/sh", "-c", "/usr/local/bin/reth node"],
+        ["502", "dottrace", "/usr/local/bin/reth", "node"],
+        ["503", "grep", "reth", "/proc/1/cmdline"],
+        ["504", "   "],
+    ],
+)
+def test_client_host_pid_ignores_reth_argument_mentions(process):
+    config = Mock()
+    config.get_execution_client_name.return_value = "reth"
+    container = Mock()
+    container.top.return_value = {"Processes": [process]}
+
+    executor = Executor(config=config, logger=Mock())
+
+    with patch(
+        "expb.payloads.executor.executor.time.monotonic", side_effect=[0, 0, 2]
+    ), patch("expb.payloads.executor.executor.time.sleep"):
+        assert executor._client_host_pid(container, timeout=1) is None
+    container.top.assert_called_once_with(ps_args="-eo pid,args")
+
+
+def test_client_host_pid_preserves_nethermind_dottrace_exclusion():
+    config = Mock()
+    config.get_execution_client_name.return_value = "nethermind"
+    container = Mock()
+    container.top.return_value = {
+        "Processes": [
+            ["601", "dottrace", "/nethermind/nethermind", "--config=/tmp/a"],
+            ["602", "/nethermind/nethermind", "--config=/tmp/a"],
+        ]
+    }
+
+    executor = Executor(config=config, logger=Mock())
+
+    assert executor._client_host_pid(container) == 602
+
+
 def test_fold_orders_frames_root_first_and_counts_duplicates():
     folded = fold_perf_script(PERF_SCRIPT)
     assert folded[0] == (

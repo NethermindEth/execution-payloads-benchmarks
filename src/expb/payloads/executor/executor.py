@@ -702,6 +702,7 @@ class Executor:
         profiler launcher, and profiling the launcher would sample the wrong process.
         """
         deadline = time.monotonic() + timeout
+        client_name = self.config.get_execution_client_name()
         while time.monotonic() < deadline:
             try:
                 listing = container.top(ps_args="-eo pid,args")
@@ -709,7 +710,13 @@ class Executor:
                 listing = None
             for row in (listing or {}).get("Processes") or []:
                 args = " ".join(row[1:]).lower()
-                if "nethermind" in args and "dottrace" not in args:
+                if client_name == "reth":
+                    process_args = str(row[1]).split(maxsplit=1) if len(row) > 1 else []
+                    first_arg = process_args[0] if process_args else ""
+                    executable = first_arg.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
+                    if executable == "reth":
+                        return int(row[0])
+                elif "nethermind" in args and "dottrace" not in args:
                     return int(row[0])
             time.sleep(1)
         return None
