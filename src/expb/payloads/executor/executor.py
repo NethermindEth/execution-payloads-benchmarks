@@ -968,6 +968,49 @@ class Executor:
             f"Client json rpc is not available after {max_attempts} attempts"
         )
 
+    def first_payload_parent_number(self) -> int | None:
+        skip = self.config.k6_payloads_skip or 0
+        with open(self.config.payloads_file, "r") as pf:
+            for idx, payload_line in enumerate(pf):
+                if idx == skip:
+                    params = json.loads(payload_line)["params"]
+                    return int(params[0]["blockNumber"], 16) - 1
+        return None
+
+    def wait_for_client_head(
+        self,
+        execution_client_rpc_url: str,
+        parent_number: int,
+    ) -> None:
+        # A client can open JSON-RPC while it still processes stored blocks at startup.
+        # A payload sent before that ends gets SYNCING, so wait until the head reaches
+        # the parent of the first payload and stops moving.
+        payload = {
+            "jsonrpc": "2.0",
+            "method": "eth_blockNumber",
+            "params": [],
+            "id": 1,
+        }
+        previous_head: int | None = None
+        for attempt in range(1, self.config.json_rpc_wait_max_retries + 1):
+            response = requests.post(execution_client_rpc_url, json=payload, timeout=5)
+            response.raise_for_status()
+            head = int(response.json()["result"], 16)
+            if head >= parent_number and head == previous_head:
+                self.log.info(
+                    "Client head is ready",
+                    head=head,
+                    parent_number=parent_number,
+                    attempts=attempt,
+                )
+                return
+            previous_head = head
+            time.sleep(1)
+        raise Exception(
+            f"Client head did not reach block {parent_number} and settle "
+            f"after {self.config.json_rpc_wait_max_retries} attempts"
+        )
+
     # Grafana Alloy Setup
     def prepare_alloy_config(
         self,
@@ -1946,6 +1989,20 @@ class Executor:
             except Exception as e:
                 self.log.error("Failed to wait for client json rpc", error=e)
                 raise e
+
+            parent_number = self.first_payload_parent_number()
+            if parent_number is not None:
+                self.log.info(
+                    "Waiting for client head", parent_number=parent_number
+                )
+                try:
+                    self.wait_for_client_head(
+                        execution_client_rpc_url=execution_client_rpc_url,
+                        parent_number=parent_number,
+                    )
+                except Exception as e:
+                    self.log.error("Failed to wait for client head", error=e)
+                    raise e
 
             if options.perf:
                 self._start_perf(execution_client_container, options.perf_frequency)
