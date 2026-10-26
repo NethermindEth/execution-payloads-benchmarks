@@ -166,7 +166,7 @@ def test_client_readiness_fails_when_snapshot_replay_never_reaches_the_target(he
 def make_readiness_executor(
     startup_block: int | None = 100, attempts: int = 2
 ) -> Executor:
-    return Executor(
+    executor = Executor(
         config=Mock(
             startup_wait=0,
             json_rpc_wait_max_retries=attempts,
@@ -174,3 +174,5 @@ def make_readiness_executor(
         ),
         logger=Mock(),
     )
+    executor.first_payload_parent_number = Mock(return_value=None)
+    return executor

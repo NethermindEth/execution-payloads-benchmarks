@@ -111,13 +111,22 @@ warmup and measured payloads. It must be a nonnegative integer; for example,
 eleventh payload without changing the scenario file. `EXPB_WARMUP_OVERRIDE`
 continues to override the number of unmeasured warmup payloads.
 
-Set a scenario's `startup_block` to its snapshot checkpoint when the client
-replays stored blocks during startup. The runner waits until `eth_blockNumber`
-reaches that checkpoint before it sends any warmup or measured payloads. RPC
-availability alone does not mean replay has finished. The existing startup
-retry limit bounds the wait. Leave `startup_block` unset when no checkpoint is
-required. Use the snapshot's processed checkpoint, not a block that the warmup
-must import.
+Before sending warmup or measured payloads, the runner reads the first payload
+after the effective skip and finds its parent block number. With `startup_block`
+unset, it waits until `eth_blockNumber` reaches that parent and two consecutive
+successful polls one second apart return the same head. This is a heuristic:
+a pause during replay can satisfy it before replay finishes.
+
+Set a scenario's `startup_block` to a trusted processed snapshot checkpoint
+when the client replays stored blocks during startup. The runner waits for the
+higher of that checkpoint and the first payload parent. It returns as soon as
+that target is reached, without the extra confirmation poll. Use the snapshot's
+processed checkpoint, not a block that the warmup must import.
+
+RPC availability and head readiness share one bounded retry loop. Transient
+HTTP failures and invalid RPC replies use the same attempt budget. A failed
+reply resets head confirmation. If no payload is selected, the runner checks
+RPC availability and any explicit checkpoint.
 
 Pass `--startup-block NUMBER` to `execute-scenario` or `execute-scenarios` to
 override the configured checkpoint. The option accepts nonnegative integers.
