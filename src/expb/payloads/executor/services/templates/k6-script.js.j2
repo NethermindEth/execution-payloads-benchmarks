@@ -130,6 +130,10 @@ function checkEngineResponse(response, kind, idx, tags) {
     'status_200': (x) => x.status === 200,
     'payload_status_valid': () => valid,
   }, tags);
+
+  if (!valid) {
+    exec.test.abort(`[engine] ${kind} idx=${idx} ${diagnostic}`);
+  }
 }
 
 // --- Fetch next pair from payload server ---
