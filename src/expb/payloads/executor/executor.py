@@ -663,9 +663,10 @@ class Executor:
         )
         cpu_count = self.config.resources.cpu if self.config.resources else None
         mem_limit = self.config.resources.mem if self.config.resources else None
+        container_name = self.config.get_execution_client_container_name()
         run_kwargs = dict(
             image=self.config.execution_client_image,
-            name=self.config.get_execution_client_container_name(),
+            name=container_name,
             labels=self._container_labels(),
             volumes=execution_container_volumes,
             ports=execution_container_ports,
@@ -691,6 +692,18 @@ class Executor:
             run_kwargs["security_opt"] = self.config.execution_client_security_opt
         if self.config.execution_client_cap_add:
             run_kwargs["cap_add"] = self.config.execution_client_cap_add
+        if container_network is not None:
+            run_kwargs["networking_config"] = {
+                container_network.name: self.config.docker_client.api.create_endpoint_config(
+                    aliases=self.config.get_execution_client_aliases()
+                )
+            }
+            if len(container_name) > 63:
+                self.log.warning(
+                    "Execution client container name exceeds the DNS label limit; use its network alias",
+                    container=container_name,
+                    aliases=self.config.get_execution_client_aliases(),
+                )
         container = self.config.docker_client.containers.run(**run_kwargs)
         return container
 
