@@ -50,7 +50,7 @@ for (const [kind, response, expected] of cases) {
     if (!(error instanceof BenchmarkAbort)) throw error;
     aborted = true;
   }
-  if (records.checks.at(-1).result.payload_status_valid !== expected || aborted === expected) {
+  if (records.checks.at(-1).result.payload_status_valid !== expected || aborted !== !expected) {
     throw new Error(`unexpected result for ${kind}: ${JSON.stringify(response)}`);
   }
 }
