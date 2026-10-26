@@ -202,6 +202,12 @@ def execute_scenarios(
                 except re.error as e:
                     raise ValueError(f"Invalid regex pattern: {filter}. Error: {e}")
 
+            if startup_block is not None and len(filtered_scenarios) > 1:
+                raise typer.BadParameter(
+                    "select one scenario with --filter or configure startup_block per scenario",
+                    param_hint="--startup-block",
+                )
+
             while True:
                 for scenario in filtered_scenarios.values():
                     if startup_block is not None:

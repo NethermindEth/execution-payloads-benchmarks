@@ -133,6 +133,11 @@ class Scenario(BaseModel):
         ge=0,
         strict=True,
     )
+    startup_wait_for_head: bool = Field(
+        description="Wait for the first payload parent and two equal head readings when startup_block is unset.",
+        default=False,
+        strict=True,
+    )
     warmup_wait: int = Field(
         description="Wait time between warmup and payloads requests in seconds.",
         default=0,

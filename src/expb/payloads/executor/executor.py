@@ -965,13 +965,16 @@ class Executor:
             "id": 1,
         }
         max_attempts = self.config.startup_wait + self.config.json_rpc_wait_max_retries
-        parent_number = self.first_payload_parent_number()
+        wait_for_head = self.config.startup_block is not None or self.config.startup_wait_for_head
+        parent_number = self.first_payload_parent_number() if wait_for_head else None
         required_block = max(
             (block for block in (self.config.startup_block, parent_number) if block is not None),
             default=None,
         )
         require_stable_head = self.config.startup_block is None and parent_number is not None
         previous_head = None
+        rpc_available = False
+        last_head = None
         for attempt in range(1, max_attempts + 1):
             try:
                 response = requests.post(
@@ -995,15 +998,31 @@ class Executor:
             except (requests.exceptions.RequestException, ValueError):
                 latest_block = None
             if latest_block is not None:
-                if (required_block is None or latest_block >= required_block) and (
-                    not require_stable_head or latest_block == previous_head
-                ):
+                last_head = latest_block
+                if not rpc_available:
                     self.log.info(
                         "Client json rpc is available",
                         latest_block=latest_block,
                         attempts=attempt,
                     )
+                    rpc_available = True
+                if (required_block is None or latest_block >= required_block) and (
+                    not require_stable_head or latest_block == previous_head
+                ):
+                    if wait_for_head:
+                        self.log.info(
+                            "Client head is ready",
+                            latest_block=latest_block,
+                            required_block=required_block,
+                            attempts=attempt,
+                        )
                     return
+                if previous_head is None:
+                    self.log.info(
+                        "Waiting for client head",
+                        latest_block=latest_block,
+                        required_block=required_block,
+                    )
                 self.log.debug(
                     "Client head is not ready",
                     latest_block=latest_block,
@@ -1015,6 +1034,11 @@ class Executor:
             previous_head = latest_block
             if attempt < max_attempts:
                 time.sleep(1)
+        if rpc_available:
+            raise Exception(
+                f"Client head is not ready after {max_attempts} attempts "
+                f"(last head: {last_head}, required startup block: {required_block})"
+            )
         raise Exception(
             f"Client json rpc is not ready after {max_attempts} attempts "
             f"(required startup block: {required_block})"

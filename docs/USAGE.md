@@ -111,11 +111,15 @@ warmup and measured payloads. It must be a nonnegative integer; for example,
 eleventh payload without changing the scenario file. `EXPB_WARMUP_OVERRIDE`
 continues to override the number of unmeasured warmup payloads.
 
-Before sending warmup or measured payloads, the runner reads the first payload
-after the effective skip and finds its parent block number. With `startup_block`
-unset, it waits until `eth_blockNumber` reaches that parent and two consecutive
-successful polls one second apart return the same head. This is a heuristic:
-a pause during replay can satisfy it before replay finishes.
+By default, the runner starts after a valid `eth_blockNumber` reply. It does not
+require a particular head number or read the first payload during startup.
+
+Set `startup_wait_for_head: true` in a scenario to opt into automatic head
+readiness. The runner reads the first payload after the effective skip and waits
+until the head reaches its parent and two consecutive successful polls one second
+apart return the same head. Enable this only when the client reports its processed
+head before receiving payloads or forkchoice updates. This is a heuristic: a pause
+during replay can satisfy it before replay finishes.
 
 Set a scenario's `startup_block` to a trusted processed snapshot checkpoint
 when the client replays stored blocks during startup. The runner waits for the
@@ -130,7 +134,9 @@ RPC availability and any explicit checkpoint.
 
 Pass `--startup-block NUMBER` to `execute-scenario` or `execute-scenarios` to
 override the configured checkpoint. The option accepts nonnegative integers.
-For multiple scenarios, the override applies to each selected scenario.
+With `execute-scenarios`, this override requires exactly one selected scenario;
+use `--filter` to select it. To run several snapshots together, set each scenario's
+`startup_block` in the configuration instead.
 
 ## `expb compress-payloads`
 
