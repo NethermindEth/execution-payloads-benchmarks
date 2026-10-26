@@ -58,6 +58,8 @@ class ExecutorConfig:
         self.executor_name: str = f"expb-executor-{safe_name}"
         self.test_id: str = f"{self.scenario_name}-{time.strftime('%Y%m%d-%H%M%S')}"
         self.startup_wait = scenario.startup_wait
+        self.startup_block = scenario.startup_block
+        self.startup_wait_for_head = scenario.startup_wait_for_head
         # Executor Client config
         self.network: Network = scenario.network or Network.MAINNET
         self.execution_client: Client = scenario.client

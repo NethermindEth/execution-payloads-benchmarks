@@ -143,6 +143,10 @@ def execute_scenarios(
             help="Path to lock file. Defaults to platform-specific temp directory.",
         ),
     ] = None,
+    startup_block: Annotated[
+        int | None,
+        typer.Option(min=0, help="Processed snapshot block required before sending payloads."),
+    ] = None,
 ) -> None:
     """
     Execute payloads for multiple execution clients using Grafana K6.
@@ -198,8 +202,16 @@ def execute_scenarios(
                 except re.error as e:
                     raise ValueError(f"Invalid regex pattern: {filter}. Error: {e}")
 
+            if startup_block is not None and len(filtered_scenarios) > 1:
+                raise typer.BadParameter(
+                    "select one scenario with --filter or configure startup_block per scenario",
+                    param_hint="--startup-block",
+                )
+
             while True:
                 for scenario in filtered_scenarios.values():
+                    if startup_block is not None:
+                        scenario.startup_block = startup_block
                     for iteration in range(scenario.repeat):
                         logger.info(
                             "Executing scenario",

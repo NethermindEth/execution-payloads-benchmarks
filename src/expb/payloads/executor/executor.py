@@ -939,6 +939,20 @@ class Executor:
         )
         self.log.info("perf profile folded", **summarize_folded(folded))
 
+    def first_payload_parent_number(self) -> int | None:
+        skip = self.config.k6_payloads_skip or 0
+        with self.config.payloads_file.open(encoding="utf-8") as payloads:
+            for index, line in enumerate(payloads):
+                if index == skip:
+                    quantity = json.loads(line)["params"][0]["blockNumber"]
+                    if (
+                        not isinstance(quantity, str)
+                        or re.fullmatch(r"0x[0-9a-fA-F]+", quantity) is None
+                    ):
+                        raise ValueError("First payload did not contain a block quantity")
+                    return max(0, int(quantity, 16) - 1)
+        return None
+
     def wait_for_client_json_rpc(
         self,
         execution_client_rpc_url: str,
@@ -951,6 +965,16 @@ class Executor:
             "id": 1,
         }
         max_attempts = self.config.startup_wait + self.config.json_rpc_wait_max_retries
+        wait_for_head = self.config.startup_block is not None or self.config.startup_wait_for_head
+        parent_number = self.first_payload_parent_number() if wait_for_head else None
+        required_block = max(
+            (block for block in (self.config.startup_block, parent_number) if block is not None),
+            default=None,
+        )
+        require_stable_head = self.config.startup_block is None and parent_number is not None
+        previous_head = None
+        rpc_available = False
+        last_head = None
         for attempt in range(1, max_attempts + 1):
             try:
                 response = requests.post(
@@ -960,25 +984,64 @@ class Executor:
                     timeout=5,
                 )
                 if response.ok:
+                    result = response.json()
+                    quantity = result.get("result") if isinstance(result, dict) else None
+                    if (
+                        not isinstance(quantity, str)
+                        or re.fullmatch(r"0x[0-9a-fA-F]+", quantity) is None
+                        or "error" in result
+                    ):
+                        raise ValueError("eth_blockNumber did not return a block quantity")
+                    latest_block = int(quantity, 16)
+                else:
+                    latest_block = None
+            except (requests.exceptions.RequestException, ValueError):
+                latest_block = None
+            if latest_block is not None:
+                last_head = latest_block
+                if not rpc_available:
                     self.log.info(
                         "Client json rpc is available",
-                        latest_block=int(response.json()["result"], 16),
+                        latest_block=latest_block,
                         attempts=attempt,
                     )
+                    rpc_available = True
+                if (required_block is None or latest_block >= required_block) and (
+                    not require_stable_head or latest_block == previous_head
+                ):
+                    if wait_for_head:
+                        self.log.info(
+                            "Client head is ready",
+                            latest_block=latest_block,
+                            required_block=required_block,
+                            attempts=attempt,
+                        )
                     return
+                if previous_head is None:
+                    self.log.info(
+                        "Waiting for client head",
+                        latest_block=latest_block,
+                        required_block=required_block,
+                    )
                 self.log.debug(
-                    "Client json rpc not ready",
-                    attempt=attempt,
-                    status_code=response.status_code,
-                )
-            except requests.exceptions.ConnectionError:
-                self.log.debug(
-                    "Client json rpc not reachable",
+                    "Client head is not ready",
+                    latest_block=latest_block,
+                    required_block=required_block,
                     attempt=attempt,
                 )
-            time.sleep(1)
+            else:
+                self.log.debug("Client json rpc not ready", attempt=attempt)
+            previous_head = latest_block
+            if attempt < max_attempts:
+                time.sleep(1)
+        if rpc_available:
+            raise Exception(
+                f"Client head is not ready after {max_attempts} attempts "
+                f"(last head: {last_head}, required startup block: {required_block})"
+            )
         raise Exception(
-            f"Client json rpc is not available after {max_attempts} attempts"
+            f"Client json rpc is not ready after {max_attempts} attempts "
+            f"(required startup block: {required_block})"
         )
 
     # Grafana Alloy Setup

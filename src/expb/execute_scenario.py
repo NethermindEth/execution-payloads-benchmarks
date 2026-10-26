@@ -137,6 +137,10 @@ def execute_scenario(
             help="Path to lock file. Defaults to platform-specific temp directory.",
         ),
     ] = None,
+    startup_block: Annotated[
+        int | None,
+        typer.Option(min=0, help="Processed snapshot block required before sending payloads."),
+    ] = None,
 ) -> None:
     """
     Execute payloads for a given execution client using Grafana K6.
@@ -167,6 +171,8 @@ def execute_scenario(
                 raise ValueError(
                     f"Scenario {scenario_name} not found in config file {config_file}"
                 )
+            if startup_block is not None:
+                scenario.startup_block = startup_block
             for iteration in range(scenario.repeat):
                 executor = Executor.from_scenarios(
                     scenarios,
