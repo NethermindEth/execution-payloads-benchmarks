@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+from click import unstyle
 from typer.testing import CliRunner
 
 from expb.clients import Client
@@ -114,7 +115,7 @@ def test_cli_startup_block_validates_and_overrides_the_checkpoint(
 
     if checkpoint in ("-1", "true", "1.5"):
         assert result.exit_code != 0
-        assert "startup-block" in result.output
+        assert "startup-block" in unstyle(result.output)
         factory.assert_not_called()
     else:
         assert result.exit_code == 0, result.output
