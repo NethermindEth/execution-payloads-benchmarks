@@ -14,7 +14,6 @@ from expb.clients import (
     CLIENT_METRICS_PORT,
     CLIENT_RPC_PORT,
     CLIENT_RPC_WS_PORT,
-    CLIENTS_DATA_DIR,
     CLIENTS_JWT_SECRET_DIR,
     Client,
 )
@@ -74,6 +73,7 @@ class ExecutorConfig:
         )
         self.execution_client_extra_commands = scenario.extra_commands
         self.execution_client_security_opt = scenario.security_opt
+        self.execution_client_cap_add = scenario.cap_add
 
         # Executor Additional Tooling config
         ## Docker client
@@ -104,6 +104,17 @@ class ExecutorConfig:
         self.k6_warmup_wait: int = scenario.warmup_wait
         self.k6_payloads_skip: int | None = scenario.payloads_skip
         self.k6_payloads_warmup: int | None = scenario.payloads_warmup
+        # EXPB_SKIP_OVERRIDE changes the number of payloads skipped before the
+        # configured warmup and measured payloads, without editing the scenario.
+        _skip_override = os.environ.get("EXPB_SKIP_OVERRIDE")
+        if _skip_override is not None:
+            if not _skip_override.isdecimal():
+                raise ValueError(
+                    "EXPB_SKIP_OVERRIDE must be a nonnegative integer, "
+                    f"got '{_skip_override}'"
+                )
+            self.k6_payloads_skip = int(_skip_override)
+
         # EXPB_WARMUP_OVERRIDE overrides the number of unmeasured warmup payloads
         # without editing the scenario config. A larger warmup lets the OS page
         # cache and client caches reach a warm steady state before measurement.
@@ -127,6 +138,7 @@ class ExecutorConfig:
 
         ## Snapshot config
         self.snapshot_source: str = scenario.snapshot_source
+        self.snapshot_mount_path: str = scenario.snapshot_mount_path
         self.snapshot_service: SnapshotService = snapshot_service
 
         ## Outputs directory
@@ -324,7 +336,7 @@ class ExecutorConfig:
         )
         execution_container_volumes.append(
             {
-                "bind": CLIENTS_DATA_DIR,
+                "bind": self.snapshot_mount_path,
                 "config": {
                     "name": f"{container_name}-overlay-merged",
                     "driver": "local",

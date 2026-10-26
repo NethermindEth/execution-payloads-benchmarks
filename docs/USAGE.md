@@ -105,6 +105,12 @@ expb execute-scenarios [OPTIONS]
 * `--print-logs / --no-print-logs`: Print K6 and Execution Client logs to console.  [default: no-print-logs]
 * `--help`: Show this message and exit.
 
+`EXPB_SKIP_OVERRIDE` sets the number of payloads skipped before the configured
+warmup and measured payloads. It must be a nonnegative integer; for example,
+`EXPB_SKIP_OVERRIDE=10 EXPB_WARMUP_OVERRIDE=0` starts measurement at the
+eleventh payload without changing the scenario file. `EXPB_WARMUP_OVERRIDE`
+continues to override the number of unmeasured warmup payloads.
+
 ## `expb compress-payloads`
 
 Compress execution payloads txs for a given block range into bigger blocks.

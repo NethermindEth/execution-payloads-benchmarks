@@ -86,6 +86,8 @@ scenarios:
     network: mainnet
     # Optional: Snapshot backend to use. Available snapshot backends: overlay, zfs, copy. Defaults to overlay
     snapshot_backend: overlay
+    # Optional: Snapshot mount target. Use /execution-data/geth when the source contains the contents of Geth's datadir/geth.
+    # snapshot_mount_path: /execution-data/geth
     # Optional: Snapshot path for copy backend. If defined, this path will be used instead of work_dir/snapshot. Only used when snapshot_backend is copy
     snapshot_path: ./work_dir/snapshot
     # Optional: Number of times to repeat the scenario. Defaults to 1.

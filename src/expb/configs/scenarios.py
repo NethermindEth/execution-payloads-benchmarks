@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 from pydantic import (
     BaseModel,
@@ -139,6 +140,10 @@ class Scenario(BaseModel):
         description="Snapshot backend to use.",
         default=SnapshotBackend.OVERLAY,
     )
+    snapshot_mount_path: Literal["/execution-data", "/execution-data/geth"] = Field(
+        description="Path where the snapshot is mounted in the execution client container.",
+        default="/execution-data",
+    )
     snapshot_path: Path | None = Field(
         description="Path to the snapshot directory for copy backend (overrides work_dir).",
         default=None,
@@ -162,6 +167,10 @@ class Scenario(BaseModel):
     )
     security_opt: list[str] = Field(
         description="Docker security options for the execution client container (e.g., seccomp=unconfined).",
+        default=[],
+    )
+    cap_add: list[str] = Field(
+        description="Linux capabilities to add to the execution client container (e.g., PERFMON for in-process perf counters).",
         default=[],
     )
 

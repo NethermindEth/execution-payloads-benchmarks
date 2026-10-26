@@ -567,9 +567,17 @@ class Executor:
             )
             diag_socket = self._dotnet_trace_diag_dir / "diag.sock"
             nettrace_file = dotnet_trace_dir / f"{self.config.test_id}.nettrace"
+            # EXPB_DOTNET_TRACE_CLREVENTS / EXPB_DOTNET_TRACE_CLREVENTLEVEL override the
+            # runtime-event capture, e.g. "gc" at "verbose" adds GCAllocationTick for an
+            # allocation-by-type profile of the whole run.
+            clrevents = os.environ.get(
+                "EXPB_DOTNET_TRACE_CLREVENTS", "gc+contention+threading+exception"
+            )
+            clreventlevel = os.environ.get(
+                "EXPB_DOTNET_TRACE_CLREVENTLEVEL", "informational"
+            )
             capture_args = (
-                ["--clrevents", "gc+contention+threading+exception",
-                 "--clreventlevel", "informational"]
+                ["--clrevents", clrevents, "--clreventlevel", clreventlevel]
                 if dottrace
                 else ["--profile", "cpu-sampling"]
             )
@@ -681,6 +689,8 @@ class Executor:
             run_kwargs["mem_swappiness"] = self.config.resources.mem_swappiness
         if self.config.execution_client_security_opt:
             run_kwargs["security_opt"] = self.config.execution_client_security_opt
+        if self.config.execution_client_cap_add:
+            run_kwargs["cap_add"] = self.config.execution_client_cap_add
         if container_network is None:
             return self.config.docker_client.containers.run(**run_kwargs)
         # Attach the client under its short aliases as well: the container name exceeds the
@@ -1622,6 +1632,24 @@ class Executor:
                     "Failed to reap orphan network", network=network.name, error=e
                 )
 
+    def _stop_dotnet_trace_collector(self) -> None:
+        if self._dotnet_trace_process is None:
+            return
+        collector = self._dotnet_trace_process
+        self._dotnet_trace_process = None
+        try:
+            # SIGINT finalizes the .nettrace; the session usually ends on its own
+            # once the client runtime disconnects.
+            collector.send_signal(signal.SIGINT)
+            collector.wait(timeout=120)
+            self.log.info("dotnet-trace collection stopped")
+        except Exception as e:
+            collector.kill()
+            self.log.error("dotnet-trace collector did not stop cleanly", error=e)
+        if self._dotnet_trace_diag_dir is not None:
+            shutil.rmtree(self._dotnet_trace_diag_dir, ignore_errors=True)
+            self._dotnet_trace_diag_dir = None
+
     def cleanup_scenario(
         self,
         print_logs_to_console: bool = False,
@@ -1658,6 +1686,24 @@ class Executor:
             line_callback=_collect_k6_metric,
         )
 
+        # Stop RPC-consuming infrastructure before the client so its connections do not
+        # delay the client's graceful shutdown (the payload server also owns the SSE stream).
+        self._teardown_container(
+            self.config.get_payload_server_container_name(),
+            log_file=self.config.outputs_dir / "payload-server.log",
+            stop_timeout=3,
+            print_console=print_logs_to_console,
+        )
+
+        self._teardown_container(
+            self.config.get_alloy_container_name(),
+            stop_timeout=3,
+        )
+
+        # Stop the collector while the client runtime is still alive: the stop request makes
+        # the runtime emit its method rundown, without which the .nettrace stacks do not resolve.
+        self._stop_dotnet_trace_collector()
+
         execution_client_mounts = self._teardown_container(
             self.config.get_execution_client_container_name(),
             log_file=(
@@ -1688,36 +1734,9 @@ class Executor:
                             error=e,
                         )
 
-        if self._dotnet_trace_process is not None:
-            collector = self._dotnet_trace_process
-            self._dotnet_trace_process = None
-            try:
-                # SIGINT finalizes the .nettrace; the session usually ends on its own
-                # once the client runtime disconnects.
-                collector.send_signal(signal.SIGINT)
-                collector.wait(timeout=120)
-                self.log.info("dotnet-trace collection stopped")
-            except Exception as e:
-                collector.kill()
-                self.log.error("dotnet-trace collector did not stop cleanly", error=e)
-            if self._dotnet_trace_diag_dir is not None:
-                shutil.rmtree(self._dotnet_trace_diag_dir, ignore_errors=True)
-                self._dotnet_trace_diag_dir = None
 
         if print_logs_to_console and print_per_payload_metrics_table:
             self._print_per_payload_metrics_table(per_payload_metrics_rows)
-
-        self._teardown_container(
-            self.config.get_payload_server_container_name(),
-            log_file=self.config.outputs_dir / "payload-server.log",
-            stop_timeout=3,
-            print_console=print_logs_to_console,
-        )
-
-        self._teardown_container(
-            self.config.get_alloy_container_name(),
-            stop_timeout=3,
-        )
 
         # Clean docker network
         try:

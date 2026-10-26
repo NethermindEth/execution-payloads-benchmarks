@@ -12,7 +12,7 @@ extracts lightweight metadata on the fly, and returns tab-separated lines:
 Supports per-block modes controlled by environment variables:
 - GC drain (EXPB_EL_RPC_URL): sends eth_blockNumber before each measured block
   to absorb any pending .NET GC from the previous block's processing, preventing
-  GC pauses from inflating K6 TTFB measurements.
+  GC pauses from inflating the k6 request-time measurements.
 - Client metrics via SSE (EXPB_CLIENT_SSE_URL): connects to the client's
   Server-Sent Events data feed (e.g. Nethermind /data/events) to receive
   real-time per-block processing times, immune to Prometheus snapshot staleness.
@@ -265,7 +265,7 @@ def drain_gc(idx):
     After block processing, .NET schedules a GC that may fire during the
     next JSON-RPC deserialization (outside the noGC region).  A cheap
     eth_blockNumber call lets that GC complete on an unrelated RPC so it
-    does not inflate the measured newPayload TTFB.
+    does not inflate the measured newPayload request time.
 
     Skips warmup blocks (same pattern as drop_caches).
     Returns (success: bool, elapsed_ms: float, error: str|None).
