@@ -248,9 +248,7 @@ class ExecutorConfig:
         }
 
     def get_execution_client_aliases(self) -> list[str]:
-        # Docker's embedded DNS resolves a name only if it fits a 63-character DNS label. Scenario
-        # names push the client's container name past that, so the client also gets a short alias
-        # on the scenario network and everything that addresses it by name uses the alias.
+        # Docker's embedded DNS cannot resolve container names longer than a 63-character label.
         return [EXECUTION_CLIENT_ALIAS]
 
     def get_execution_metrics_address(self) -> str:
