@@ -55,6 +55,23 @@ def test_snapshot_mount_path_rejects_arbitrary_container_paths(tmp_path: Path) -
         make_scenario(tmp_path, snapshot_mount_path="/tmp/snapshot")
 
 
+def test_alloy_scrapes_the_client_alias_regardless_of_container_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(executor_config_module.docker, "from_env", lambda: object())
+    monkeypatch.setattr(executor_config_module.os, "getuid", lambda: 0, raising=False)
+    monkeypatch.setattr(executor_config_module.os, "getgid", lambda: 0, raising=False)
+    scenario = make_scenario(tmp_path, name="nethermind-multi-" + "a" * 40 + "-run1")
+    config = ExecutorConfig(
+        scenario=scenario,
+        snapshot_service=StubSnapshotService(tmp_path),
+        paths=ScenariosPaths(work=tmp_path / "work", outputs=tmp_path / "outputs"),
+    )
+
+    assert len(config.get_execution_client_container_name()) > 63
+    assert config.get_execution_metrics_address() == "execution-client:6060"
+
+
 def test_executor_mounts_snapshot_at_configured_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
