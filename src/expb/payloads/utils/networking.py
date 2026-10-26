@@ -1,47 +1,61 @@
 import subprocess
+from pathlib import Path
 
 from docker.models.containers import Container
 
-
-def get_veth_name(pid: int) -> str:
-    # This command finds the veth interface on the host for the container's eth0
-    cmd = f"sudo nsenter -t {pid} -n ip link show eth0 | grep -oP '(?<=eth0@if)\\d+'"
-    veth_index = subprocess.check_output(cmd, shell=True, text=True).strip()
-    # Now find the veth name on the host with that index
-    cmd = f"ip link | grep '^{veth_index}:' | awk -F: '{{print $2}}' | tr -d ' '"
-    veth_name = subprocess.check_output(cmd, shell=True, text=True).strip()
-    return veth_name
+SYS_CLASS_NET = Path("/sys/class/net")
 
 
-def apply_tc_limits(
-    veth_name: str,
-    download_speed: str,
-    upload_speed: str,
-):
-    # FIXME: current implementation only limits egress speed (uploading)
-    device_name = veth_name.split("@")[0]
-    # Remove any existing qdisc
+def _netns_prefix(pid: int) -> list[str]:
+    return ["sudo", "nsenter", "-t", str(pid), "-n"]
+
+
+def get_veth_name(pid: int, sys_class_net: Path = SYS_CLASS_NET) -> str:
+    # The container's eth0 iflink is the ifindex of its veth peer on the host.
+    peer_index = subprocess.check_output(
+        [*_netns_prefix(pid), "cat", "/sys/class/net/eth0/iflink"], text=True
+    ).strip()
+    for iface in sys_class_net.iterdir():
+        ifindex_file = iface / "ifindex"
+        if ifindex_file.is_file() and ifindex_file.read_text().strip() == peer_index:
+            return iface.name
+    raise RuntimeError(f"No host interface found with ifindex {peer_index}")
+
+
+def _shape_egress(cmd_prefix: list[str], device: str, rate: str) -> None:
     subprocess.run(
-        f"sudo tc qdisc del dev {device_name} root || true",
-        shell=True,
+        [
+            *cmd_prefix,
+            "tc",
+            "qdisc",
+            "replace",
+            "dev",
+            device,
+            "root",
+            "handle",
+            "1:",
+            "htb",
+            "default",
+            "1",
+        ],
         check=True,
     )
-    # Add root qdisc
     subprocess.run(
-        f"sudo tc qdisc add dev {device_name} root handle 1: htb default 1",
-        shell=True,
-        check=True,
-    )
-    # Add download (ingress) class
-    subprocess.run(
-        f"sudo tc class add dev {device_name} parent 1: classid 1:1 htb rate {download_speed}",
-        shell=True,
-        check=True,
-    )
-    # Add upload (egress) class
-    subprocess.run(
-        f"sudo tc class add dev {device_name} parent 1: classid 1:2 htb rate {upload_speed}",
-        shell=True,
+        [
+            *cmd_prefix,
+            "tc",
+            "class",
+            "replace",
+            "dev",
+            device,
+            "parent",
+            "1:",
+            "classid",
+            "1:1",
+            "htb",
+            "rate",
+            rate,
+        ],
         check=True,
     )
 
@@ -51,10 +65,15 @@ def limit_container_bandwidth(
     download_speed: str,
     upload_speed: str,
 ) -> None:
+    """Shape each direction as egress on its own end of the container's veth pair.
+
+    The host-side veth's egress is the container's download and the container's
+    eth0 egress is its upload, so no ingress/IFB shaping is needed. Both qdiscs go
+    away with the veth pair when the container is removed.
+    """
     container.reload()
-    if container.attrs is not None:
-        container_pid = container.attrs["State"]["Pid"]
-        veth_name = get_veth_name(container_pid)
-        apply_tc_limits(veth_name, download_speed, upload_speed)
-    else:
+    if container.attrs is None:
         raise ValueError("Container attributes are not available")
+    pid = container.attrs["State"]["Pid"]
+    _shape_egress(["sudo"], get_veth_name(pid), download_speed)
+    _shape_egress(_netns_prefix(pid), "eth0", upload_speed)

@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -25,6 +26,8 @@ from expb.configs.defaults import (
 from expb.configs.exports import Exports
 from expb.configs.networks import Network
 from expb.configs.snapshots import SnapshotBackend
+
+TC_RATE_PATTERN = re.compile(r"\d+(\.\d+)?([kmgt]?bit|[kmgt]?bps)", re.IGNORECASE)
 
 
 class ScenarioExtraVolume(BaseModel):
@@ -229,12 +232,16 @@ class ScenariosResources(BaseModel):
         description="Memory limit for the scenario.",
         default=DOCKER_CONTAINER_DEFAULT_MEM_LIMIT,
     )
+    limit_bandwidth: bool = Field(
+        description="Shape the execution client container's network to download_speed/upload_speed. Applies to all of its traffic, Engine API included.",
+        default=False,
+    )
     download_speed: str = Field(
-        description="Download speed for the scenario.",
+        description="Download speed for the scenario, as a tc rate (e.g. '50mbit').",
         default=DOCKER_CONTAINER_DEFAULT_DOWNLOAD_SPEED,
     )
     upload_speed: str = Field(
-        description="Upload speed for the scenario.",
+        description="Upload speed for the scenario, as a tc rate (e.g. '15mbit').",
         default=DOCKER_CONTAINER_DEFAULT_UPLOAD_SPEED,
     )
     cpuset: str | None = Field(
@@ -251,6 +258,15 @@ class ScenariosResources(BaseModel):
         ge=0,
         le=100,
     )
+
+    @field_validator("download_speed", "upload_speed")
+    @classmethod
+    def validate_tc_rate(cls, value: str) -> str:
+        if not TC_RATE_PATTERN.fullmatch(value):
+            raise ValueError(
+                f"Invalid tc rate '{value}', expected e.g. '50mbit', '1gbit', '500kbps'"
+            )
+        return value
 
 
 class ScenariosImages(BaseModel):

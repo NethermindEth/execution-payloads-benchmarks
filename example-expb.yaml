@@ -53,6 +53,8 @@ export:
 resources:
   cpu: 4
   mem: 32g
+  # Shapes all client traffic (Engine API included) with tc; needs passwordless sudo for tc and nsenter
+  limit_bandwidth: false
   download_speed: 50mbit
   upload_speed: 15mbit
   # Optional: Pin execution client container to specific CPU cores (Docker --cpuset-cpus)
