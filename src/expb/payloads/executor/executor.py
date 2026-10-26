@@ -938,6 +938,7 @@ class Executor:
             "id": 1,
         }
         max_attempts = self.config.startup_wait + self.config.json_rpc_wait_max_retries
+        required_block = self.config.startup_block
         for attempt in range(1, max_attempts + 1):
             try:
                 response = requests.post(
@@ -947,25 +948,39 @@ class Executor:
                     timeout=5,
                 )
                 if response.ok:
+                    result = response.json()
+                    quantity = result.get("result") if isinstance(result, dict) else None
+                    if (
+                        not isinstance(quantity, str)
+                        or re.fullmatch(r"0x[0-9a-fA-F]+", quantity) is None
+                        or "error" in result
+                    ):
+                        raise ValueError("eth_blockNumber did not return a block quantity")
+                    latest_block = int(quantity, 16)
+                else:
+                    latest_block = None
+            except (requests.exceptions.RequestException, ValueError):
+                latest_block = None
+            if latest_block is not None:
+                if required_block is None or latest_block >= required_block:
                     self.log.info(
                         "Client json rpc is available",
-                        latest_block=int(response.json()["result"], 16),
+                        latest_block=latest_block,
                         attempts=attempt,
                     )
                     return
                 self.log.debug(
-                    "Client json rpc not ready",
-                    attempt=attempt,
-                    status_code=response.status_code,
-                )
-            except requests.exceptions.ConnectionError:
-                self.log.debug(
-                    "Client json rpc not reachable",
+                    "Client snapshot replay is not complete",
+                    latest_block=latest_block,
+                    required_block=required_block,
                     attempt=attempt,
                 )
+            else:
+                self.log.debug("Client json rpc not ready", attempt=attempt)
             time.sleep(1)
         raise Exception(
-            f"Client json rpc is not available after {max_attempts} attempts"
+            f"Client json rpc is not ready after {max_attempts} attempts "
+            f"(required startup block: {required_block})"
         )
 
     # Grafana Alloy Setup

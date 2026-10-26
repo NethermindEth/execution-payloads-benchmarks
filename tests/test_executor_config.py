@@ -1,6 +1,11 @@
+import json
+from contextlib import nullcontext
+from importlib import import_module
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
+from typer.testing import CliRunner
 
 from expb.clients import Client
 from expb.configs.scenarios import Scenario, ScenariosPaths
@@ -53,6 +58,68 @@ def test_snapshot_mount_path_defaults_to_client_data_directory(tmp_path: Path) -
 def test_snapshot_mount_path_rejects_arbitrary_container_paths(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         make_scenario(tmp_path, snapshot_mount_path="/tmp/snapshot")
+
+
+@pytest.mark.parametrize("startup_block", [None, 0, 25490000])
+def test_startup_block_preserves_the_configured_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, startup_block: int | None
+) -> None:
+    monkeypatch.setattr(executor_config_module.docker, "from_env", lambda: object())
+    monkeypatch.setattr(executor_config_module.os, "getuid", lambda: 0, raising=False)
+    monkeypatch.setattr(executor_config_module.os, "getgid", lambda: 0, raising=False)
+    scenario = make_scenario(tmp_path, startup_block=startup_block)
+    config = ExecutorConfig(
+        scenario=scenario,
+        snapshot_service=StubSnapshotService(tmp_path),
+        paths=ScenariosPaths(work=tmp_path / "work", outputs=tmp_path / "outputs"),
+    )
+
+    assert config.startup_block == startup_block
+
+
+@pytest.mark.parametrize("checkpoint", [-1, True, False, "100", "0x64", "many", 1.5])
+def test_startup_block_rejects_invalid_checkpoints(tmp_path: Path, checkpoint) -> None:
+    with pytest.raises(ValueError):
+        make_scenario(tmp_path, startup_block=checkpoint)
+
+
+@pytest.mark.parametrize("command", ["execute_scenario", "execute_scenarios"])
+@pytest.mark.parametrize("checkpoint", [None, "0", "105", "-1", "true", "1.5"])
+def test_cli_startup_block_validates_and_overrides_the_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str, checkpoint: str | None
+) -> None:
+    module = import_module(f"expb.{command}")
+    scenario = make_scenario(tmp_path, client="nethermind", startup_block=100)
+    config_file = tmp_path / "expb.yaml"
+    config_file.write_text(json.dumps({
+        "paths": {"work": str(tmp_path / "work"), "outputs": str(tmp_path / "outputs")},
+        "scenarios": {"ready": {
+            "client": "nethermind",
+            "payloads": str(scenario.payloads_file),
+            "fcus": str(scenario.fcus_file),
+            "snapshot_source": scenario.snapshot_source,
+            "startup_block": scenario.startup_block,
+        }},
+    }))
+    factory = Mock(return_value=Mock())
+    monkeypatch.setattr(module.Executor, "from_scenarios", factory)
+    monkeypatch.setattr(module, "acquire_execution_lock", lambda **kwargs: nullcontext())
+    arguments = ["--config-file", str(config_file)]
+    if command == "execute_scenario":
+        arguments.extend(["--scenario-name", "ready"])
+    if checkpoint is not None:
+        arguments.extend(["--startup-block", checkpoint])
+
+    result = CliRunner().invoke(module.app, arguments)
+
+    if checkpoint in ("-1", "true", "1.5"):
+        assert result.exit_code != 0
+        assert "startup-block" in result.output
+        factory.assert_not_called()
+    else:
+        assert result.exit_code == 0, result.output
+        configured = factory.call_args.args[0].scenarios_configs["ready"]
+        assert configured.startup_block == (100 if checkpoint is None else int(checkpoint))
 
 
 def test_executor_mounts_snapshot_at_configured_path(

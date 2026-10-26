@@ -111,6 +111,18 @@ warmup and measured payloads. It must be a nonnegative integer; for example,
 eleventh payload without changing the scenario file. `EXPB_WARMUP_OVERRIDE`
 continues to override the number of unmeasured warmup payloads.
 
+Set a scenario's `startup_block` to its snapshot checkpoint when the client
+replays stored blocks during startup. The runner waits until `eth_blockNumber`
+reaches that checkpoint before it sends any warmup or measured payloads. RPC
+availability alone does not mean replay has finished. The existing startup
+retry limit bounds the wait. Leave `startup_block` unset when no checkpoint is
+required. Use the snapshot's processed checkpoint, not a block that the warmup
+must import.
+
+Pass `--startup-block NUMBER` to `execute-scenario` or `execute-scenarios` to
+override the configured checkpoint. The option accepts nonnegative integers.
+For multiple scenarios, the override applies to each selected scenario.
+
 ## `expb compress-payloads`
 
 Compress execution payloads txs for a given block range into bigger blocks.
