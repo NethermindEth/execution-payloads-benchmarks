@@ -46,7 +46,6 @@ class ExecutorConfig:
         docker_images: ScenariosImages = ScenariosImages(),
         exports: Exports | None = None,
         json_rpc_wait_max_retries: int = 1800,
-        limit_bandwidth: bool = False,
         cpu_max_frequency_khz: int | None = None,
         offline_cpus: list[int] | None = None,
         dottrace: bool = False,
@@ -84,7 +83,6 @@ class ExecutorConfig:
         self.docker_group_add: list[int] = [os.getgid()]
         ## Docker container config
         self.resources: ScenariosResources | None = resources
-        self.limit_bandwidth: bool = limit_bandwidth
         self.json_rpc_wait_max_retries: int = json_rpc_wait_max_retries
         self.cpu_max_frequency_khz: int | None = cpu_max_frequency_khz
         self.offline_cpus: list[int] = offline_cpus or []

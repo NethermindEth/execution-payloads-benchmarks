@@ -325,6 +325,9 @@ Container resources are limited via Docker API:
 
 - `cpu` - CPU count/shares
 - `mem` - Memory limit (e.g., "32g")
-- `download_speed` / `upload_speed` - Bandwidth limits using tc-netem
+- `download_speed` / `upload_speed` - Bandwidth limits (tc rates such as `50mbit`), applied only when
+  `limit_bandwidth: true`
 
-Bandwidth limiting requires host capabilities and may require privileged mode on some systems.
+Bandwidth is shaped with a `tc` HTB qdisc on each end of the client's veth pair: the host-side veth
+egress caps download and the container's `eth0` egress (via `nsenter`) caps upload. All client
+traffic is shaped, Engine API included. It requires passwordless `sudo` for `tc` and `nsenter`.

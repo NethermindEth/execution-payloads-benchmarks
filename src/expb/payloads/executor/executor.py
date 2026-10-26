@@ -1930,16 +1930,12 @@ class Executor:
                 client_sse_url=client_sse_url,
             )
 
-            if self.config.resources and self.config.limit_bandwidth:
+            if self.config.resources and self.config.resources.limit_bandwidth:
                 self.log.info(
                     "Limiting container bandwidth",
                     execution_client=self.config.get_execution_client_name(),
-                    download_speed=self.config.resources.download_speed
-                    if self.config.resources
-                    else None,
-                    upload_speed=self.config.resources.upload_speed
-                    if self.config.resources
-                    else None,
+                    download_speed=self.config.resources.download_speed,
+                    upload_speed=self.config.resources.upload_speed,
                 )
                 try:
                     limit_container_bandwidth(
