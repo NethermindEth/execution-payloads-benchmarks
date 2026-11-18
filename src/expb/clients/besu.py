@@ -15,6 +15,10 @@ class BesuConfig(ClientConfig):
         super().__init__(
             name="besu",
             default_image="hyperledger/besu:develop",
+            # Mitigate CVE-2026-114938 until the bundled JVM is patched.
+            default_env={
+                "JAVA_TOOL_OPTIONS": "-XX:+UnlockDiagnosticVMOptions -XX:-UseBASE64Intrinsics",
+            },
             default_command=[
                 f"--data-path={CLIENTS_DATA_DIR}",
                 "--p2p-host=0.0.0.0",
